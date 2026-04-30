@@ -11,6 +11,7 @@ async def get_active_workspaces():
 
 
 
+# Ejemplo de la documentación
 
 # @mcp.tool()
 # async def long_running_task(task_name: str, ctx: Context[ServerSession, None], steps: int = 5) -> str:
