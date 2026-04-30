@@ -120,10 +120,11 @@ if __name__ == "__main__":
     workspaces = service.get_workspaces()
     
     my_worskpace = workspaces[0]
+    my_worskpace_id = my_worskpace.get('id')
     print(f"Workspace: {my_worskpace.get('name')}, ID: {my_worskpace.get('id')}")
 
     nombre_proyecto = "Prueba TFG Bienestar2"
-    resultado = service.add_new_project(my_worskpace.get('id'), nombre_proyecto)
+    resultado = service.add_new_project(my_worskpace_id, nombre_proyecto)
     print(resultado)
 
     service.get_projects(my_worskpace.get('id'))
