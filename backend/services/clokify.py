@@ -23,7 +23,7 @@ class ClockifyService:
     # METHODS FOR WORKSPACES
 
     def get_workspaces(self):
-        """Obtiene la lista de workspaces del usuario."""
+        """"Returns a list of workspaces for the authenticated user."""
         url = f"{self.base_url}/workspaces"
         try:
             response = requests.get(url, headers=self.headers)
@@ -37,7 +37,8 @@ class ClockifyService:
         
 
     def _set_workspace_if_null(self, workspace_id):
-        """Método interno para asegurar que siempre tengamos un ID de workspace."""
+        """"Private mehod to ensure we always have a workspace ID."""
+
         if workspace_id is None:
             if self.current_workspace:
                 return self.current_workspace.get('id')
@@ -46,7 +47,7 @@ class ClockifyService:
         return workspace_id
     
     def set_current_workspace(self, workspace_id):
-        """Permite cambiar el workspace actual."""
+        """Changes the current workspace to the one specified by workspace_id, if it exists in the list of available workspaces."""
 
         if any(ws.get('id') == workspace_id for ws in self.workspaces):
             self.current_workspace = next(ws for ws in self.workspaces if ws.get('id') == workspace_id)
@@ -59,7 +60,7 @@ class ClockifyService:
     # METHODS FOR PROJECTS
 
     def get_projects(self, workspace_id=None):
-        """Obtiene la lista de proyectos de un workspace específico."""
+        """"Returns a list of projects for a given workspace ID. If no workspace ID is provided, it uses the current workspace."""
 
         try:
             ws_id = self._set_workspace_if_null(workspace_id)
@@ -83,8 +84,8 @@ class ClockifyService:
     
         
     
-    def add_new_project(self, project_name, workspace_id = None):
-        """Agrega un nuevo proyecto a un workspace específico."""
+    def add_new_project(self, project_name, workspace_id = None): #TODO ver si le añado el color como parámetro opcional (no lo considero importante)
+        """"Creates a new project in the specified workspace. If no workspace ID is provided, it uses the current workspace."""
 
         try:
             workspace_id = self._set_workspace_if_null(workspace_id)
@@ -97,7 +98,7 @@ class ClockifyService:
         url = f"{self.base_url}/workspaces/{workspace_id}/projects"
         payload = {
             "name": project_name,
-            "color": "#000000"  # Puedes personalizar el color del proyecto
+            "color": "#000000" 
         }
         
         try:
@@ -112,19 +113,19 @@ class ClockifyService:
         
 
     
-# main de prueba 
-if __name__ == "__main__":
+# # main de prueba 
+# if __name__ == "__main__":
 
-    service = ClockifyService()
+#     service = ClockifyService()
 
-    workspaces = service.get_workspaces()
+#     workspaces = service.get_workspaces()
     
-    my_worskpace = workspaces[0]
-    my_worskpace_id = my_worskpace.get('id')
-    print(f"Workspace: {my_worskpace.get('name')}, ID: {my_worskpace.get('id')}")
+#     my_worskpace = workspaces[0]
+#     my_worskpace_id = my_worskpace.get('id')
+#     print(f"Workspace: {my_worskpace.get('name')}, ID: {my_worskpace.get('id')}")
 
-    nombre_proyecto = "Prueba TFG Bienestar2"
-    resultado = service.add_new_project(my_worskpace_id, nombre_proyecto)
-    print(resultado)
+#     nombre_proyecto = "Prueba TFG Bienestar2"
+#     resultado = service.add_new_project(nombre_proyecto, my_worskpace_id)
+#     print(resultado)
 
-    service.get_projects(my_worskpace.get('id'))
+#     service.get_projects(my_worskpace.get('id'))
