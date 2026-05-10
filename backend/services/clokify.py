@@ -25,15 +25,13 @@ class ClockifyService:
     def get_workspaces(self):
         """"Returns a list of workspaces for the authenticated user."""
         url = f"{self.base_url}/workspaces"
-        try:
-            response = requests.get(url, headers=self.headers)
+        
+        response = requests.get(url, headers=self.headers)
 
-            if response.status_code == 200:
-                return response.json()
-            else:
-                return f"Error {response.status_code}: {response.text}"
-        except Exception as e:
-            return f"Error de conexión: {str(e)}"
+        if response.status_code == 200:
+            return response.json()
+        else:
+            response.raise_for_status()
         
 
     def _set_workspace_if_null(self, workspace_id):
@@ -62,23 +60,17 @@ class ClockifyService:
     def get_projects(self, workspace_id=None):
         """"Returns a list of projects for a given workspace ID. If no workspace ID is provided, it uses the current workspace."""
 
-        try:
-            ws_id = self._set_workspace_if_null(workspace_id)
-        except ValueError as e:
-            return str(e)
+        
+        workspace_id = self._set_workspace_if_null(workspace_id)
         
 
-        url = f"{self.base_url}/workspaces/{workspace_id}/projects"
-        
-        try:
-            response = requests.get(url, headers=self.headers)
+        url = f"{self.base_url}/workspaces/{workspace_id}/projects" 
+        response = requests.get(url, headers=self.headers)
 
-            if response.status_code == 200:
-                return response.json()
-            else:
-                return f"Error {response.status_code}: {response.text}"
-        except Exception as e:
-            return f"Error de conexión: {str(e)}"
+        if response.status_code == 200:
+            return response.json()
+        else:
+            response.raise_for_status()
         
     
     
@@ -87,30 +79,19 @@ class ClockifyService:
     def add_new_project(self, project_name, workspace_id = None): #TODO ver si le añado el color como parámetro opcional (no lo considero importante)
         """"Creates a new project in the specified workspace. If no workspace ID is provided, it uses the current workspace."""
 
-        try:
-            workspace_id = self._set_workspace_if_null(workspace_id)
-        except ValueError as e:
-            return str(e)
-
-        
-
+        workspace_id = self._set_workspace_if_null(workspace_id)
 
         url = f"{self.base_url}/workspaces/{workspace_id}/projects"
         payload = {
             "name": project_name,
             "color": "#000000" 
         }
-        
-        try:
-            response = requests.post(url, json=payload, headers=self.headers)
 
-            if response.status_code == 201:
-                return response.json()
-            else:
-                return f"Error {response.status_code}: {response.text}"
-        except Exception as e:
-            return f"Error de conexión: {str(e)}"
-        
+         
+        response = requests.post(url, json=payload, headers=self.headers)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+        return response.json()
+
 
     
 # # main de prueba 

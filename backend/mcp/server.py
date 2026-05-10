@@ -3,13 +3,32 @@
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
 
+from services.clokify import ClockifyService
+
+clockify_service = ClockifyService()
+
+
+
 mcp = FastMCP(name="Clockify")
 
 @mcp.tool()
 async def get_active_workspaces():
     # llamar al método de clokify que lo haga para obtener los espacios de trabajo activos
+    try:
+        return clockify_service.get_workspaces()
+    except Exception as e:
+        return f"Error: {str(e)}"
+    
 
-
+@mcp.tool()
+async def get_projects(workspace_id: str = None):
+    # llamar al método de clokify que lo haga para obtener los proyectos activos
+    try:
+        return clockify_service.get_projects(workspace_id)
+    except Exception as e:
+        return f"Error: {str(e)}"
+    
+    
 
 # Ejemplo de la documentación
 
