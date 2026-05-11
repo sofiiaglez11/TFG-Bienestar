@@ -1,7 +1,8 @@
 import requests
 import os
 from dotenv import load_dotenv
- 
+
+
 
 # Cargamos las variables del archivo .env que creamos en la raíz
 load_dotenv()

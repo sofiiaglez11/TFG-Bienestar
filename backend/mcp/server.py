@@ -3,7 +3,7 @@
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
 
-from services.clokify import ClockifyService
+from services.clockify import ClockifyService
 
 clockify_service = ClockifyService()
 
@@ -29,7 +29,10 @@ async def get_projects(workspace_id: str = None):
         return f"Error: {str(e)}"
     
     
+if __name__ == "__main__":
+    mcp.run()
 
+    
 # Ejemplo de la documentación
 
 # @mcp.tool()
