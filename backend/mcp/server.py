@@ -27,6 +27,20 @@ async def get_projects(workspace_id: str = None):
         return clockify_service.get_projects(workspace_id)
     except Exception as e:
         return f"Error: {str(e)}"
+
+
+
+@mcp.prompt()
+def greet_user(name: str, style: str = "friendly") -> str:
+    """Generate a greeting prompt"""
+    styles = {
+        "friendly": "Por favor, escribe un saludo amigable",
+        "formal": "Por favor, escribe un saludo formal y profesional",
+        "casual": "Por favor, escribe un saludo casual y relajado",
+    }
+
+    return f"{styles.get(style, styles['friendly'])} for someone named {name}."
+
     
     
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import requests
 import os
 from dotenv import load_dotenv
-
+from datetime import datetime, timedelta, timezone
 
 
 # Cargamos las variables del archivo .env que creamos en la raíz
@@ -94,20 +94,53 @@ class ClockifyService:
         return response.json()
 
 
-    
-# # main de prueba 
-# if __name__ == "__main__":
 
-#     service = ClockifyService()
+    def get_time_entries(self, workspace_id: str = None, days_back: int = 7) -> list:
+        """
+        Retrieves time entries from the specified workspace for the last X days.
+        """
+        if not workspace_id:
+            workspace_id = self.get_default_workspace_id()
 
-#     workspaces = service.get_workspaces()
-    
-#     my_worskpace = workspaces[0]
-#     my_worskpace_id = my_worskpace.get('id')
-#     print(f"Workspace: {my_worskpace.get('name')}, ID: {my_worskpace.get('id')}")
+        # Calculate start and end times in ISO format (required by Clockify)
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(days=days_back)
 
-#     nombre_proyecto = "Prueba TFG Bienestar2"
-#     resultado = service.add_new_project(nombre_proyecto, my_worskpace_id)
-#     print(resultado)
+        url = f"{self.base_url}/workspaces/{workspace_id}/user/{self.get_user_id()}/time-entries"
+        
+        # Query parameters to filter by date
+        params = {
+            "start": start_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "end": end_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "page-size": 50 # Retrieve up to 50 entries
+        }
 
-#     service.get_projects(my_worskpace.get('id'))
+        response = requests.get(url, headers=self.headers, params=params)
+        response.raise_for_status()
+        
+        # We parse the response to extract only what's useful for the AI
+        entries = response.json()
+        simplified_entries = []
+        
+        for entry in entries:
+            # Clockify returns duration in ISO 8601 format (e.g., PT1H30M)
+            # For now, we take the raw data, Gemini is smart enough to understand it!
+            simplified_entries.append({
+                "description": entry.get("description", "No description"),
+                "start": entry.get("timeInterval", {}).get("start"),
+                "end": entry.get("timeInterval", {}).get("end"),
+                "duration": entry.get("timeInterval", {}).get("duration")
+            })
+            
+        return simplified_entries
+
+    def get_user_id(self) -> str:
+        """
+        Helper method to get the current user ID, needed for time entries.
+        """
+        url = f"{self.base_url}/user"
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+        return response.json().get("id")
+
+
