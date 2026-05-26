@@ -4,11 +4,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-class Gemini:
+class GeminiService:
     def __init__(self):
-        # Busca automáticamente GEMINI_API_KEY en tu .env
-        self.client = genai.Client()
-        self.model = "gemini-2.5-flash"  # Rápido, inteligente y gratis para desarrollo
+        self.client = genai.Client() # loads GEMINI_API_KEY from .env automatically
+        self.model = "gemini-2.5-flash" 
 
     def chat_with_context(self, user_message: str, clockify_data: list) -> str:
         """

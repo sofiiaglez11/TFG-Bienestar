@@ -33,6 +33,13 @@ class ClockifyService:
             return response.json()
         else:
             response.raise_for_status()
+    
+    def get_current_workspace_id(self):
+        """"Helper method to get the default workspace ID, which is the first one in the list of workspaces."""
+        if self.current_workspace:
+            return self.current_workspace.get('id')
+        else:
+            raise ValueError("No hay workspaces disponibles para el usuario.")
         
 
     def _set_workspace_if_null(self, workspace_id):
@@ -74,8 +81,7 @@ class ClockifyService:
             response.raise_for_status()
         
     
-    
-        
+ 
     
     def add_new_project(self, project_name, workspace_id = None): #TODO ver si le añado el color como parámetro opcional (no lo considero importante)
         """"Creates a new project in the specified workspace. If no workspace ID is provided, it uses the current workspace."""
@@ -93,14 +99,15 @@ class ClockifyService:
         response.raise_for_status()  # Raise an exception for HTTP errors
         return response.json()
 
-
+    ############################################################################
+    # METHODS FOR TIME ENTRIES
 
     def get_time_entries(self, workspace_id: str = None, days_back: int = 7) -> list:
         """
         Retrieves time entries from the specified workspace for the last X days.
         """
         if not workspace_id:
-            workspace_id = self.get_default_workspace_id()
+            workspace_id = self.get_current_workspace_id()
 
         # Calculate start and end times in ISO format (required by Clockify)
         end_time = datetime.now(timezone.utc)
@@ -123,8 +130,6 @@ class ClockifyService:
         simplified_entries = []
         
         for entry in entries:
-            # Clockify returns duration in ISO 8601 format (e.g., PT1H30M)
-            # For now, we take the raw data, Gemini is smart enough to understand it!
             simplified_entries.append({
                 "description": entry.get("description", "No description"),
                 "start": entry.get("timeInterval", {}).get("start"),
@@ -133,6 +138,32 @@ class ClockifyService:
             })
             
         return simplified_entries
+    
+
+    def create_time_entry(self, description: str, workspace_id: str = None) -> dict:
+        """
+        Creates a new time entry in Clockify starting right now.
+        """
+        if not workspace_id:
+            workspace_id = self.get_default_workspace_id()
+
+        url = f"{self.base_url}/workspaces/{workspace_id}/time-entries"
+        
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        payload = {
+            "description": description,
+            "start": now
+            # "end" could be used to determine the end date ()
+        }
+
+        response = requests.post(url, headers=self.headers, json=payload)
+        response.raise_for_status()
+        return response.json()
+
+
+    ############################################################################
+    # METHODS FOR USERS
 
     def get_user_id(self) -> str:
         """

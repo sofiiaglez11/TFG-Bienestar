@@ -10,15 +10,11 @@ class OpenAIService:
         self.model = "gpt-4o-mini" 
 
     def chat_with_context(self, user_message, clokify_data):
-        """
-        Sends the user's message to ChatGPT along with the real Clockify data as 'context'
-        so the AI knows what it's talking about.
-        """
+
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    # El 'system' le da el rol y las reglas a la IA
                     {
                         "role": "system", 
                         "content": (
@@ -28,14 +24,12 @@ class OpenAIService:
                             "Usa estos datos para responder a sus preguntas de forma empática, clara y concisa."
                         )
                     },
-                    # El 'user' es lo que escribe el alumno/trabajador en la web
                     {
                         "role": "user", 
                         "content": user_message
                     }
                 ]
             )
-            # Retornamos solo el texto de la respuesta de la IA
             return response.choices[0].message.content
             
         except Exception as e:
