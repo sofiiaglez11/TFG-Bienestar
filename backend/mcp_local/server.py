@@ -1,5 +1,10 @@
 
+import os
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 # Archivo con las tools, resources y prompts
+
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
 
@@ -41,7 +46,7 @@ def greet_user(name: str, style: str = "friendly") -> str:
     
     
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    mcp.run()
 
     
 # Ejemplo de la documentación
