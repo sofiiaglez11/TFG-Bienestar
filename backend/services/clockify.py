@@ -154,7 +154,7 @@ class ClockifyService:
         payload = {
             "description": description,
             "start": now
-            # "end" could be used to determine the end date ()
+            # NOTE: "end" could be used to determine the end date ()
         }
 
         response = requests.post(url, headers=self.headers, json=payload)
