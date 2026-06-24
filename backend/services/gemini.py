@@ -12,6 +12,7 @@ class GeminiService (BaseChatbotService):
         self.client = genai.Client() # loads GEMINI_API_KEY from .env automatically
         self.model = "gemini-2.5-flash" 
 
+
     async def chat_with_mcp_async(self, user_message: str, config: types.GenerateContentConfig):
         """
         Async method to handle chat interactions with Gemini, specifically designed to work with the MCP protocol.

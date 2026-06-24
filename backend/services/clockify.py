@@ -140,22 +140,31 @@ class ClockifyService:
         return simplified_entries
     
 
-    def create_time_entry(self, description: str, workspace_id: str = None) -> dict:
+    def create_time_entry(self, description: str, project_id: str = None, start_time: str = None,
+                          end_time: str = None, workspace_id: str = None) -> dict:
         """
         Creates a new time entry in Clockify starting right now.
         """
         if not workspace_id:
-            workspace_id = self.get_default_workspace_id()
+            workspace_id = self.get_current_workspace_id()
 
         url = f"{self.base_url}/workspaces/{workspace_id}/time-entries"
+
+        if not start_time:
+            start_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         payload = {
             "description": description,
-            "start": now
-            # NOTE: "end" could be used to determine the end date ()
+            "start": start_time
         }
+
+        if project_id:
+            payload["projectId"] = project_id
+
+        if end_time:
+            payload["end"] = end_time
+
 
         response = requests.post(url, headers=self.headers, json=payload)
         response.raise_for_status()

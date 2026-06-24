@@ -67,16 +67,55 @@ async def get_time_entries(workspace_id: str = None, days_back: int = 7):
     try:
         return clockify_service.get_time_entries(workspace_id, days_back)
     except Exception as e:
-        return f"Error: {str(e)}"   
-    
-@mcp.tool()
-async def create_time_entry(description: str, project_id: str, start_time: str, end_time: str, workspace_id: str = None):
-    try:
-        return clockify_service.create_time_entry(description, project_id, start_time, end_time, workspace_id)
-    except Exception as e:
-        return f"Error: {str(e)}"
+        return f"Error: {str(e)}"    
     
 
+@mcp.tool()
+async def start_new_timer(description: str, project_id: str = None, workspace_id: str = None):
+    """
+    Inicia un temporizador activo (Timer) en este preciso instante en Clockify.
+    Usa esta herramienta cuando el usuario pida controlar el tiempo de una tarea en directo.
+    """
+    try:
+        return clockify_service.create_time_entry(
+            description=description,
+            project_id=project_id,
+            start_time=None,
+            end_time=None, # Al ser None, Clockify activa el cronómetro
+            workspace_id=workspace_id
+        )
+    except Exception as e:
+        return f"Error al iniciar el temporizador: {str(e)}"
+    
+
+@mcp.tool()
+async def create_past_time_entry(description: str, start_time: str, end_time: str, project_id: str = None, workspace_id: str = None):
+    """
+    Crea una entrada de tiempo manual en Clockify con una hora de inicio y de fin ya definidas.
+    Útil cuando el usuario dice: 'Registra que estuve trabajando en el TFG de 10:00 a 12:00 hoy'.
+    
+    IMPORTANTE: Tanto start_time como end_time deben tener formato ISO 8601 (Ej: '2026-06-22T10:00:00Z').
+    """
+    try:
+        # Nos aseguramos de que los strings lleven la 'Z' (UTC) que exige Clockify si la IA los genera planos
+        if start_time and not start_time.endswith('Z') and '+' not in start_time:
+            start_time += 'Z'
+        if end_time and not end_time.endswith('Z') and '+' not in end_time:
+            end_time += 'Z'
+
+        resultado = clockify_service.create_time_entry(
+            description=description,
+            project_id=project_id,
+            start_time=start_time,
+            end_time=end_time,
+            workspace_id=workspace_id
+        )
+        return f"Entrada creada con éxito: '{description}' ({start_time} -> {end_time})"
+    except Exception as e:
+        return f"Error al crear la entrada de tiempo manual: {str(e)}"
+
+
+# TOOLS FOR USERS
 
 @mcp.prompt()
 def greet_user(name: str, style: str = "friendly") -> str:

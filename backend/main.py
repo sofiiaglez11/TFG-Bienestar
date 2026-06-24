@@ -5,19 +5,20 @@ from contextlib import asynccontextmanager
 from google.genai import types
 
 # Importamos tus servicios
-# from services.openai import OpenAIService
+from services.openai import OpenAIService
 from services.gemini import GeminiService
 from mcp_local.client import MCPClientService
 
 
 mcp_client = MCPClientService()
 
-ACTIVE_MODEL = "gemini" 
+# ACTIVE_MODEL = "openai" 
+ACTIVE_MODEL = "gemini"
 
 if ACTIVE_MODEL == "gemini":
     ai_chatbot = GeminiService()
-# elif ACTIVE_MODEL == "openai":
-#     ai_chatbot = OpenAIService()
+elif ACTIVE_MODEL == "openai":
+    ai_chatbot = OpenAIService()
 
 
 # FastAPI lifespan: Manages startup and shutdown of the app
