@@ -1,85 +1,66 @@
 import os
 import json
-from openai import AsyncOpenAI  # ⚡ Versión asíncrona para no bloquear FastAPI
+from openai import AsyncOpenAI  
 from dotenv import load_dotenv
 from services.base_bot import BaseChatbotService
+from services.base_bot import StandardResponse, FunctionCall
 
 load_dotenv()
 
 class OpenAIService(BaseChatbotService):
     def __init__(self):
-        # Inicializa el cliente asíncrono con tu OPENAI_API_KEY del .env
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        # Usamos gpt-4o-mini: es ultra rápido, baratísimo y buenísimo con herramientas
-        self.model = "gpt-4o-mini" 
+        super().__init__()
+        # self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = AsyncOpenAI(
+            api_key=os.getenv("NVIDIA_API_KEY"),
+            base_url="https://integrate.api.nvidia.com/v1"
+        )
 
-    async def chat_with_mcp_async(self, user_message: str, config):
-        """
-        Procesa el mensaje del usuario con OpenAI y traduce la configuración 
-        de herramientas de Gemini/FastAPI al formato JSON Schema de OpenAI.
-        """
-        try:
-            openai_tools = []
-            
-            # TRADUCCIÓN DE HERRAMIENTAS: 
-            # Convertimos el formato de tools que armó FastAPI al formato que entiende OpenAI
-            if hasattr(config, 'tools') and config.tools:
-                for tool in config.tools[0].function_declarations:
-                    openai_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": tool.name,
-                            "description": tool.description,
-                            "parameters": tool.parameters
-                        }
-                    })
+        # self.model = "gpt-4o-mini"
+        self.model = "meta/llama-3.1-70b-instruct"
+        # self.model = "nvidia/nemotron-3-super"
 
-            # Configuramos las instrucciones de sistema enfocadas en el bienestar laboral
-            system_instruction = (
+    def set_config(self, config):
+        self.config = {
+            "tools": self.translate_tools_to_specific_format(config),
+            "system_instruction": (
                 "Eres una IA experta en bienestar laboral y gestión del tiempo. "
                 "Tu objetivo es ayudar al usuario a gestionar su fatiga y mejorar su día. "
                 "Tienes acceso a herramientas de Clockify mediante el protocolo MCP para consultar "
                 "proyectos, registrar tiempos o ver espacios de trabajo reales. Responde siempre en español."
             )
+        }
 
-            # Montamos el histórico de mensajes
-            messages = [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_message}
-            ]
+    def translate_tools_to_specific_format(self, config):
+        openai_tools = []
+        if hasattr(config, 'tools') and config.tools:
+            for tool in config.tools[0].function_declarations:
+                openai_tools.append({
+                    "type": "function",
+                    "function": {"name": tool.name, "description": tool.description, "parameters": tool.parameters}
+                })
+        return openai_tools
 
-            # Preparamos los argumentos de la llamada a la API
-            kwargs = {"model": self.model, "messages": messages}
-            if openai_tools:
-                kwargs["tools"] = openai_tools
+    def append_user_message(self, user_message: str):
+        self.history.append({"role": "user", "content": user_message})
 
-            # Invocación asíncrona
-            response = await self.client.chat.completions.create(**kwargs)
-            choice = response.choices[0].message
+    async def call_model(self):
+        messages = [{"role": "system", "content": self.config["system_instruction"]}] + self.history
+        kwargs = {"model": self.model, "messages": messages}
+        if self.config.get("tools"):
+            kwargs["tools"] = self.config["tools"]
+        response = await self.client.chat.completions.create(**kwargs)
+        return response.choices[0].message  # devolvemos directamente el "choice"
 
-            # ADAPTADOR DE RESPUESTA HOMOGÉNEA:
-            # Creamos un objeto "espejo" idéntico al que devuelve Gemini 
-            # para que tu main.py no tenga que cambiar su forma de leer los datos (.text y .function_calls)
-            class StandardResponse:
-                def __init__(self, text, function_calls=None):
-                    self.text = text
-                    self.function_calls = function_calls
+    def append_model_message(self, choice):
+        if choice.content:
+            self.history.append({"role": "assistant", "content": choice.content})
 
-            # Si OpenAI ha decidido invocar herramientas, traducimos sus tool_calls
-            standard_calls = []
-            if choice.tool_calls:
-                for call in choice.tool_calls:
-                    class FunctionCallMock:
-                        def __init__(self, name, args):
-                            self.name = name
-                            self.args = args
-                    
-                    # OpenAI devuelve los argumentos como un string JSON, lo parseamos a un diccionario de Python
-                    arguments_dict = json.loads(call.function.arguments)
-                    standard_calls.append(FunctionCallMock(call.function.name, arguments_dict))
-
-            return StandardResponse(text=choice.content, function_calls=standard_calls)
-
-        except Exception as e:
-            print(f"Error en OpenAIService MCP: {str(e)}")
-            raise e
+    def get_standard_response(self, choice) -> StandardResponse:
+        function_calls = []
+        if choice.tool_calls:
+            for call in choice.tool_calls:
+                function_calls.append(
+                    FunctionCall(call.function.name, json.loads(call.function.arguments))
+                )
+        return StandardResponse(text=choice.content, function_calls=function_calls)

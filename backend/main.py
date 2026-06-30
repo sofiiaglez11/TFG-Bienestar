@@ -9,11 +9,15 @@ from services.openai import OpenAIService
 from services.gemini import GeminiService
 from mcp_local.client import MCPClientService
 
+from services.base_bot import StandardResponse, FunctionCall
+
+from fastapi.middleware.cors import CORSMiddleware
+
 
 mcp_client = MCPClientService()
 
-# ACTIVE_MODEL = "openai" 
-ACTIVE_MODEL = "gemini"
+ACTIVE_MODEL = "openai" 
+# ACTIVE_MODEL = "gemini"
 
 if ACTIVE_MODEL == "gemini":
     ai_chatbot = GeminiService()
@@ -32,10 +36,18 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="TFG Bienestar (Agentic App)", lifespan=lifespan)
+ 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 
 class ChatRequest(BaseModel):
     message: str
-    workspace_id: str = None
 
 
 @app.post("/api/chat")
@@ -56,16 +68,19 @@ async def handle_chat(request: ChatRequest):
         
         tool_config = types.Tool(function_declarations=gemini_declarations)
         mcp_config = types.GenerateContentConfig(tools=[tool_config])
+
+        ai_chatbot.set_config(mcp_config)  # Configuramos el chatbot con las herramientas MCP
         
         # Primer paso del agente: Consultamos a Gemini
         # (Usa el método asíncrono con client.aio que configuramos en tu gemini.py)
         response = await ai_chatbot.chat_with_mcp_async(
-            user_message=request.message,
-            config=mcp_config
+            user_message=request.message
         )
         
        # El bucle agéntico: Si el LLM solicita ejecutar una o varias herramientas
-        if hasattr(response, 'function_calls') and response.function_calls:
+        # if hasattr(response, 'function_calls') and response.function_calls:
+        if response.function_calls:
+
             # Creamos una lista por si el LLM decide encadenar varias llamadas consecutivas
             resultados_herramientas = []
             
@@ -86,19 +101,34 @@ async def handle_chat(request: ChatRequest):
             
             # Devolvemos el resultado al LLM activo para que redacte el texto empático final en español
             final_response = await ai_chatbot.chat_with_mcp_async(
-                user_message=f"Aquí tienes los datos que me pediste del sistema:\n{contexto_final}\n\nPor favor, responde ahora al usuario en base a estos datos.",
-                config=mcp_config
+                user_message=f"Aquí tienes los datos que me pediste del sistema:\n{contexto_final}\n\nPor favor, responde ahora al usuario en base a estos datos."
             )
             
             # Retornamos la respuesta redactada (manejando tanto el objeto adaptado como texto plano)
-            texto_respuesta = final_response.text if hasattr(final_response, 'text') else str(final_response)
+            # texto_respuesta = final_response.text if hasattr(final_response, 'text') else str(final_response)
+            texto_respuesta = final_response.text
+
+            # Guardamos en historial: mensaje original del usuario + respuesta final
+            # ai_chatbot.history.append({"role": "user", "parts": [{"text": request.message}]})
+            # ai_chatbot.history.append({"role": "model", "parts": [{"text": texto_respuesta}]})
+            
             return {"response": texto_respuesta}
         
         # Respuesta directa en caso de que el LLM no haya necesitado llamar a ninguna herramienta
-        texto_directo = response.text if hasattr(response, 'text') else str(response)
+        # texto_directo = response.text if hasattr(response, 'text') else str(response)
+        texto_directo = response.text
+
+        # ai_chatbot.history.append({"role": "user", "parts": [{"text": request.message}]})
+        # ai_chatbot.history.append({"role": "model", "parts": [{"text": texto_directo}]})
+
         return {"response": texto_directo}
 
     except Exception as e:
         print(f"Error crítico en handle_chat: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
  
+
+@app.post("/api/chat/reset")
+async def reset_chat():
+    ai_chatbot.clear_history()
+    return {"message": "Conversación reiniciada"}
