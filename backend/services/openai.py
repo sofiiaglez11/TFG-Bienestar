@@ -20,26 +20,29 @@ class OpenAIService(BaseChatbotService):
         self.model = "meta/llama-3.1-70b-instruct"
         # self.model = "nvidia/nemotron-3-super"
 
-    def set_config(self, config):
-        self.config = {
-            "tools": self.translate_tools_to_specific_format(config),
-            "system_instruction": (
-                "Eres una IA experta en bienestar laboral y gestión del tiempo. "
-                "Tu objetivo es ayudar al usuario a gestionar su fatiga y mejorar su día. "
-                "Tienes acceso a herramientas de Clockify mediante el protocolo MCP para consultar "
-                "proyectos, registrar tiempos o ver espacios de trabajo reales. Responde siempre en español."
-            )
-        }
 
-    def translate_tools_to_specific_format(self, config):
-        openai_tools = []
-        if hasattr(config, 'tools') and config.tools:
-            for tool in config.tools[0].function_declarations:
-                openai_tools.append({
-                    "type": "function",
-                    "function": {"name": tool.name, "description": tool.description, "parameters": tool.parameters}
-                })
-        return openai_tools
+    # def translate_tools_to_specific_format(self, config):
+    #     openai_tools = []
+    #     if hasattr(config, 'tools') and config.tools:
+    #         for tool in config.tools[0].function_declarations:
+    #             openai_tools.append({
+    #                 "type": "function",
+    #                 "function": {"name": tool.name, "description": tool.description, "parameters": tool.parameters}
+    #             })
+    #     return openai_tools
+
+    def translate_tools_to_specific_format(self, tools: list):
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "parameters": tool["parameters"]
+                }
+            }
+            for tool in tools
+        ]
 
     def append_user_message(self, user_message: str):
         self.history.append({"role": "user", "content": user_message})

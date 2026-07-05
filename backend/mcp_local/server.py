@@ -17,7 +17,7 @@ mcp = FastMCP(name="Clockify")
 
 @mcp.tool()
 async def get_current_time():
-    """Returns the current time in ISO 8601 format."""
+    """Devuelve la hora actual en formato ISO 8601."""
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()
 

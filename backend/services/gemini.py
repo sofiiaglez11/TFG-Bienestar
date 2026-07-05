@@ -14,14 +14,17 @@ class GeminiService(BaseChatbotService):
         self.client = genai.Client()
         self.model = "gemini-2.5-flash"
 
-    def set_config(self, config):
-        config.system_instruction = (
-        "Eres una IA experta en bienestar laboral y gestión del tiempo. "
-        "Tu objetivo es ayudar al usuario a gestionar su fatiga y mejorar su día. "
-        "Tienes acceso a herramientas de Clockify mediante el protocolo MCP para consultar "
-        "proyectos o espacios de trabajo reales si el usuario te lo pide. Responde siempre en español."
-        )
-        self.config = config
+    def translate_tools_to_specific_format(self, config):
+        gemini_tools = []
+        if hasattr(config, 'tools') and config.tools:
+            for tool in config.tools[0].function_declarations:
+                gemini_tools.append({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters
+                })
+        return gemini_tools
+    
 
     def append_user_message(self, user_message: str):
         self.history.append({"role": "user", "parts": [{"text": user_message}]})

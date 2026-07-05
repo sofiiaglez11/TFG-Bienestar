@@ -56,20 +56,33 @@ async def handle_chat(request: ChatRequest):
         mcp_tools = mcp_client.tools
         
         # NOTE hay que mapear las herramientas a declaraciones de Gemini (esquemas de texto)
-        gemini_declarations = []
-        for tool in mcp_tools:
-            gemini_declarations.append(
-                types.FunctionDeclaration(
-                    name=tool.name,
-                    description=tool.description or f"Ejecutar {tool.name}",
-                    parameters=tool.inputSchema
-                )
-            )
+        # gemini_declarations = []
+        # for tool in mcp_tools:
+        #     gemini_declarations.append(
+        #         types.FunctionDeclaration(
+        #             name=tool.name,
+        #             description=tool.description or f"Ejecutar {tool.name}",
+        #             parameters=tool.inputSchema
+        #         )
+        #     )
         
-        tool_config = types.Tool(function_declarations=gemini_declarations)
-        mcp_config = types.GenerateContentConfig(tools=[tool_config])
+        # tool_config = types.Tool(function_declarations=gemini_declarations)
+        # mcp_config = types.GenerateContentConfig(tools=[tool_config])
 
-        ai_chatbot.set_config(mcp_config)  # Configuramos el chatbot con las herramientas MCP
+        # ai_chatbot.set_config(mcp_config)  # Configuramos el chatbot con las herramientas MCP
+
+
+        mcp_tools = mcp_client.tools
+        tools_raw = [
+            {
+                "name": tool.name,
+                "description": tool.description or f"Ejecutar {tool.name}",
+                "parameters": tool.inputSchema
+            }
+            for tool in mcp_tools
+        ]
+
+        ai_chatbot.set_config(tools_raw)
         
         # Primer paso del agente: Consultamos a Gemini
         # (Usa el método asíncrono con client.aio que configuramos en tu gemini.py)
@@ -105,21 +118,13 @@ async def handle_chat(request: ChatRequest):
             )
             
             # Retornamos la respuesta redactada (manejando tanto el objeto adaptado como texto plano)
-            # texto_respuesta = final_response.text if hasattr(final_response, 'text') else str(final_response)
             texto_respuesta = final_response.text
 
-            # Guardamos en historial: mensaje original del usuario + respuesta final
-            # ai_chatbot.history.append({"role": "user", "parts": [{"text": request.message}]})
-            # ai_chatbot.history.append({"role": "model", "parts": [{"text": texto_respuesta}]})
             
             return {"response": texto_respuesta}
         
-        # Respuesta directa en caso de que el LLM no haya necesitado llamar a ninguna herramienta
-        # texto_directo = response.text if hasattr(response, 'text') else str(response)
-        texto_directo = response.text
 
-        # ai_chatbot.history.append({"role": "user", "parts": [{"text": request.message}]})
-        # ai_chatbot.history.append({"role": "model", "parts": [{"text": texto_directo}]})
+        texto_directo = response.text
 
         return {"response": texto_directo}
 

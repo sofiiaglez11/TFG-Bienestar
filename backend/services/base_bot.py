@@ -26,9 +26,22 @@ class BaseChatbotService(ABC):
         self.config = None
         self.model = None
 
+    
+    def set_config(self, config):
+        self.config = {
+            "tools": self.translate_tools_to_specific_format(config),
+            "system_instruction": (
+                "Eres una IA experta en bienestar laboral y gestión del tiempo. "
+                "Tu objetivo es ayudar al usuario a gestionar su fatiga y mejorar su día. "
+                "Tienes acceso a herramientas de Clockify mediante el protocolo MCP para consultar "
+                "proyectos, registrar tiempos o ver espacios de trabajo reales. Responde siempre en español."
+            )
+        }
+
     @abstractmethod
-    def set_config(self, config: any):
+    def translate_tools_to_specific_format(self, config):
         pass
+
 
     @abstractmethod
     def append_user_message(self, user_message: str):
