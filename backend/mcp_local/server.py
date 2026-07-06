@@ -18,37 +18,38 @@ clockify_service = ClockifyService()
 
 mcp = FastMCP(name="Clockify")
 
-# @mcp.tool()
-# async def get_agent_capabilities() -> str:
-#     """
-#     Devuelve dinámicamente la lista de todas las herramientas actualmente 
-#     registradas y disponibles en este sistema de IA.
-#     Úsala cuando el usuario pregunte '¿qué puedes hacer?', 'ayuda' o quiera saber tus funciones.
-#     """
-#     try:
-#         lineas = ["Capacidades actuales del sistema Clockify:\n"]
+@mcp.tool()
+async def get_agent_capabilities() -> str:
+    """
+    Devuelve la lista de herramientas disponibles para que el LLM pueda explicarlas
+    al usuario de forma amigable.
+    Úsala cuando el usuario pregunte '¿qué puedes hacer?', 'ayuda' o quiera saber tus funciones.
+    """
+    try:
+        herramientas = await mcp.list_tools()
         
-#         # Método oficial de FastMCP para listar las herramientas registradas
-#         herramientas = mcp.list_tools()
-        
-#         for tool in herramientas:
-#             nombre = tool.name
-#             descripcion = tool.description or "Sin descripción disponible."
+        lineas = []
+        for tool in herramientas:
+            if tool.name == "get_agent_capabilities":
+                continue  # nos saltamos esta misma tool
+            lineas.append(f"- {tool.name}: {tool.description}")
             
-#             lineas.append(f"🛠️ Herramienta: {nombre}\n   Acción: {descripcion}\n")
-            
-#         return "\n".join(lineas)
+        return "\n".join(lineas)
         
-#     except Exception as e:
-#         return f"No se pudo leer el catálogo de herramientas automáticamente: {str(e)}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
 
 # TOOLS FOR SUBJECTS
 @mcp.tool()
 async def add_subject(name: str, weekly_hours_goal: int = 0, workspace_id: str = None):
     """
     Añade una nueva asignatura al sistema.
-    Crea un proyecto en Clockify y lo registra en la base de datos.
+    IMPORTANTE: Antes de llamar a esta herramienta, asegúrate de tener el nombre
+    de la asignatura. Si el usuario no lo ha especificado, pregúntaselo primero.
+    No inventes ni supongas nombres.
     Úsala cuando el usuario diga 'Tengo la asignatura X' o 'Añade la asignatura X'.
+    Necesita el nombre de la asignatura y opcionalmente un objetivo de horas semanales y un workspace_id.
     """
     try:
         # 1. Crear el proyecto en Clockify
@@ -68,6 +69,51 @@ async def add_subject(name: str, weekly_hours_goal: int = 0, workspace_id: str =
     except Exception as e:
         return f"Error al añadir la asignatura: {str(e)}"
 
+
+@mcp.tool()
+async def add_multiple_subjects(names: list[str], workspace_id: str = None):
+    try:
+        added = []
+        skipped = []
+
+        # Obtenemos los proyectos ya existentes en Clockify
+        existing_projects = clockify_service.get_projects(workspace_id)
+        existing_project_names = [p["name"].lower() for p in existing_projects]
+
+        for name in names:
+            # Comprobar si ya existe en MongoDB
+            existing_subjects = await db_service.get_subjects_by_user("default_user")
+            if any(s["name"].lower() == name.lower() for s in existing_subjects):
+                skipped.append(name)
+                continue
+
+            # Comprobar si ya existe en Clockify
+            if name.lower() in existing_project_names:
+                # El proyecto ya existe en Clockify, buscar su ID
+                project = next(p for p in existing_projects if p["name"].lower() == name.lower())
+                clockify_project_id = project.get("id")
+            else:
+                # Crear el proyecto en Clockify
+                project = clockify_service.add_new_project(name, workspace_id)
+                clockify_project_id = project.get("id")
+
+            await db_service.create_subject(
+                user_id="default_user",
+                name=name,
+                clockify_project_id=clockify_project_id
+            )
+            added.append(name)
+
+        result = ""
+        if added:
+            result += f"Asignaturas añadidas: {', '.join(added)}. "
+        if skipped:
+            result += f"Ya existían en el sistema: {', '.join(skipped)}."
+        return result
+
+    except Exception as e:
+        return f"Error al añadir las asignaturas: {str(e)}"
+    
 
 @mcp.tool()
 async def get_subjects():
@@ -91,11 +137,7 @@ async def get_subjects():
     except Exception as e:
         return f"Error al obtener las asignaturas: {str(e)}"
 
-@mcp.tool()
-async def get_current_time():
-    """Devuelve la hora actual en formato ISO 8601."""
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat()
+
 
 # # TOOOLS FOR WORKSPACES
 # @mcp.tool()
@@ -211,7 +253,6 @@ async def get_current_time():
 #     return f"{styles.get(style, styles['friendly'])} for someone named {name}."
 
 
-# # TOOLS FOR USERS
 # @mcp.tool()
 # async def get_user_id():
 #     '''Devuelve el ID del usuario en Clockify.'''
@@ -225,20 +266,3 @@ if __name__ == "__main__":
     mcp.run()
 
     
-# Ejemplo de la documentación
-
-# @mcp.tool()
-# async def long_running_task(task_name: str, ctx: Context[ServerSession, None], steps: int = 5) -> str:
-#     """Execute a task with progress updates."""
-#     await ctx.info(f"Starting: {task_name}")
-
-#     for i in range(steps):
-#         progress = (i + 1) / steps
-#         await ctx.report_progress(
-#             progress=progress,
-#             total=1.0,
-#             message=f"Step {i + 1}/{steps}",
-#         )
-#         await ctx.debug(f"Completed step {i + 1}")
-
-#     return f"Task '{task_name}' completed"
