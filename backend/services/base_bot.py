@@ -40,26 +40,32 @@ class BaseChatbotService(ABC):
 
     @abstractmethod
     def translate_tools_to_specific_format(self, config):
+        '''Traduce la lista de herramientas a un formato específico para cada proveedor de IA.'''
         pass
 
 
     @abstractmethod
     def append_user_message(self, user_message: str):
+        '''Agrega el mensaje del usuario al historial de conversación.'''
         pass
 
     @abstractmethod
     def append_model_message(self, response):
+        '''Agrega el mensaje del modelo al historial de conversación.'''
         pass
 
     @abstractmethod
     async def call_model(self):
+        '''Llama al modelo de IA con el historial de conversación y devuelve la respuesta.'''
         pass
 
     @abstractmethod
     def get_standard_response(self, response) -> StandardResponse:
+        '''Convierte la respuesta del modelo a un formato estándar que pueda ser leído por main.py.'''
         pass
 
     async def chat_with_mcp_async(self, user_message: str):
+        '''Permite al usuario enviar un mensaje a la IA y obtener una respuesta, manejando el historial de conversación y las llamadas a herramientas.'''
         try:
             self.append_user_message(user_message)
             response = await self.call_model()
@@ -70,4 +76,5 @@ class BaseChatbotService(ABC):
             raise e
 
     def clear_history(self):
+        '''Limpia el historial de conversación.'''
         self.history = []

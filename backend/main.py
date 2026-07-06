@@ -13,7 +13,10 @@ from services.base_bot import StandardResponse, FunctionCall
 
 from fastapi.middleware.cors import CORSMiddleware
 
+from services.database import DatabaseService
 
+# Servicios de MCP y de la Base de DAtos
+db_service = DatabaseService()
 mcp_client = MCPClientService()
 
 ACTIVE_MODEL = "openai" 
@@ -33,6 +36,8 @@ async def lifespan(app: FastAPI):
     yield
     # Al apagar la API, desconectamos el proceso de fondo de forma segura
     await mcp_client.disconnect()
+    db_service.client.close()
+
 
 
 app = FastAPI(title="TFG Bienestar (Agentic App)", lifespan=lifespan)
@@ -49,6 +54,13 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
 
+
+@app.get("/api/test-db")
+async def test_db():
+    # Intenta insertar y luego borrar un documento de prueba
+    result = await db_service.users.insert_one({"test": "conexion ok"})
+    await db_service.users.delete_one({"_id": result.inserted_id})
+    return {"message": "Conexión a MongoDB funcionando"}
 
 @app.post("/api/chat")
 async def handle_chat(request: ChatRequest):
