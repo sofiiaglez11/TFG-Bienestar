@@ -23,16 +23,19 @@ async def get_agent_capabilities() -> str:
     """
     Devuelve la lista de herramientas disponibles para que el LLM pueda explicarlas
     al usuario de forma amigable.
-    Úsala cuando el usuario pregunte '¿qué puedes hacer?', 'ayuda' o quiera saber tus funciones.
+    Úsala cuando el usuario pregunte '¿qué puedes hacer?', 'ayuda', quiera saber tus 
+    funciones o cuando haga una consulta que esté fuera de tu ámbito (explicándoselo) o que no 
+    esté clara.
+    IMPORTANTE: No inventes herramientas ni funciones que no existan. Solo describe las que
+    realmente están disponibles en el MCP.
     """
     try:
         herramientas = await mcp.list_tools()
         
         lineas = []
         for tool in herramientas:
-            if tool.name == "get_agent_capabilities":
-                continue  # nos saltamos esta misma tool
-            lineas.append(f"- {tool.name}: {tool.description}")
+            if tool.name != "get_agent_capabilities":
+                lineas.append(f"- {tool.name}: {tool.description}")
             
         return "\n".join(lineas)
         

@@ -67,6 +67,20 @@ class BaseChatbotService(ABC):
         pass
 
     @abstractmethod
+    def append_tool_results(self, function_calls: list, results: list):
+        '''
+        Añade al historial los resultados de las tools ejecutadas, usando el formato
+        NATIVO que cada proveedor necesita para continuar la conversación:
+        - OpenAI: mensajes {"role": "tool", "tool_call_id": ..., "content": ...}
+        - Gemini: Content(role="user", parts=[Part.from_function_response(...)])
+        function_calls: lista de FunctionCall, en el mismo orden en que se pidieron.
+        results: lista de resultados (mismo orden), ya convertidos a string/dict.
+        '''
+        pass
+ 
+
+
+    @abstractmethod
     async def call_model(self):
         '''Llama al modelo de IA con el historial de conversación y devuelve la respuesta.'''
         pass
@@ -86,6 +100,48 @@ class BaseChatbotService(ABC):
         except Exception as e:
             print(f"Error en chat_with_mcp_async: {str(e)}")
             raise e
+        
+
+    
+    async def run_agentic_conversation(self, user_message: str, tool_executor, max_turns: int = 5) -> StandardResponse:
+        '''
+        Bucle agéntico genérico, independiente del proveedor de IA.
+        Usa FunctionCall/StandardResponse y delega el formateo específico a
+          append_model_message/append_tool_results.
+ 
+        tool_executor: función async (nombre: str, args: dict) -> resultado
+                       p.ej. mcp_client.call_tool
+        max_turns: límite de "rondas" de tool-calling encadenadas (evita bucles infinitos
+                   si el modelo insiste en llamar tools sin parar, p.ej. get_agent_capabilities).
+        '''
+        standard = await self.chat_with_mcp_async(user_message)
+ 
+        turns = 0
+        while standard.function_calls and turns < max_turns:
+            results = []
+            for fc in standard.function_calls:
+                print(f"[Agente] Ejecutando herramienta: {fc.name} con argumentos: {fc.args}")
+                resultado = await tool_executor(fc.name, fc.args)
+                results.append(str(resultado))
+ 
+            # Cada proveedor sabe cómo insertar esto en SU propio formato de historial
+            self.append_tool_results(standard.function_calls, results)
+ 
+            response = await self.call_model()
+            self.append_model_message(response)
+            standard = self.get_standard_response(response)
+            turns += 1
+ 
+        if not standard.text:
+            # Para evitar enviar al endpoint una respuesta vacía, devolvemos este mensaje
+            # genérico"
+            standard.text = (
+                "Lo siento, no he podido generar una respuesta esta vez. "
+                "¿Puedes reformular tu mensaje?"
+            )
+ 
+        return standard
+ 
 
     def clear_history(self):
         '''Limpia el historial de conversación.'''

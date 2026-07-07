@@ -21,16 +21,6 @@ class OpenAIService(BaseChatbotService):
         # self.model = "nvidia/nemotron-3-super"
 
 
-    # def translate_tools_to_specific_format(self, config):
-    #     openai_tools = []
-    #     if hasattr(config, 'tools') and config.tools:
-    #         for tool in config.tools[0].function_declarations:
-    #             openai_tools.append({
-    #                 "type": "function",
-    #                 "function": {"name": tool.name, "description": tool.description, "parameters": tool.parameters}
-    #             })
-    #     return openai_tools
-
     def translate_tools_to_specific_format(self, tools: list):
         return [
             {
@@ -55,9 +45,41 @@ class OpenAIService(BaseChatbotService):
         response = await self.client.chat.completions.create(**kwargs)
         return response.choices[0].message  # devolvemos directamente el "choice"
 
+
     def append_model_message(self, choice):
-        if choice.content:
+        if choice.tool_calls:
+            self.history.append({
+                "role": "assistant",
+                "content": choice.content,  
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    }
+                    for tc in choice.tool_calls
+                ]
+            })
+            # Guardamos los tool_calls "crudos" para poder mapear id -> resultado
+            # cuando se llame a append_tool_results
+            self._pending_tool_calls = choice.tool_calls
+        elif choice.content:
             self.history.append({"role": "assistant", "content": choice.content})
+ 
+    def append_tool_results(self, function_calls: list, results: list):
+        pending = getattr(self, "_pending_tool_calls", None) or []
+        for tc, result in zip(pending, results):
+            self.history.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": result
+            })
+        self._pending_tool_calls = None
+ 
+
 
     def get_standard_response(self, choice) -> StandardResponse:
         function_calls = []
