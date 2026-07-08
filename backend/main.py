@@ -19,6 +19,7 @@ from services.database import DatabaseService
 db_service = DatabaseService()
 mcp_client = MCPClientService()
 
+
 ACTIVE_MODEL = "openai" 
 # ACTIVE_MODEL = "gemini"
 
@@ -33,6 +34,8 @@ elif ACTIVE_MODEL == "openai":
 async def lifespan(app: FastAPI):
     # Al arrancar la API, encendemos el "USB" del servidor MCP una sola vez
     await mcp_client.connect()
+    await db_service.ensure_indexes()  # Aseguramos que los índices estén creados al iniciar la app
+
     yield
     # Al apagar la API, desconectamos el proceso de fondo de forma segura
     await mcp_client.disconnect()
@@ -40,13 +43,13 @@ async def lifespan(app: FastAPI):
 
 
 
-app = FastAPI(title="TFG Bienestar (Agentic App)", lifespan=lifespan)
+app = FastAPI(title="TFG Bienestar", lifespan=lifespan)
  
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["http://localhost:3000"], # Permitir solicitudes desde el frontend
+    allow_methods=["*"], # Permitir todos los métodos HTTP
+    allow_headers=["*"], # Permitir todos los encabezados
 )
 
 

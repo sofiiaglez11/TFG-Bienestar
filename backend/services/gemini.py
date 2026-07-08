@@ -34,6 +34,11 @@ class GeminiService(BaseChatbotService):
                 "añadirlas y, si confirma, usa add_multiple_subjects para crearlas todas de una vez.\n\n"
                 "Cuando el usuario pregunte qué puedes hacer o pida ayuda, usa get_agent_capabilities "
                 "para obtener la lista de herramientas disponibles de forma real."
+                "IMPORTANTE: Solo debes responder preguntas relacionadas con gestión de asignaturas, "
+                "tiempo de estudio y bienestar académico. Si el usuario pregunta algo fuera de este ámbito "
+                "(por ejemplo, pedir explicaciones de código, temas generales, etc.), no respondas la "
+                "pregunta directamente: usa get_agent_capabilities para explicarle amablemente que estás "
+                "limitado a estas funciones."
             )
 
 

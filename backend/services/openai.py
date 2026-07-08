@@ -42,6 +42,7 @@ class OpenAIService(BaseChatbotService):
         kwargs = {"model": self.model, "messages": messages}
         if self.config.get("tools"):
             kwargs["tools"] = self.config["tools"]
+            kwargs["parallel_tool_calls"] = False # para que no de error si intenta hacer llamadads paralelas
         response = await self.client.chat.completions.create(**kwargs)
         return response.choices[0].message  # devolvemos directamente el "choice"
 
