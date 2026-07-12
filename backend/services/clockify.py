@@ -21,7 +21,7 @@ class ClockifyService:
         self.current_workspace = self.workspaces[0] if self.workspaces else None
  
     ############################################################################
-    # METHODS FOR WORKSPACES
+    # METHODS FOR WORKSPACES -> NOTE: no los estoy usando
  
     def get_workspaces(self):
         """"Returns a list of workspaces for the authenticated user."""

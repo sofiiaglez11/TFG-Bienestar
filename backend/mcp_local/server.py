@@ -61,6 +61,88 @@ async def get_agent_capabilities() -> str:
         return f"Error: {str(e)}"
  
  
+# TOOLS FOR PLANNING AND ORGANIZATION
+
+@mcp.tool()
+async def get_user_schedule():
+    """
+    Devuelve un resumen del horario del usuario, incluyendo asignaturas, tareas y deadlines.
+    Úsala cuando el usuario pregunte 'muéstrame mi horario' o 'qué tengo planeado'.
+    """
+    try:
+        subjects = await db_service.get_subjects_by_user("default_user")
+        periods = await db_service.get_periods_by_user("default_user")
+        tasks = []
+        for subject in subjects:
+            subject_tasks = await db_service.get_tasks_by_subject(subject["_id"])
+            tasks.extend(subject_tasks)
+ 
+        result = "Resumen de tu planificación:\n"
+        result += "\nAsignaturas:\n"
+        for s in subjects:
+            result += f"- {s['name']}\n"
+ 
+        result += "\nPeriodos:\n"
+        for p in periods:
+            marca = " (activo)" if p.get("is_active") else ""
+            result += f"- {p['name']}{marca}\n"
+ 
+        result += "\nTareas:\n"
+        for t in tasks:
+            estado = "✅" if t["completed"] else "⏳"
+            result += f"- {estado} {t['title']} (de {t['subject_id']})\n"
+ 
+        return result
+    except Exception as e:
+        return f"Error al obtener el resumen del horario: {str(e)}"
+    
+
+@mcp.tool()
+async def get_user_progress():
+    """
+    Devuelve un resumen del progreso del usuario en sus asignaturas y tareas.
+    Úsala cuando el usuario pregunte 'cuánto he avanzado' o 'qué progreso tengo'.
+    """
+    try:
+        subjects = await db_service.get_subjects_by_user("default_user")
+        progress_summary = []
+ 
+        for s in subjects:
+            tasks = await db_service.get_tasks_by_subject(s["_id"])
+            total_tasks = len(tasks)
+            completed_tasks = sum(1 for t in tasks if t["completed"])
+            progress_summary.append(f"- {s['name']}: {completed_tasks}/{total_tasks} tareas completadas")
+ 
+        return "Progreso de tus asignaturas:\n" + "\n".join(progress_summary)
+    except Exception as e:
+        return f"Error al obtener el progreso: {str(e)}"
+    
+
+@mcp.tool()
+async def get_time_spent_summary():
+    """
+    Devuelve un resumen del tiempo total dedicado a cada asignatura.
+    Úsala cuando el usuario pregunte 'cuánto tiempo he dedicado a X' o 'resumen de tiempo'.
+    """
+    try:
+        subjects = await db_service.get_subjects_by_user("default_user")
+        time_summary = []
+ 
+        for s in subjects:
+            entries = await db_service.get_time_entries_by_subject(s["_id"])
+            total_seconds = sum(
+                (datetime.fromisoformat(e["end_time"]) - datetime.fromisoformat(e["start_time"])).total_seconds()
+                for e in entries if e.get("end_time")
+            )
+            hours, remainder = divmod(total_seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+            time_summary.append(f"- {s['name']}: {int(hours)}h {int(minutes)}m")
+ 
+        return "Resumen de tiempo dedicado a tus asignaturas:\n" + "\n".join(time_summary)
+    except Exception as e:
+        return f"Error al obtener el resumen de tiempo: {str(e)}"
+    
+
 # TOOLS FOR SUBJECTS
 @mcp.tool()
 async def add_subject(name: str, weekly_hours_goal: int = 0, workspace_id: str = None):
@@ -394,6 +476,17 @@ async def complete_task(subject_name: str, task_title: str):
         return f"Tarea '{task_title}' marcada como completada."
     except Exception as e:
         return f"Error al completar la tarea: {str(e)}"
+    
+async def edit_task(subject_name: str, task_title:str, description: str = "",
+                    due_date: str = None, parent_task_title: str = None,
+                    workspace_id: str = None):
+    """
+    Edita una tarea existente de una asignatura. Permite cambiar su descripción, fecha de vencimiento,
+    asignarla a otra tarea como subtarea, o actualizar su representación en Clockify.
+    Úsala cuando el usuario diga 'cambia la tarea X de Y' o 'edita la tarea X de Y'.
+    """
+
+
  
  
 ############################################################################
@@ -478,6 +571,7 @@ async def log_time_entry(subject_name: str, start_time: str, end_time: str,
     ya conocidas (a diferencia de start_timer/stop_timer, que son para tiempo real).
     Útil cuando el usuario dice 'estuve estudiando Matemáticas de 10:00 a 12:00 hoy'.
     IMPORTANTE: start_time y end_time deben tener formato ISO 8601 (ej: '2026-07-08T10:00:00Z').
+    Si existe una tareaa concreta para esa sesión, se puede indicar task_title; si no, se deja vacío.
     """
     try:
         if not start_time.endswith('Z') and '+' not in start_time:
@@ -508,12 +602,14 @@ async def log_time_entry(subject_name: str, start_time: str, end_time: str,
     except Exception as e:
         return f"Error al registrar la entrada de tiempo: {str(e)}"
  
+
  
 @mcp.tool()
 async def get_time_summary(subject_name: str):
     """
     Devuelve el resumen de tiempo dedicado a una asignatura, con sus últimas sesiones.
     Úsala cuando el usuario pregunte 'cuánto tiempo llevo en X' o 'muéstrame mis sesiones de X'.
+    devuelve el tiempo dedicado en un formato amigable (horas y minutos) para el usuario.
     """
     try:
         subject = await _find_subject_by_name("default_user", subject_name)
@@ -525,7 +621,8 @@ async def get_time_summary(subject_name: str):
             return f"No tienes ninguna sesión registrada para '{subject_name}' todavía."
  
         result = f"Sesiones de {subject_name}:\n"
-        for e in entries[:10]:
+        # for e in entries[:10]:
+        for e in entries:
             fin = e.get("end_time") or "en curso"
             result += f"- {e['start_time']} -> {fin}\n"
         return result
