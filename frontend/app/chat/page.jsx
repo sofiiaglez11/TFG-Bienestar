@@ -50,15 +50,15 @@ export default function ChatPage() {
         display: "flex",
         flexDirection: "column",
         height: "100vh",
-        background: "#f9fafb",
+        background: "var(--bg-page)",
       }}
     >
       {/* Header */}
       <div
         style={{
           padding: "14px 20px",
-          borderBottom: "1px solid #e5e7eb",
-          background: "white",
+          borderBottom: "1px solid var(--border)",
+          background: "var(--bg-header)",
           display: "flex",
           alignItems: "center",
           gap: "10px",
@@ -73,10 +73,10 @@ export default function ChatPage() {
           }}
         />
         <div>
-          <div style={{ fontWeight: 600, fontSize: "14px", color: "#111827" }}>
+          <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--text-primary)" }}>
             Asistente de bienestar
           </div>
-          <div style={{ fontSize: "12px", color: "#9ca3af" }}>
+          <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
             Conectado a Clockify
           </div>
         </div>

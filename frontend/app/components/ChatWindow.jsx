@@ -24,7 +24,7 @@ export default function ChatWindow({ messages, isLoading }) {
           style={{
             margin: "auto",
             textAlign: "center",
-            color: "#9ca3af",
+            color: "var(--text-secondary)",
           }}
         >
           <div style={{ fontSize: "40px", marginBottom: "12px" }}>💬</div>
@@ -39,18 +39,23 @@ export default function ChatWindow({ messages, isLoading }) {
       ))}
 
       {isLoading && (
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "4px 0" }}>
+        <div style={{ 
+          display: "flex", 
+          alignItems: "center", 
+          gap: "6px", 
+          padding: "4px 0"
+          }}>
           <div
             style={{
               width: "28px",
               height: "28px",
               borderRadius: "50%",
-              background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+              background: "linear-gradient(135deg, var(--brand), var(--brand))",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               fontSize: "12px",
-              color: "white",
+              color: "var(--text-primary)",
               flexShrink: 0,
             }}
           >
@@ -60,7 +65,7 @@ export default function ChatWindow({ messages, isLoading }) {
             style={{
               padding: "10px 14px",
               borderRadius: "18px 18px 18px 4px",
-              background: "#f3f4f6",
+              background: "var(--bg-input)",
               display: "flex",
               gap: "4px",
               alignItems: "center",
@@ -73,7 +78,7 @@ export default function ChatWindow({ messages, isLoading }) {
                   width: "6px",
                   height: "6px",
                   borderRadius: "50%",
-                  background: "#9ca3af",
+                  background: "var(--text-secondary)",
                   animation: "bounce 1.2s infinite",
                   animationDelay: `${i * 0.2}s`,
                   display: "inline-block",

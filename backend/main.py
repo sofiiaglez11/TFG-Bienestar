@@ -57,13 +57,10 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
-@app.get("/api/test-db")
-async def test_db():
-    # Intenta insertar y luego borrar un documento de prueba
-    result = await db_service.users.insert_one({"test": "conexion ok"})
-    await db_service.users.delete_one({"_id": result.inserted_id})
-    return {"message": "Conexión a MongoDB funcionando"}
 
 @app.post("/api/chat")
 async def handle_chat(request: ChatRequest):
@@ -95,6 +92,10 @@ async def handle_chat(request: ChatRequest):
         print(f"Error crítico en handle_chat: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
  
+@app.post("/api/login")
+async def login(request: LoginRequest):
+    # Lógica de inicio de sesión
+    pass
 
 @app.post("/api/chat/reset")
 async def reset_chat():

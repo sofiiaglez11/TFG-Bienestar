@@ -23,8 +23,8 @@ export default function ChatInput({ onSend, isLoading }) {
     <div
       style={{
         padding: "16px",
-        borderTop: "1px solid #e5e7eb",
-        background: "white",
+        borderTop: "1px solid var(--border)",
+        background: "var(--bg-surface)",
         display: "flex",
         gap: "10px",
         alignItems: "flex-end",
@@ -39,7 +39,7 @@ export default function ChatInput({ onSend, isLoading }) {
         style={{
           flex: 1,
           resize: "none",
-          border: "1px solid #e5e7eb",
+          border: "1px solid var(--border)",
           borderRadius: "12px",
           padding: "10px 14px",
           fontSize: "14px",
@@ -48,12 +48,12 @@ export default function ChatInput({ onSend, isLoading }) {
           lineHeight: "1.5",
           maxHeight: "120px",
           overflowY: "auto",
-          color: "#111827",
-          background: "#f9fafb",
+          color: "var(--text-primary)",
+          background: "var(--bg-input)",
           transition: "border-color 0.15s",
         }}
-        onFocus={(e) => (e.target.style.borderColor = "#6366f1")}
-        onBlur={(e) => (e.target.style.borderColor = "#e5e7eb")}
+        onFocus={(e) => (e.target.style.borderColor = "var(--border-focus)")}
+        onBlur={(e) => (e.target.style.borderColor = "var(--border) ")}
       />
 
       <button
@@ -64,8 +64,8 @@ export default function ChatInput({ onSend, isLoading }) {
           height: "40px",
           borderRadius: "10px",
           border: "none",
-          background: !text.trim() || isLoading ? "#e5e7eb" : "#6366f1",
-          color: "white",
+          background: !text.trim() || isLoading ? "var(--bg-input)" : "var(--brand)",
+          color: "var(--text-primary)",
           cursor: !text.trim() || isLoading ? "not-allowed" : "pointer",
           display: "flex",
           alignItems: "center",
@@ -77,7 +77,7 @@ export default function ChatInput({ onSend, isLoading }) {
         aria-label="Enviar mensaje"
       >
         <Send size={16} />
-        
+
       </button>
     </div>
   );
