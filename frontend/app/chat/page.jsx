@@ -37,7 +37,7 @@ export default function ChatPage() {
       const assistantMessage = { role: "assistant", content: data.response };
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (err) {
-      setError("eRROR EN EL SERVIDOR"); 
+      setError("eRROR EN EL SERVIDOR");
       console.error(err);
     } finally {
       setIsLoading(false);

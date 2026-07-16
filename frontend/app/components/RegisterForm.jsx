@@ -1,21 +1,14 @@
 import { useState } from 'react';
 
-export default function LoginForm({ onLogin }) {
+export default function RegisterForm({ onRegister }) {
+    const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
 
     const handleSubmit = async (e) => {
-
-        e.preventDefault(); // para evitar que la página se recargue al enviar
-
-        await onLogin(email, password);
-
-        // console.log("Datos enviaodos:", { email, password });
-
-        // alert("Intentando iniciar sesión con:\nEmail: " + email + "\nPassword: " + password);
-
-    }
-
+        e.preventDefault();
+        await onRegister(name, email, password);
+    };
 
     return (
         <form onSubmit={handleSubmit}
@@ -29,9 +22,19 @@ export default function LoginForm({ onLogin }) {
                 flexDirection: 'column',
                 width: '90%',
                 maxWidth: '600px',
-                margin: '0 auto'
-
+                margin: '0 auto',
+                gap: '8px',
             }}>
+
+            <label htmlFor="name">Nombre:</label>
+            <input
+                type="text"
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+            />
+
             <label htmlFor="email">Email:</label>
             <input
                 type="email"
@@ -41,7 +44,7 @@ export default function LoginForm({ onLogin }) {
                 required
             />
 
-            <label htmlFor="password">Password:</label>
+            <label htmlFor="password">Contraseña:</label>
             <input
                 type="password"
                 id="password"
@@ -50,7 +53,7 @@ export default function LoginForm({ onLogin }) {
                 required
             />
 
-            <button type="submit" style={{ marginTop: '20px' }}>Login</button>
+            <button type="submit" style={{ marginTop: '12px' }}>Crear cuenta</button>
         </form>
     );
 }

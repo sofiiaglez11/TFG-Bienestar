@@ -23,8 +23,8 @@ db_service = DatabaseService()
 mcp_client = MCPClientService()
 
 
-# ACTIVE_MODEL = "openai" 
-ACTIVE_MODEL = "gemini"
+ACTIVE_MODEL = "openai" 
+# ACTIVE_MODEL = "gemini"
 
 if ACTIVE_MODEL == "gemini":
     ai_chatbot = GeminiService()
