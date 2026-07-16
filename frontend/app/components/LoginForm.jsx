@@ -25,7 +25,8 @@ export default function LoginForm() {
                 color: 'var(--text-primary)',
                 display: 'flex',
                 flexDirection: 'column',
-                width: '300px',
+                width: '90%',
+                maxWidth: '600px',
                 margin: '0 auto'
 
             }}>

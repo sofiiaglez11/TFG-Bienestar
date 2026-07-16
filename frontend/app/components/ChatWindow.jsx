@@ -39,23 +39,23 @@ export default function ChatWindow({ messages, isLoading }) {
       ))}
 
       {isLoading && (
-        <div style={{ 
-          display: "flex", 
-          alignItems: "center", 
-          gap: "6px", 
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
           padding: "4px 0"
-          }}>
+        }}>
           <div
             style={{
               width: "28px",
               height: "28px",
               borderRadius: "50%",
-              background: "linear-gradient(135deg, var(--brand), var(--brand))",
+              background: "var(--avatar-ai-bg)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               fontSize: "12px",
-              color: "var(--text-primary)",
+              color: "white",
               flexShrink: 0,
             }}
           >

@@ -16,6 +16,9 @@
   --text-secondary: #9ca3af;
   --brand: #6366f1;
   --bubble-ai-bg: #f3f4f6;
+  --bubble-user-text: #ffffff;
+  --bubble-user-bg: #6366f1;
+  --avatar-ai-bg: linear-gradient(135deg, #6366f1, #8b5cf6);
 }
 
 
