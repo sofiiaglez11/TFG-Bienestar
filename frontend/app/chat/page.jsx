@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
 
@@ -13,8 +14,27 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const router = useRouter();
+
+  // si no se ha iniciado sesión (no hay token), redirige al usuario a la página de inicio de sesión
+  useEffect(() => {
+    const token = localStorage.getItem("token"); // obtener el token del localStorage
+    if (!token) {
+      router.push("/login"); // redirigir a la página de inicio de sesión
+    }
+  }, [router]); // si cambia el router, se ejecuta de nuevo
+
   const sendMessage = async (text) => {
-    // Add the user's message to the chat history
+
+    const token = localStorage.getItem("token"); // obtener el token del localStorage
+    if (!token) {
+      router.push("/login"); // redirigir a la página de inicio de sesión
+      return;
+    }
+
+
+
+    // Agregar el mensaje del usuario al historial de chat
     const userMessage = { role: "user", content: text };
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
@@ -23,7 +43,10 @@ export default function ChatPage() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify({ message: text }),
       });
 
@@ -42,6 +65,11 @@ export default function ChatPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    router.push("/login");
   };
 
   return (
@@ -80,6 +108,32 @@ export default function ChatPage() {
             Conectado a Clockify
           </div>
         </div>
+
+        {/* Botón de cerrar sesión */}
+        <button
+          onClick={handleLogout}
+          style={{
+            marginLeft: "auto",
+            padding: "6px 12px",
+            background: "transparent",
+            border: "1px solid var(--border)",
+            borderRadius: "6px",
+            color: "var(--text-secondary)",
+            fontSize: "13px",
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.color = "var(--text-primary)";
+            e.currentTarget.style.borderColor = "var(--text-primary)";
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.color = "var(--text-secondary)";
+            e.currentTarget.style.borderColor = "var(--border)";
+          }}
+        >
+          Cerrar sesión
+        </button>
       </div>
 
       {/* Message Area */}

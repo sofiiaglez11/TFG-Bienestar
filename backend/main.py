@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from google.genai import types
 
-# Importamos tus servicios
+
 from services.openai import OpenAIService
 from services.gemini import GeminiService
 from mcp_local.client import MCPClientService
@@ -16,6 +16,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from services.database import DatabaseService
 
 from services.auth import verify_password, create_token, hash_password
+
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import jwt
+from services.auth import SECRET_KEY, ALGORITHM
+
 
 
 # Servicios de MCP y de la Base de DAtos
@@ -47,6 +53,29 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="TFG Bienestar", lifespan=lifespan)
+
+# ESQUEMA DE SEGURIDAD
+security = HTTPBearer()
+
+async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+    """
+    Coge el token de la cabecera, 
+    verifica que sea válido y devuelve el ID del usuario.
+    """
+    token = credentials.credentials
+    try:
+        # Intentamos descifrar el token con nuestra clave secreta
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Token inválido: falta el usuario")
+        return user_id
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="El token ha caducado. Vuelve a iniciar sesión.")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Token inválido o corrupto.")
+
+
  
 app.add_middleware(
     CORSMiddleware,
@@ -77,28 +106,44 @@ class RegisterRequest(BaseModel):
 
 
 @app.post("/api/chat")
-async def handle_chat(request: ChatRequest):
+async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_user_id)):
     try:
 
         # Obtenemos la lista de herramientas disponibles en el MCP
-        # las pasamos a la configuración del agente para que pueda usarlas
-        # sin formato (raw) para que el traductor de cada proveedor las adapte a su SDK
-        mcp_tools = mcp_client.tools
-        tools_raw = [
-            {
+        # y ocultamos el campo "user_id" para que la IA no se lo invente.
+        tools_raw = []
+        for tool in mcp_client.tools:
+            schema = dict(tool.inputSchema) if tool.inputSchema else {}
+            if "properties" in schema and "user_id" in schema["properties"]:
+                props = dict(schema["properties"])
+                del props["user_id"]
+                schema["properties"] = props
+                
+                if "required" in schema and "user_id" in schema["required"]:
+                    reqs = list(schema["required"])
+                    reqs.remove("user_id")
+                    schema["required"] = reqs
+                    
+            tools_raw.append({
                 "name": tool.name,
                 "description": tool.description or f"Ejecutar {tool.name}",
-                "parameters": tool.inputSchema
-            }
-            for tool in mcp_tools
-        ]
+                "parameters": schema
+            })
 
         ai_chatbot.set_config(tools_raw)
-        
+
+        #NOTE: PARA DEPURACIÓN
+        print(f"Mensaje recibido del usuario con ID: {user_id}")
+
+        async def custom_tool_executor(name: str, arguments: dict):
+            # Inyectamos el user_id del token en los argumentos de la herramienta
+            if name != "get_agent_capabilities":
+                arguments["user_id"] = user_id
+            return await mcp_client.call_tool(name, arguments)
 
         result = await ai_chatbot.run_agentic_conversation(
             user_message=request.message,
-            tool_executor=mcp_client.call_tool
+            tool_executor=custom_tool_executor
         )
         return {"response": result.text}
 

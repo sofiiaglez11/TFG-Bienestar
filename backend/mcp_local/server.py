@@ -63,48 +63,48 @@ async def get_agent_capabilities() -> str:
  
 # TOOLS FOR PLANNING AND ORGANIZATION
 
-@mcp.tool()
-async def get_user_schedule():
-    """
-    Devuelve un resumen del horario del usuario, incluyendo asignaturas, tareas y deadlines.
-    Úsala cuando el usuario pregunte 'muéstrame mi horario' o 'qué tengo planeado'.
-    """
-    try:
-        subjects = await db_service.get_subjects_by_user("default_user")
-        periods = await db_service.get_periods_by_user("default_user")
-        tasks = []
-        for subject in subjects:
-            subject_tasks = await db_service.get_tasks_by_subject(subject["_id"])
-            tasks.extend(subject_tasks)
+# @mcp.tool()
+# async def get_user_schedule(user_id: str):
+#     """
+#     Devuelve un resumen del horario del usuario, incluyendo asignaturas, tareas y deadlines.
+#     Úsala cuando el usuario pregunte 'muéstrame mi horario' o 'qué tengo planeado'.
+#     """
+#     try:
+#         subjects = await db_service.get_subjects_by_user(user_id)
+#         periods = await db_service.get_periods_by_user(user_id)
+#         tasks = []
+#         for subject in subjects:
+#             subject_tasks = await db_service.get_tasks_by_subject(subject["_id"])
+#             tasks.extend(subject_tasks)
  
-        result = "Resumen de tu planificación:\n"
-        result += "\nAsignaturas:\n"
-        for s in subjects:
-            result += f"- {s['name']}\n"
+#         result = "Resumen de tu planificación:\n"
+#         result += "\nAsignaturas:\n"
+#         for s in subjects:
+#             result += f"- {s['name']}\n"
  
-        result += "\nPeriodos:\n"
-        for p in periods:
-            marca = " (activo)" if p.get("is_active") else ""
-            result += f"- {p['name']}{marca}\n"
+#         result += "\nPeriodos:\n"
+#         for p in periods:
+#             marca = " (activo)" if p.get("is_active") else ""
+#             result += f"- {p['name']}{marca}\n"
  
-        result += "\nTareas:\n"
-        for t in tasks:
-            estado = "✅" if t["completed"] else "⏳"
-            result += f"- {estado} {t['title']} (de {t['subject_id']})\n"
+#         result += "\nTareas:\n"
+#         for t in tasks:
+#             estado = "✅" if t["completed"] else "⏳"
+#             result += f"- {estado} {t['title']} (de {t['subject_id']})\n"
  
-        return result
-    except Exception as e:
-        return f"Error al obtener el resumen del horario: {str(e)}"
+#         return result
+#     except Exception as e:
+#         return f"Error al obtener el resumen del horario: {str(e)}"
     
 
 @mcp.tool()
-async def get_user_progress():
+async def get_user_progress(user_id: str):
     """
     Devuelve un resumen del progreso del usuario en sus asignaturas y tareas.
     Úsala cuando el usuario pregunte 'cuánto he avanzado' o 'qué progreso tengo'.
     """
     try:
-        subjects = await db_service.get_subjects_by_user("default_user")
+        subjects = await db_service.get_subjects_by_user(user_id)
         progress_summary = []
  
         for s in subjects:
@@ -119,13 +119,13 @@ async def get_user_progress():
     
 
 @mcp.tool()
-async def get_time_spent_summary():
+async def get_time_spent_summary(user_id: str):
     """
     Devuelve un resumen del tiempo total dedicado a cada asignatura.
     Úsala cuando el usuario pregunte 'cuánto tiempo he dedicado a X' o 'resumen de tiempo'.
     """
     try:
-        subjects = await db_service.get_subjects_by_user("default_user")
+        subjects = await db_service.get_subjects_by_user(user_id)
         time_summary = []
  
         for s in subjects:
@@ -145,7 +145,7 @@ async def get_time_spent_summary():
 
 # TOOLS FOR SUBJECTS
 @mcp.tool()
-async def add_subject(name: str, weekly_hours_goal: int = 0, workspace_id: str = None):
+async def add_subject(user_id: str, name: str, weekly_hours_goal: int = 0, workspace_id: str = None):
     """
     Añade una nueva asignatura al sistema.
     IMPORTANTE: Antes de llamar a esta herramienta, asegúrate de tener el nombre
@@ -161,7 +161,7 @@ async def add_subject(name: str, weekly_hours_goal: int = 0, workspace_id: str =
  
         # 2. Guardar la asignatura en MongoDB
         subject = await db_service.create_subject(
-            user_id="default_user",  # TODO: reemplazar por el ID real cuando haya login
+            user_id=user_id,  # TODO: reemplazar por el ID real cuando haya login
             name=name,
             clockify_project_id=clockify_project_id,
             weekly_hours_goal=weekly_hours_goal
@@ -174,7 +174,7 @@ async def add_subject(name: str, weekly_hours_goal: int = 0, workspace_id: str =
  
  
 @mcp.tool()
-async def add_multiple_subjects(names: list[str], workspace_id: str = None):
+async def add_multiple_subjects(user_id: str, names: list[str], workspace_id: str = None):
     try:
         added = []
         skipped = []
@@ -185,7 +185,7 @@ async def add_multiple_subjects(names: list[str], workspace_id: str = None):
  
         for name in names:
             # Comprobar si ya existe en MongoDB
-            existing_subjects = await db_service.get_subjects_by_user("default_user")
+            existing_subjects = await db_service.get_subjects_by_user(user_id)
             if any(s["name"].lower() == name.lower() for s in existing_subjects):
                 skipped.append(name)
                 continue
@@ -201,7 +201,7 @@ async def add_multiple_subjects(names: list[str], workspace_id: str = None):
                 clockify_project_id = project.get("id")
  
             await db_service.create_subject(
-                user_id="default_user",
+                user_id=user_id,
                 name=name,
                 clockify_project_id=clockify_project_id
             )
@@ -219,13 +219,13 @@ async def add_multiple_subjects(names: list[str], workspace_id: str = None):
     
  
 @mcp.tool()
-async def get_subjects():
+async def get_subjects(user_id: str):
     """
     Devuelve la lista de asignaturas del usuario.
     Úsala cuando el usuario pregunte 'Qué asignaturas tengo' o 'Muéstrame mis asignaturas'.
     """
     try:
-        subjects = await db_service.get_subjects_by_user(user_id="default_user")
+        subjects = await db_service.get_subjects_by_user(user_id=user_id)
  
         if not subjects:
             return "No tienes ninguna asignatura registrada todavía."
@@ -245,7 +245,7 @@ async def get_subjects():
 # TOOLS FOR PERIODS
  
 @mcp.tool()
-async def create_period(name: str, start_date: str, end_date: str = None):
+async def create_period(user_id: str, name: str, start_date: str, end_date: str = None):
     """
     Crea un nuevo periodo académico (cuatrimestre, trimestre, curso escolar, o cualquier
     periodo que el usuario quiera usar para organizar sus asignaturas) y lo establece
@@ -257,25 +257,25 @@ async def create_period(name: str, start_date: str, end_date: str = None):
     """
     try:
         period = await db_service.create_period(
-            user_id="default_user",
+            user_id=user_id,
             name=name,
             start_date=start_date,
             end_date=end_date
         )
-        await db_service.set_active_period("default_user", period["_id"])
+        await db_service.set_active_period(user_id, period["_id"])
         return f"Periodo '{name}' creado y establecido como periodo activo."
     except Exception as e:
         return f"Error al crear el periodo: {str(e)}"
  
  
 @mcp.tool()
-async def get_periods():
+async def get_periods(user_id: str):
     """
     Devuelve la lista de periodos académicos del usuario.
     Úsala cuando el usuario pregunte 'qué periodos tengo' o 'muéstrame mis cuatrimestres'.
     """
     try:
-        periods = await db_service.get_periods_by_user("default_user")
+        periods = await db_service.get_periods_by_user(user_id)
         if not periods:
             return "No tienes ningún periodo académico registrado todavía."
  
@@ -290,7 +290,7 @@ async def get_periods():
  
  
 @mcp.tool()
-async def set_current_period(period_name: str):
+async def set_current_period(user_id: str, period_name: str):
     """
     Establece un periodo ya existente como el periodo activo del usuario.
     A partir de ese momento, cuando el usuario hable de sus asignaturas sin especificar
@@ -298,23 +298,23 @@ async def set_current_period(period_name: str):
     Úsala cuando el usuario diga 'cambia al cuatrimestre X' o 'ahora estoy en Y'.
     """
     try:
-        period = await db_service.get_period_by_user_and_name("default_user", period_name)
+        period = await db_service.get_period_by_user_and_name(user_id, period_name)
         if not period:
             return f"No encontré ningún periodo llamado '{period_name}'."
-        await db_service.set_active_period("default_user", period["_id"])
+        await db_service.set_active_period(user_id, period["_id"])
         return f"Periodo activo cambiado a '{period_name}'."
     except Exception as e:
         return f"Error al cambiar de periodo: {str(e)}"
  
  
 @mcp.tool()
-async def get_current_period():
+async def get_current_period(user_id: str):
     """
     Devuelve el periodo académico activo del usuario, si tiene uno definido.
     Úsala cuando el usuario pregunte 'en qué periodo estoy' o 'qué cuatrimestre tengo activo'.
     """
     try:
-        period = await db_service.get_active_period("default_user")
+        period = await db_service.get_active_period(user_id)
         if not period:
             return "No tienes ningún periodo activo ahora mismo."
         fin = period.get("end_date") or "sin fecha de fin"
@@ -327,14 +327,14 @@ async def get_current_period():
 # TOOLS FOR SUBJECTS (adicionales)
  
 @mcp.tool()
-async def archive_subject(subject_name: str):
+async def archive_subject(user_id: str, subject_name: str):
     """
     Archiva una asignatura sin borrar su historial (tareas, tiempo dedicado, deadlines).
     Úsala cuando el usuario ya no vaya a trabajar más en una asignatura, por ejemplo al
     terminar un cuatrimestre, en vez de eliminarla del todo.
     """
     try:
-        subject = await _find_subject_by_name("default_user", subject_name)
+        subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
         await db_service.update_subject(subject["_id"], is_archived=True)
@@ -344,16 +344,16 @@ async def archive_subject(subject_name: str):
  
  
 @mcp.tool()
-async def assign_subject_to_period(subject_name: str, period_name: str):
+async def assign_subject_to_period(user_id: str, subject_name: str, period_name: str):
     """
     Asocia una asignatura ya existente a un periodo académico ya existente.
     Úsala si el usuario añadió una asignatura sin periodo y luego quiere organizarla dentro de uno.
     """
     try:
-        subject = await _find_subject_by_name("default_user", subject_name)
+        subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
-        period = await db_service.get_period_by_user_and_name("default_user", period_name)
+        period = await db_service.get_period_by_user_and_name(user_id, period_name)
         if not period:
             return f"No encontré ningún periodo llamado '{period_name}'."
         await db_service.update_subject(subject["_id"], period_id=period["_id"])
@@ -366,7 +366,7 @@ async def assign_subject_to_period(subject_name: str, period_name: str):
 # TOOLS FOR TASKS
  
 @mcp.tool()
-async def add_task(subject_name: str, title: str, description: str = "",
+async def add_task(user_id: str, subject_name: str, title: str, description: str = "",
                     due_date: str = None, parent_task_title: str = None,
                     workspace_id: str = None):
     # """
@@ -395,7 +395,7 @@ async def add_task(subject_name: str, title: str, description: str = "",
     '''
     
     try:
-        subject = await _find_subject_by_name("default_user", subject_name)
+        subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
  
@@ -418,7 +418,7 @@ async def add_task(subject_name: str, title: str, description: str = "",
             clockify_task_id = clockify_task.get("id")
  
         await db_service.create_task(
-            user_id="default_user",
+            user_id=user_id,
             subject_id=subject["_id"],
             title=title,
             description=description,
@@ -432,14 +432,14 @@ async def add_task(subject_name: str, title: str, description: str = "",
  
  
 @mcp.tool()
-async def get_tasks(subject_name: str, only_pending: bool = False):
+async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False):
     """
     Devuelve la lista de tareas de una asignatura.
     Úsala cuando el usuario pregunte 'qué tareas tengo de X' o 'muéstrame las tareas de X'.
     only_pending=True para mostrar solo las que faltan por completar.
     """
     try:
-        subject = await _find_subject_by_name("default_user", subject_name)
+        subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
  
@@ -458,13 +458,13 @@ async def get_tasks(subject_name: str, only_pending: bool = False):
  
  
 @mcp.tool()
-async def complete_task(subject_name: str, task_title: str):
+async def complete_task(user_id: str, subject_name: str, task_title: str):
     """
     Marca una tarea como completada.
     Úsala cuando el usuario diga 'ya terminé X' o 'marca X como hecha'.
     """
     try:
-        subject = await _find_subject_by_name("default_user", subject_name)
+        subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
  
@@ -493,7 +493,7 @@ async def edit_task(subject_name: str, task_title:str, description: str = "",
 # TOOLS FOR TIME ENTRIES
  
 @mcp.tool()
-async def start_timer(subject_name: str, task_title: str = None, description: str = "",
+async def start_timer(user_id: str, subject_name: str, task_title: str = None, description: str = "",
                        workspace_id: str = None):
     """
     Inicia un cronómetro activo, ahora mismo, dedicado a una asignatura (y opcionalmente
@@ -503,11 +503,11 @@ async def start_timer(subject_name: str, task_title: str = None, description: st
     usuario que debe pararlo antes de empezar uno nuevo (usa stop_timer).
     """
     try:
-        existing = await db_service.get_active_time_entry("default_user")
+        existing = await db_service.get_active_time_entry(user_id)
         if existing:
             return "Ya tienes un cronómetro en marcha. Para antes uno con stop_timer."
  
-        subject = await _find_subject_by_name("default_user", subject_name)
+        subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
  
@@ -533,7 +533,7 @@ async def start_timer(subject_name: str, task_title: str = None, description: st
         # Y lo reflejamos en nuestra propia base de datos
         start_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         await db_service.create_time_entry(
-            user_id="default_user",
+            user_id=user_id,
             subject_id=subject["_id"],
             task_id=task_id,
             start_time=start_time,
@@ -547,13 +547,13 @@ async def start_timer(subject_name: str, task_title: str = None, description: st
  
  
 @mcp.tool()
-async def stop_timer():
+async def stop_timer(user_id: str):
     """
     Detiene el cronómetro que esté en marcha ahora mismo.
     Úsala cuando el usuario diga 'para el cronómetro' o 'ya he terminado de estudiar'.
     """
     try:
-        entry = await db_service.get_active_time_entry("default_user")
+        entry = await db_service.get_active_time_entry(user_id)
         if not entry:
             return "No tienes ningún cronómetro en marcha ahora mismo."
  
@@ -564,7 +564,7 @@ async def stop_timer():
  
  
 @mcp.tool()
-async def log_time_entry(subject_name: str, start_time: str, end_time: str,
+async def log_time_entry(user_id: str, subject_name: str, start_time: str, end_time: str,
                           task_title: str = None, description: str = ""):
     """
     Registra manualmente una sesión de estudio ya finalizada, con hora de inicio y fin
@@ -579,7 +579,7 @@ async def log_time_entry(subject_name: str, start_time: str, end_time: str,
         if not end_time.endswith('Z') and '+' not in end_time:
             end_time += 'Z'
  
-        subject = await _find_subject_by_name("default_user", subject_name)
+        subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
  
@@ -591,7 +591,7 @@ async def log_time_entry(subject_name: str, start_time: str, end_time: str,
             task_id = task["_id"]
  
         await db_service.create_time_entry(
-            user_id="default_user",
+            user_id=user_id,
             subject_id=subject["_id"],
             task_id=task_id,
             start_time=start_time,
@@ -605,14 +605,14 @@ async def log_time_entry(subject_name: str, start_time: str, end_time: str,
 
  
 @mcp.tool()
-async def get_time_summary(subject_name: str):
+async def get_time_summary(user_id: str, subject_name: str):
     """
     Devuelve el resumen de tiempo dedicado a una asignatura, con sus últimas sesiones.
     Úsala cuando el usuario pregunte 'cuánto tiempo llevo en X' o 'muéstrame mis sesiones de X'.
     devuelve el tiempo dedicado en un formato amigable (horas y minutos) para el usuario.
     """
     try:
-        subject = await _find_subject_by_name("default_user", subject_name)
+        subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
  
@@ -634,7 +634,7 @@ async def get_time_summary(subject_name: str):
 # # TOOLS FOR DEADLINES
  
 # @mcp.tool()
-# async def add_deadline(title: str, date: str, type: str = "assignment",
+# async def add_deadline(user_id: str, title: str, date: str, type: str = "assignment",
 #                         subject_name: str = None, task_title: str = None):
 #     """
 #     Registra una entrega, examen o fecha importante.
@@ -650,7 +650,7 @@ async def get_time_summary(subject_name: str):
 #         task_id = None
  
 #         if subject_name:
-#             subject = await _find_subject_by_name("default_user", subject_name)
+#             subject = await _find_subject_by_name(user_id, subject_name)
 #             if not subject:
 #                 return f"No encontré ninguna asignatura llamada '{subject_name}'."
 #             subject_id = subject["_id"]
@@ -662,7 +662,7 @@ async def get_time_summary(subject_name: str):
 #                 task_id = task["_id"]
  
 #         await db_service.create_deadline(
-#             user_id="default_user",
+#             user_id=user_id,
 #             title=title,
 #             date=date,
 #             type=type,
@@ -675,13 +675,13 @@ async def get_time_summary(subject_name: str):
  
  
 # @mcp.tool()
-# async def get_deadlines():
+# async def get_deadlines(user_id: str):
 #     """
 #     Devuelve todas las entregas, exámenes y fechas importantes del usuario, ordenadas por fecha.
 #     Úsala cuando el usuario pregunte 'qué entregas tengo' o 'muéstrame mis exámenes'.
 #     """
 #     try:
-#         deadlines = await db_service.get_deadlines_by_user("default_user")
+#         deadlines = await db_service.get_deadlines_by_user(user_id)
 #         if not deadlines:
 #             return "No tienes ninguna entrega o examen registrado todavía."
  
