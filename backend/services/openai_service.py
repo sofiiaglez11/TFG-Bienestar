@@ -2,8 +2,8 @@ import os
 import json
 from openai import AsyncOpenAI  
 from dotenv import load_dotenv
-from services.base_bot import BaseChatbotService
-from services.base_bot import StandardResponse, FunctionCall
+from services.base_chatbot_service import BaseChatbotService
+from services.base_chatbot_service import StandardResponse, FunctionCall
 
 load_dotenv()
 

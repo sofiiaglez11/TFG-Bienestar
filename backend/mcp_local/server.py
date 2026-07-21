@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
  
-from services.clockify import ClockifyService
-from services.database import DatabaseService
+from services.clockify_service import ClockifyService
+from services.database_service import DatabaseService
  
  
 db_service = DatabaseService()

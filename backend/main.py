@@ -5,15 +5,15 @@ from contextlib import asynccontextmanager
 from google.genai import types
 
 
-from services.openai import OpenAIService
-from services.gemini import GeminiService
+from services.openai_service import OpenAIService
+from services.gemini_service import GeminiService
 from mcp_local.client import MCPClientService
 
-from services.base_bot import StandardResponse, FunctionCall
+from services.base_chatbot_service import StandardResponse, FunctionCall
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from services.database import DatabaseService
+from services.database_service import DatabaseService
 
 from services.auth import verify_password, create_token, hash_password
 
