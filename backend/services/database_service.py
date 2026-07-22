@@ -20,6 +20,8 @@ class DatabaseService:
         self.subjects = self.db["subjects"]
         self.tasks = self.db["tasks"]
         self.time_entries = self.db["time_entries"]
+        self.history = self.db["history"]
+        self.wellbeing_entries = self.db["wellbeing_entries"]
         # self.deadlines = self.db["deadlines"]
  
     async def ensure_indexes(self):
@@ -34,7 +36,57 @@ class DatabaseService:
         await self.time_entries.create_index([("task_id", 1)])
         # await self.deadlines.create_index([("user_id", 1), ("date", 1)])
         await self.periods.create_index([("user_id", 1)])
+        await self.history.create_index([("user_id", 1), ("timestamp", -1)])
+        await self.wellbeing_entries.create_index([("user_id", 1), ("date", -1)])
  
+
+    ############################################################################
+    # METHODS FOR HISTORY
+
+    async def get_history(self, user_id: str, limit: int = 50) -> list[dict]:
+        """
+        Recupera los últimos N mensajes de un usuario ordenados cronológicamente.
+        """
+        # Buscamos por user_id y ordenamos por timestamp descendente (más recientes primero)
+        cursor = self.history.find({"user_id": user_id}).sort("timestamp", -1).limit(limit)
+        messages = await cursor.to_list(length=limit)
+
+        # Invertimos la lista para devolverlos en orden cronológico (del más antiguo al más reciente)
+        messages.reverse()
+
+        # Normalizamos los campos de MongoDB a formatos amigables para JSON
+        for msg in messages:
+            msg["_id"] = str(msg["_id"])
+            if isinstance(msg.get("timestamp"), datetime):
+                msg["timestamp"] = msg["timestamp"].isoformat()
+
+        return messages
+
+    async def insert_message(self, user_id: str, role: str, content: str, agent_used: str = None) -> dict:
+        """
+        Guarda un mensaje en la base de datos.
+        - role: 'user' o 'assistant'
+        - content: el texto del mensaje
+        - agent_used: 'ACADEMICO', 'BIENESTAR', 'GENERAL' (opcional)
+        """
+        message_doc = {
+            "user_id": user_id,
+            "role": role,
+            "content": content,
+            "agent_used": agent_used,
+            "timestamp": datetime.now(timezone.utc)
+        }
+
+        result = await self.history.insert_one(message_doc)
+        message_doc["_id"] = str(result.inserted_id)
+        message_doc["timestamp"] = message_doc["timestamp"].isoformat()
+        return message_doc
+
+
+    async def clear_history(self, user_id: str) -> int:
+        """Borra el historial guardado en BD al reiniciar chat."""
+        result = await self.history.delete_many({"user_id": user_id})
+        return result.deleted_count
  
     ############################################################################
     # METHODS FOR USERS
@@ -146,7 +198,7 @@ class DatabaseService:
     # METHODS FOR SUBJECTS
  
     async def create_subject(self, user_id: str, name: str, clockify_project_id: str,
-                              weekly_hours_goal: int = 0, period_id: str = None) -> dict:
+                              weekly_hours_goal: int = 0, period_id: str = None, grade: float = None) -> dict:
         """
         Crea una nueva asignatura asociada a un usuario.
         period_id es opcional: una asignatura puede no pertenecer a ningún periodo
@@ -158,11 +210,13 @@ class DatabaseService:
             "name": name,
             "clockify_project_id": clockify_project_id,
             "weekly_hours_goal": weekly_hours_goal,
+            "grade": grade,
             "is_archived": False,
         }
         result = await self.subjects.insert_one(subject)
         subject["_id"] = str(result.inserted_id)
         return subject
+
  
     async def get_subjects_by_user(self, user_id: str, include_archived: bool = False) -> list:
         """Devuelve todas las asignaturas de un usuario (por defecto, sin las archivadas)."""
@@ -376,62 +430,50 @@ class DatabaseService:
  
  
     # ############################################################################
-    # # METHODS FOR DEADLINES
- 
-    # async def create_deadline(self, user_id: str, title: str, date: str,
-    #                            type: str = "assignment", subject_id: str = None,
-    #                            task_id: str = None) -> dict:
+    # # METHODS FOR WELLBEING
+    
+
+    async def create_wellbeing_report(self, user_id: str, date: str, sleep_hours: float, sleep_quality: int, mood_score: int, energy_level: int, notes: str = "") -> dict:
+        """
+        Crea un informe de bienestar del usuario.
+        Úsala cuando el usuario quiera registrar su estado de ánimo o bienestar.
+        """
+        try:
+            wellbeing_entry = {
+                "user_id": user_id,
+                "date": date,
+                "sleep_hours": sleep_hours,
+                "sleep_quality": sleep_quality,
+                "mood_score": mood_score,
+                "energy_level": energy_level,
+                "notes": notes
+            }
+            result = await self.wellbeing_entries.insert_one(wellbeing_entry)
+            wellbeing_entry["_id"] = str(result.inserted_id)
+            return wellbeing_entry
+        except Exception as e:
+            return f"Error al registrar el informe de bienestar: {str(e)}"
+    
+    # async def get_wellbeing_report(self, user_id: str) -> dict:
     #     """
-    #     Crea una entrega, examen o fecha importante.
-    #     type: 'assignment', 'exam' u 'other'.
-    #     date: string en formato ISO 8601 (ej: '2026-07-15').
-    #     subject_id y task_id son opcionales e independientes entre sí:
-    #     - ninguno de los dos -> deadline "libre" (ej. algo administrativo)
-    #     - solo subject_id -> deadline general de la asignatura (ej. examen final)
-    #     - subject_id + task_id -> deadline de una tarea concreta
+    #     Obtiene el informe de bienestar del usuario.
+    #     Úsala cuando el usuario quiera consultar su estado de ánimo o bienestar.
     #     """
-    #     deadline = {
-    #         "user_id": user_id,
-    #         "subject_id": subject_id,
-    #         "task_id": task_id,
-    #         "title": title,
-    #         "date": date,
-    #         "type": type
-    #     }
-    #     result = await self.deadlines.insert_one(deadline)
-    #     deadline["_id"] = str(result.inserted_id)
-    #     return deadline
- 
-    # async def get_deadlines_by_user(self, user_id: str) -> list:
-    #     """Devuelve todas las entregas y exámenes de un usuario, ordenados por fecha."""
-    #     cursor = self.deadlines.find({"user_id": user_id}).sort("date", 1)
-    #     deadlines = await cursor.to_list(100)
-    #     for d in deadlines:
-    #         d["_id"] = str(d["_id"])
-    #     return deadlines
- 
-    # async def get_deadlines_by_subject(self, subject_id: str) -> list:
-    #     """Devuelve las entregas y exámenes de una asignatura concreta, ordenados por fecha."""
-    #     cursor = self.deadlines.find({"subject_id": subject_id}).sort("date", 1)
-    #     deadlines = await cursor.to_list(100)
-    #     for d in deadlines:
-    #         d["_id"] = str(d["_id"])
-    #     return deadlines
- 
-    # async def get_deadline_by_id(self, deadline_id: str) -> dict | None:
-    #     """Devuelve un deadline por su ID."""
-    #     deadline = await self.deadlines.find_one({"_id": ObjectId(deadline_id)})
-    #     if deadline:
-    #         deadline["_id"] = str(deadline["_id"])
-    #     return deadline
- 
-    # async def update_deadline(self, deadline_id: str, **fields):
-    #     """Actualiza campos sueltos de un deadline (title, date, type...)."""
-    #     if not fields:
-    #         return
-    #     await self.deadlines.update_one({"_id": ObjectId(deadline_id)}, {"$set": fields})
- 
-    # async def delete_deadline(self, deadline_id: str):
-    #     """Elimina una entrega o examen por su ID."""
-    #     await self.deadlines.delete_one({"_id": ObjectId(deadline_id)})
+    #     try:
+    #         report = await self.wellbeing_entries.find_one({"user_id": user_id})
+    #         if report:
+    #             report["_id"] = str(report["_id"])
+    #         return report
+    #     except Exception as e:
+    #         return f"Error al obtener el informe de bienestar: {str(e)}"
+
+    async def get_latest_wellbeing_report(self, user_id: str) -> dict | None:
+        """Devuelve el últomo informe registrado ordenado por fecha."""
+        report = await self.wellbeing_entries.find_one(
+            {"user_id": user_id},
+            sort=[("date", -1)]
+        )
+        if report:
+            report["_id"] = str(report["_id"])
+        return report
  

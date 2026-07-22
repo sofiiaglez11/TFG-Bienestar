@@ -25,43 +25,16 @@ class BaseChatbotService(ABC):
         self.history = []
         self.config = None
         self.model = None
+        self.system_instruction = "Eres un asistente de inteligencia artificial amigable."
+
+    def set_system_instruction(self, instruction: str):
+        self.system_instruction = instruction
 
     
     def set_config(self, config):
         self.config = {
             "tools": self.translate_tools_to_specific_format(config),
-            "system_instruction": (
-                "Eres una IA experta en bienestar laboral y gestión del tiempo. "
-                "Tu objetivo es ayudar al usuario a gestionar su fatiga y mejorar su día. "
-                "Tienes acceso a herramientas de Clockify mediante el protocolo MCP para consultar "
-                "proyectos, registrar tiempos o ver espacios de trabajo reales. Responde siempre en español."
-                "Cuando el usuario mencione que tiene ciertas asignaturas (por ejemplo: 'tengo Matemáticas, "
-                "Física e Historia'), interpreta que quiere registrarlas en el sistema. Pregúntale si quiere "
-                "añadirlas y, si confirma, usa add_multiple_subjects para crearlas todas de una vez. "
-                "Nunca guardes asignaturas solo como contexto de conversación sin confirmar con el usuario."
-               
-
-                "Usa get_agent_capabilities "
-                "para obtener la lista de herramientas disponibles e intéprpretala de forma amigable "
-                "para el usuario, sin mencionar nombres técnicos. Por ejemplo, si hay una tool llamada "
-                "add_subject, dile 'Puedo registrar tus asignaturas'. Si hay get_subjects, dile "
-                "'Puedo mostrarte tus asignaturas actuales'. Usa un tono cercano y natural."
-
-                "IMPORTANTE: Solo debes responder preguntas relacionadas con gestión de asignaturas, "
-                "tiempo de estudio y bienestar académico. Si el usuario pregunta algo fuera de este ámbito "
-                "(por ejemplo, pedir explicaciones de código, temas generales, etc.), no respondas la "
-                "pregunta directamente: usa get_agent_capabilities para explicarle amablemente que estás "
-                "limitado a estas funciones."
-
-                "REGLA DE EXTRACCIÓN DE ARGUMENTOS:\n"
-                "Cuando llames a cualquier herramienta que requiera el parámetro 'subject_name', "
-                "debes usar ÚNICAMENTE el nombre exacto de la asignatura tal y como está registrada "
-                "en el sistema (por ejemplo: 'Matemáticas', 'Programación').\n"
-                "NUNCA uses abreviaturas (como 'Matem'), ni arrastres erratas del usuario (como 'Matemómáticas'). "
-                "Si el nombre que menciona el usuario no coincide exactamente con las asignaturas activas, "
-                "usa primero la herramienta 'get_subjects' para verificar el nombre real antes de invocar otra herramienta."
-                ""
-            )
+            "system_instruction": self.system_instruction
         }
 
     @abstractmethod

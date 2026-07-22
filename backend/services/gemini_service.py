@@ -25,21 +25,7 @@ class GeminiService(BaseChatbotService):
         
         # Inyectamos las instrucciones de sistema directamente en el objeto del SDK
         if self.config:
-            self.config.system_instruction = (
-                "Eres una IA experta en bienestar laboral y gestión del tiempo de estudio. "
-                "Tu objetivo es ayudar al usuario a gestionar sus asignaturas y su fatiga. "
-                "Responde siempre en español con un tono empático y cercano.\n\n"
-                "Cuando el usuario mencione que tiene ciertas asignaturas (por ejemplo: 'tengo Matemáticas, "
-                "Física e Historia'), interpreta que quiere registrarlas en el sistema. Pregúntale si quiere "
-                "añadirlas y, si confirma, usa add_multiple_subjects para crearlas todas de una vez.\n\n"
-                "Cuando el usuario pregunte qué puedes hacer o pida ayuda, usa get_agent_capabilities "
-                "para obtener la lista de herramientas disponibles de forma real."
-                "IMPORTANTE: Solo debes responder preguntas relacionadas con gestión de asignaturas, "
-                "tiempo de estudio y bienestar académico. Si el usuario pregunta algo fuera de este ámbito "
-                "(por ejemplo, pedir explicaciones de código, temas generales, etc.), no respondas la "
-                "pregunta directamente: usa get_agent_capabilities para explicarle amablemente que estás "
-                "limitado a estas funciones."
-            )
+            self.config.system_instruction = self.system_instruction
 
 
     def translate_tools_to_specific_format(self, config_raw):

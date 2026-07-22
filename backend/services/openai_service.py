@@ -38,9 +38,10 @@ class OpenAIService(BaseChatbotService):
         self.history.append({"role": "user", "content": user_message})
 
     async def call_model(self):
-        messages = [{"role": "system", "content": self.config["system_instruction"]}] + self.history
+        sys_instr = self.config["system_instruction"] if self.config else self.system_instruction
+        messages = [{"role": "system", "content": sys_instr}] + self.history
         kwargs = {"model": self.model, "messages": messages}
-        if self.config.get("tools"):
+        if self.config and self.config.get("tools"):
             kwargs["tools"] = self.config["tools"]
             kwargs["parallel_tool_calls"] = False # para que no de error si intenta hacer llamadads paralelas
         response = await self.client.chat.completions.create(**kwargs)

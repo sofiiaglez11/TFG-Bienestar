@@ -631,72 +631,58 @@ async def get_time_summary(user_id: str, subject_name: str):
  
  
 # ############################################################################
-# # TOOLS FOR DEADLINES
- 
-# @mcp.tool()
-# async def add_deadline(user_id: str, title: str, date: str, type: str = "assignment",
-#                         subject_name: str = None, task_title: str = None):
-#     """
-#     Registra una entrega, examen o fecha importante.
-#     IMPORTANTE: pregunta el título y la fecha si el usuario no los ha dado. No inventes fechas.
-#     subject_name y task_title son opcionales e independientes:
-#     - ninguno -> deadline libre (ej. algo administrativo)
-#     - solo subject_name -> deadline general de la asignatura (ej. examen final)
-#     - ambos -> deadline de una tarea concreta
-#     date debe tener formato ISO 8601 (ej: '2026-07-15'). type: 'assignment', 'exam' u 'other'.
-#     """
-#     try:
-#         subject_id = None
-#         task_id = None
- 
-#         if subject_name:
-#             subject = await _find_subject_by_name(user_id, subject_name)
-#             if not subject:
-#                 return f"No encontré ninguna asignatura llamada '{subject_name}'."
-#             subject_id = subject["_id"]
- 
-#             if task_title:
-#                 task = await _find_task_by_title(subject_id, task_title)
-#                 if not task:
-#                     return f"No encontré ninguna tarea llamada '{task_title}' en '{subject_name}'."
-#                 task_id = task["_id"]
- 
-#         await db_service.create_deadline(
-#             user_id=user_id,
-#             title=title,
-#             date=date,
-#             type=type,
-#             subject_id=subject_id,
-#             task_id=task_id
-#         )
-#         return f"Deadline '{title}' registrado para el {date}."
-#     except Exception as e:
-#         return f"Error al registrar el deadline: {str(e)}"
- 
- 
-# @mcp.tool()
-# async def get_deadlines(user_id: str):
-#     """
-#     Devuelve todas las entregas, exámenes y fechas importantes del usuario, ordenadas por fecha.
-#     Úsala cuando el usuario pregunte 'qué entregas tengo' o 'muéstrame mis exámenes'.
-#     """
-#     try:
-#         deadlines = await db_service.get_deadlines_by_user(user_id)
-#         if not deadlines:
-#             return "No tienes ninguna entrega o examen registrado todavía."
- 
-#         result = "Tus próximas fechas importantes:\n"
-#         for d in deadlines:
-#             result += f"- {d['date']}: {d['title']} ({d['type']})\n"
-#         return result
-#     except Exception as e:
-#         return f"Error al obtener los deadlines: {str(e)}"
- 
- 
- 
+# TOOLS FOR WELLBEING
 
 
+@mcp.tool()
+async def wb_add_wellbeing_report(user_id: str, date: str, sleep_hours: float, sleep_quality: int, mood_score: int, energy_level: int, notes: str = ""):
+    """
+    Registra un informe de bienestar del usuario.
+    Úsala cuando el usuario quiera registrar su estado de ánimo o bienestar.
+    """
+    try:
+        await db_service.create_wellbeing_report(
+            user_id=user_id,
+            date=date,
+            sleep_hours=sleep_hours,
+            sleep_quality=sleep_quality,
+            mood_score=mood_score,
+            energy_level=energy_level,
+            notes=notes
+        )
+        return "Informe de bienestar registrado correctamente."
+    except Exception as e:
+        return f"Error al registrar el informe de bienestar: {str(e)}"
 
+
+@mcp.tool()
+async def wb_get_wellbeing_report(user_id: str):
+    """
+    Obtiene el informe de bienestar del usuario.
+    Úsala cuando el usuario quiera consultar su estado de ánimo o bienestar.
+    """
+    try:
+        report = await db_service.get_wellbeing_report(user_id)
+        if not report:
+            return "No tienes ningún informe de bienestar registrado todavía."
+        return report
+    except Exception as e:
+        return f"Error al obtener el informe de bienestar: {str(e)}"
+
+
+@mcp.tool()
+async def wb_get_wellbeing_trends(user_id: str):
+    """
+    Obtiene las tendencias de bienestar del usuario.
+    Úsala cuando el usuario quiera consultar las tendencias de su estado de ánimo o bienestar.
+    """
+    try:
+        trends = await db_service.get_wellbeing_trends(user_id)
+        if not trends:
+            return "No tienes ninguna tendencia de bienestar registrada todavía."
+        return trends
+    except Exception as e:
+        return f"Error al obtener las tendencias de bienestar: {str(e)}"
 
 
 if __name__ == "__main__":
