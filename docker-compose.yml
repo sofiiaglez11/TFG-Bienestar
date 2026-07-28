@@ -1,0 +1,29 @@
+services:
+  # BACKEND FASTAPI
+  backend:
+    build:
+      context: ./backend
+    container_name: tfg_backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    networks:
+      - tfg_network
+
+  # FRONTEND NEXT.JS
+  frontend:
+    build:
+      context: ./frontend
+    container_name: tfg_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - tfg_network
+
+networks:
+  tfg_network:
