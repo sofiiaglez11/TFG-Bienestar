@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
+import ClockifyConfigModal from "../components/ClockifyConfigModal";
+import StudentDashboard from "../components/StudentDashboard";
 
 const BACKEND_URL = "http://localhost:8000";
 
@@ -11,6 +13,9 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showClockifyModal, setShowClockifyModal] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
+  const [clockifyConnected, setClockifyConnected] = useState(false);
 
   const router = useRouter();
 
@@ -21,6 +26,23 @@ export default function ChatPage() {
       router.push("/login");
       return;
     }
+
+    // Comprobar si el usuario tiene Clockify conectado
+    const checkClockifyStatus = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/user/clockify-status`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setClockifyConnected(data.connected);
+        }
+      } catch (err) {
+        console.error("Error al comprobar estado de Clockify:", err);
+      }
+    };
+
+    checkClockifyStatus();
 
     const loadChatHistory = async () => {
       setIsLoading(true);
@@ -204,9 +226,33 @@ export default function ChatPage() {
         </div>
 
         {/* Acciones del Header */}
-        <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
-          {/* <button
-            onClick={handleResetChat}
+        <div style={{ marginLeft: "auto", display: "flex", gap: "8px", alignItems: "center" }}>
+
+          {/* Indicador + botón de Clockify */}
+          <button
+            onClick={() => setShowClockifyModal(true)}
+            title={clockifyConnected ? "Clockify conectado" : "Conectar Clockify"}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "6px 12px",
+              background: clockifyConnected ? "#f0fdf4" : "#fef2f2",
+              border: `1px solid ${clockifyConnected ? "#bbf7d0" : "#fecaca"}`,
+              borderRadius: "6px",
+              color: clockifyConnected ? "#166534" : "#991b1b",
+              fontSize: "13px",
+              cursor: "pointer",
+              fontWeight: "500",
+            }}
+          >
+            <span style={{ fontSize: "10px" }}>{clockifyConnected ? "●" : "●"}</span>
+            {clockifyConnected ? "Clockify ✓" : "Conectar Clockify"}
+          </button>
+
+          {/* Botón Dashboard */}
+          <button
+            onClick={() => setShowDashboard(true)}
             style={{
               padding: "6px 12px",
               background: "transparent",
@@ -215,10 +261,10 @@ export default function ChatPage() {
               color: "var(--text-secondary)",
               fontSize: "13px",
               cursor: "pointer",
-            }}0
+            }}
           >
-            Vaciar chat
-          </button> */}
+            📊 Dashboard
+          </button>
 
           <button
             onClick={handleLogout}
@@ -259,15 +305,33 @@ export default function ChatPage() {
 
       {/* Input */}
       <ChatInput onSend={sendMessage} isLoading={isLoading} />
+
+      {/* Modals */}
+      <ClockifyConfigModal
+        isOpen={showClockifyModal}
+        onClose={() => {
+          setShowClockifyModal(false);
+          // Refrescar estado de conexión al cerrar el modal
+          const token = localStorage.getItem("token");
+          if (token) {
+            fetch(`${BACKEND_URL}/api/user/clockify-status`, {
+              headers: { Authorization: `Bearer ${token}` },
+            })
+              .then((r) => r.json())
+              .then((d) => setClockifyConnected(d.connected))
+              .catch(() => { });
+          }
+        }}
+      />
+
+      <StudentDashboard
+        isOpen={showDashboard}
+        onClose={() => setShowDashboard(false)}
+      />
     </div>
   );
 }
 
-
-// "use client";
-
-// import { useState, useEffect } from "react";
-// import { useRouter } from "next/navigation";
 // import ChatWindow from "../components/ChatWindow";
 // import ChatInput from "../components/ChatInput";
 

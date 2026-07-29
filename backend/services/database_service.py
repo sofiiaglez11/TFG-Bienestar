@@ -98,29 +98,61 @@ class DatabaseService:
             "name": name,
             "password": hashed_password,
             "current_period_id": None,
-            "clockify_api_key": None
+            "clockify": None
         }
         result = await self.users.insert_one(user)
         user["_id"] = str(result.inserted_id)
         return user
- 
+
     async def get_user_by_email(self, email: str) -> dict | None:
         """Busca un usuario por su email."""
-        return await self.users.find_one({"email": email})
- 
-    async def update_clockify_key(self, user_id: str, api_key: str):
-        """Actualiza la API key de Clockify de un usuario."""
+        user = await self.users.find_one({"email": email})
+        if user:
+            user["_id"] = str(user["_id"])
+        return user
+
+    async def get_user_by_id(self, user_id: str) -> dict | None:
+        """Busca un usuario por su ID."""
+        try:
+            user = await self.users.find_one({"_id": ObjectId(user_id)})
+            if user:
+                user["_id"] = str(user["_id"])
+            return user
+        except Exception:
+            return None
+
+    
+    async def update_clockify_credentials(self, user_id: str, api_key: str, workspace_id: str = None):
+        """Actualiza la API Key y Workspace de Clockify del usuario."""
+        clockify_data = {
+            "api_key": api_key,
+            "workspace_id": workspace_id,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
         await self.users.update_one(
             {"_id": ObjectId(user_id)},
-            {"$set": {"clockify_api_key": api_key}}
+            {"$set": {"clockify": clockify_data}}
         )
- 
+        return clockify_data
+
+    async def update_clockify_key(self, user_id: str, api_key: str):
+        """Compatibilidad: Actualiza la API key de Clockify de un usuario."""
+        return await self.update_clockify_credentials(user_id=user_id, auth_type="api_key", token=api_key)
+
     async def update_current_period(self, user_id: str, period_id: str):
         """Actualiza el periodo académico actual de un usuario."""
         await self.users.update_one(
             {"_id": ObjectId(user_id)},
             {"$set": {"current_period_id": period_id}}
         )
+
+    async def update_subject_grade(self, subject_id: str, grade: float):
+        """Actualiza la nota/calificación de una asignatura."""
+        await self.subjects.update_one(
+            {"_id": ObjectId(subject_id)},
+            {"$set": {"grade": grade}}
+        )
+        return True
  
  
     ############################################################################
@@ -477,3 +509,16 @@ class DatabaseService:
             report["_id"] = str(report["_id"])
         return report
  
+    async def get_wellbeing_report(self, user_id: str) -> dict | None:
+        """Devuelve el informe de bienestar más reciente del usuario."""
+        return await self.get_latest_wellbeing_report(user_id)
+
+    async def get_wellbeing_trends(self, user_id: str) -> list:
+        """Devuelve los últimos 7 informes de bienestar ordenados por fecha."""
+        cursor = self.wellbeing_entries.find(
+            {"user_id": user_id}
+        ).sort("date", -1).limit(7)
+        entries = await cursor.to_list(7)
+        for e in entries:
+            e["_id"] = str(e["_id"])
+        return entries

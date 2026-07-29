@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -15,6 +16,7 @@ from services.base_chatbot_service import StandardResponse, FunctionCall
 from fastapi.middleware.cors import CORSMiddleware
 
 from services.database_service import DatabaseService
+from services.clockify_service import ClockifyService
 
 from services.auth import verify_password, create_token, hash_password
 
@@ -145,6 +147,27 @@ class RegisterRequest(BaseModel):
     email: str
     name: str
     password: str
+
+from typing import Optional
+from pydantic import BaseModel, model_validator
+
+class ClockifyCredentialsRequest(BaseModel):
+    api_key: Optional[str] = None
+    workspace_id: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_payload(cls, data):
+        if isinstance(data, dict):
+            # Normaliza api_key buscando variantes comunes
+            key = data.get("api_key") or data.get("apiKey") or data.get("token")
+            if not key:
+                raise ValueError("Se requiere la clave API de Clockify (api_key, apiKey o token).")
+            data["api_key"] = key
+        return data
+
+class SubjectGradeRequest(BaseModel):
+    grade: float
 
 
 ##################################################################
@@ -313,3 +336,99 @@ async def reset_chat(user_id: str = Depends(get_current_user_id)):
         "message": "Conversación reiniciada correctamente", 
         "deleted_messages": deleted_count
     }
+
+
+
+# Endpoint actualizado para recibir la API key:
+@app.post("/api/user/clockify-credentials")
+async def set_clockify_credentials(request: ClockifyCredentialsRequest, user_id: str = Depends(get_current_user_id)):
+    """
+    Guarda la API Key de Clockify del usuario y verifica la conexión.
+    """
+    try:
+        cs = ClockifyService(api_key=request.api_key, workspace_id=request.workspace_id)
+        workspaces = cs.get_workspaces()
+        workspace_id = request.workspace_id or (workspaces[0]["id"] if workspaces else None)
+        
+        await db_service.update_clockify_credentials(
+            user_id=user_id,
+            api_key=request.api_key,
+            workspace_id=workspace_id
+        )
+        return {
+            "message": "Cuenta de Clockify vinculada correctamente",
+            "connected": True,
+            "workspace_id": workspace_id,
+            "workspaces_count": len(workspaces)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"No se pudo verificar la API Key de Clockify: {str(e)}")
+
+
+@app.get("/api/user/clockify-status")
+async def get_clockify_status(user_id: str = Depends(get_current_user_id)):
+    """
+    Devuelve el estado actual de la conexión del usuario con Clockify.
+    """
+    user = await db_service.get_user_by_id(user_id)
+    if not user or not user.get("clockify"):
+        return {"connected": False}
+    
+    cdata = user["clockify"]
+    return {
+        "connected": True,
+        "workspace_id": cdata.get("workspace_id"),
+        "updated_at": cdata.get("updated_at")
+    }
+
+
+@app.post("/api/subjects/{subject_id}/grades")
+async def update_grade(subject_id: str, request: SubjectGradeRequest, user_id: str = Depends(get_current_user_id)):
+    """
+    Actualiza la nota de una asignatura concreta.
+    """
+    success = await db_service.update_subject_grade(subject_id, request.grade)
+    if not success:
+        raise HTTPException(status_code=404, detail="Asignatura no encontrada")
+    return {"message": "Nota actualizada correctamente", "grade": request.grade}
+
+
+@app.get("/api/dashboard/student-analytics")
+async def get_student_analytics(user_id: str = Depends(get_current_user_id)):
+    """
+    Devuelve las analíticas agregadas para el dashboard del alumno:
+    Cruza las horas dedicadas (desde MongoDB / Clockify) con las notas de cada asignatura.
+    """
+    try:
+        subjects = await db_service.get_subjects_by_user(user_id)
+        analytics = []
+        
+        for subject in subjects:
+            s_id = str(subject["_id"])
+            entries = await db_service.get_time_entries_by_subject(s_id)
+            
+            # Calcular total de segundos acumulados
+            total_seconds = 0
+            for entry in entries:
+                start_iso = entry.get("start_time")
+                end_iso = entry.get("end_time")
+                if start_iso and end_iso:
+                    try:
+                        dt1 = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))
+                        dt2 = datetime.fromisoformat(end_iso.replace('Z', '+00:00'))
+                        total_seconds += (dt2 - dt1).total_seconds()
+                    except Exception:
+                        pass
+            
+            total_hours = round(total_seconds / 3600.0, 2)
+            analytics.append({
+                "id": s_id,
+                "name": subject.get("name", "Asignatura"),
+                "hours": total_hours,
+                "weekly_hours_goal": subject.get("weekly_hours_goal"),
+                "grade": subject.get("grade")
+            })
+            
+        return {"analytics": analytics}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al generar analíticas: {str(e)}")

@@ -1,4 +1,15 @@
 services:
+  # BASE DE DATOS MONGODB LOCAL
+  db:
+    image: mongo:latest
+    container_name: tfg_mongodb
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - tfg_network
+
   # BACKEND FASTAPI
   backend:
     build:
@@ -25,5 +36,7 @@ services:
     networks:
       - tfg_network
 
+volumes: 
+  mongo_data:
 networks:
   tfg_network:

@@ -11,12 +11,36 @@ from mcp.server.session import ServerSession
  
 from services.clockify_service import ClockifyService
 from services.database_service import DatabaseService
- 
- 
+
+
 db_service = DatabaseService()
-clockify_service = ClockifyService()
- 
- 
+
+# async def _get_user_clockify_service(user_id: str) -> ClockifyService:
+#     """Devuelve una instancia de ClockifyService inicializada con el token o API Key del usuario."""
+#     user = await db_service.get_user_by_id(user_id)
+#     if user and user.get("clockify"):
+#         cdata = user["clockify"]
+#         return ClockifyService(
+#             token=cdata.get("token"),
+#             auth_type=cdata.get("auth_type", "api_key"),
+#             workspace_id=cdata.get("workspace_id")
+#         )
+#     return ClockifyService()
+
+
+async def _get_user_clockify_service(user_id: str) -> ClockifyService:
+    """Devuelve una instancia de ClockifyService inicializada con la API Key del usuario."""
+    user = await db_service.get_user_by_id(user_id)
+    if user and user.get("clockify"):
+        cdata = user["clockify"]
+        # Soporta tanto el campo nuevo "api_key" como "token" por retrocompatibilidad
+        api_key = cdata.get("api_key") or cdata.get("token")
+        return ClockifyService(
+            api_key=api_key,
+            workspace_id=cdata.get("workspace_id")
+        )
+    return ClockifyService()
+
 mcp = FastMCP(name="Clockify")
  
  
@@ -155,13 +179,14 @@ async def add_subject(user_id: str, name: str, weekly_hours_goal: int = 0, works
     Necesita el nombre de la asignatura y opcionalmente un objetivo de horas semanales y un workspace_id.
     """
     try:
+        cs = await _get_user_clockify_service(user_id)
         # 1. Crear el proyecto en Clockify
-        project = clockify_service.add_new_project(name, workspace_id)
+        project = cs.add_new_project(name, workspace_id)
         clockify_project_id = project.get("id")
  
         # 2. Guardar la asignatura en MongoDB
         subject = await db_service.create_subject(
-            user_id=user_id,  # TODO: reemplazar por el ID real cuando haya login
+            user_id=user_id,
             name=name,
             clockify_project_id=clockify_project_id,
             weekly_hours_goal=weekly_hours_goal
@@ -178,9 +203,10 @@ async def add_multiple_subjects(user_id: str, names: list[str], workspace_id: st
     try:
         added = []
         skipped = []
- 
+        cs = await _get_user_clockify_service(user_id)
+
         # Obtenemos los proyectos ya existentes en Clockify
-        existing_projects = clockify_service.get_projects(workspace_id)
+        existing_projects = cs.get_projects(workspace_id)
         existing_project_names = [p["name"].lower() for p in existing_projects]
  
         for name in names:
@@ -197,7 +223,7 @@ async def add_multiple_subjects(user_id: str, names: list[str], workspace_id: st
                 clockify_project_id = project.get("id")
             else:
                 # Crear el proyecto en Clockify
-                project = clockify_service.add_new_project(name, workspace_id)
+                project = cs.add_new_project(name, workspace_id)
                 clockify_project_id = project.get("id")
  
             await db_service.create_subject(
@@ -239,6 +265,73 @@ async def get_subjects(user_id: str):
  
     except Exception as e:
         return f"Error al obtener las asignaturas: {str(e)}"
+
+
+
+@mcp.tool()
+async def edit_subject(user_id: str, subject_name: str, new_name: str = None,
+                       weekly_hours_goal: int = None, period_name: str = None):
+    """
+    Edita una asignatura existente. Permite cambiar su nombre, su objetivo de horas
+    semanales y/o el periodo académico al que pertenece.
+    Úsala cuando el usuario diga 'cambia el nombre de X a Y', 'quiero dedicar N horas
+    semanales a X' o 'mueve X al periodo Y'.
+    Solo se actualizan los campos que el usuario especifique — los demás se quedan igual.
+    """
+    try:
+        subject = await _find_subject_by_name(user_id, subject_name)
+        if not subject:
+            return f"No encontré ninguna asignatura llamada '{subject_name}'."
+
+        updates = {}
+
+        if new_name:
+            updates["name"] = new_name
+        if weekly_hours_goal is not None:
+            updates["weekly_hours_goal"] = weekly_hours_goal
+        if period_name:
+            period = await db_service.get_period_by_user_and_name(user_id, period_name)
+            if not period:
+                return f"No encontré ningún periodo llamado '{period_name}'."
+            updates["period_id"] = period["_id"]
+
+        if not updates:
+            return "No me has indicado qué quieres cambiar de la asignatura."
+
+        await db_service.update_subject(subject["_id"], **updates)
+
+        cambios = []
+        if new_name:
+            cambios.append(f"nombre → '{new_name}'")
+        if weekly_hours_goal is not None:
+            cambios.append(f"objetivo semanal → {weekly_hours_goal}h")
+        if period_name:
+            cambios.append(f"periodo → '{period_name}'")
+
+        return f"Asignatura '{subject_name}' actualizada: {', '.join(cambios)}."
+    except Exception as e:
+        return f"Error al editar la asignatura: {str(e)}"
+
+
+@mcp.tool()
+async def delete_subject(user_id: str, subject_name: str):
+    """
+    Elimina permanentemente una asignatura y todo su historial (tareas, sesiones de tiempo).
+    Antes de llamar a esta herramienta, SIEMPRE pide confirmación explícita al usuario,
+    ya que la acción no se puede deshacer. Si el usuario solo quiere dejar de trabajar
+    en ella sin perder el historial, sugiere usar archive_subject en su lugar.
+    """
+    try:
+        subject = await _find_subject_by_name(user_id, subject_name)
+        if not subject:
+            return f"No encontré ninguna asignatura llamada '{subject_name}'."
+
+        await db_service.delete_subject(subject["_id"])
+        return f"Asignatura '{subject_name}' eliminada correctamente junto con todas sus tareas y sesiones."
+    except Exception as e:
+        return f"Error al eliminar la asignatura: {str(e)}"
+
+
  
  
 ############################################################################
@@ -410,7 +503,8 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
             parent_task_id = parent_task["_id"]
         else:
             # Es una tarea raíz: la reflejamos también en Clockify
-            clockify_task = clockify_service.add_new_task(
+            cs = await _get_user_clockify_service(user_id)
+            clockify_task = cs.add_new_task(
                 project_id=subject["clockify_project_id"],
                 task_name=title,
                 workspace_id=workspace_id
@@ -477,15 +571,52 @@ async def complete_task(user_id: str, subject_name: str, task_title: str):
     except Exception as e:
         return f"Error al completar la tarea: {str(e)}"
     
-async def edit_task(subject_name: str, task_title:str, description: str = "",
-                    due_date: str = None, parent_task_title: str = None,
-                    workspace_id: str = None):
-    """
-    Edita una tarea existente de una asignatura. Permite cambiar su descripción, fecha de vencimiento,
-    asignarla a otra tarea como subtarea, o actualizar su representación en Clockify.
-    Úsala cuando el usuario diga 'cambia la tarea X de Y' o 'edita la tarea X de Y'.
-    """
 
+@mcp.tool()
+async def edit_task(user_id: str, subject_name: str, task_title: str,
+                    new_title: str = None, description: str = None,
+                    due_date: str = None):
+    """
+    Edita una tarea existente de una asignatura. Permite cambiar su título,
+    descripción o fecha de vencimiento.
+    Úsala cuando el usuario diga 'cambia la fecha de X', 'renombra la tarea X a Y'
+    o 'actualiza la descripción de X'.
+    Solo se actualizan los campos que el usuario especifique.
+    due_date, si se indica, debe tener formato ISO 8601 (ej: '2026-07-20').
+    """
+    try:
+        subject = await _find_subject_by_name(user_id, subject_name)
+        if not subject:
+            return f"No encontré ninguna asignatura llamada '{subject_name}'."
+
+        task = await _find_task_by_title(subject["_id"], task_title)
+        if not task:
+            return f"No encontré ninguna tarea llamada '{task_title}' en '{subject_name}'."
+
+        updates = {}
+        if new_title:
+            updates["title"] = new_title
+        if description is not None:
+            updates["description"] = description
+        if due_date is not None:
+            updates["due_date"] = due_date
+
+        if not updates:
+            return "No me has indicado qué quieres cambiar de la tarea."
+
+        await db_service.update_task(task["_id"], **updates)
+
+        cambios = []
+        if new_title:
+            cambios.append(f"título → '{new_title}'")
+        if description is not None:
+            cambios.append("descripción actualizada")
+        if due_date is not None:
+            cambios.append(f"fecha límite → '{due_date}'")
+
+        return f"Tarea '{task_title}' actualizada: {', '.join(cambios)}."
+    except Exception as e:
+        return f"Error al editar la tarea: {str(e)}"
 
  
  
@@ -522,7 +653,8 @@ async def start_timer(user_id: str, subject_name: str, task_title: str = None, d
             clockify_task_id = task.get("clockify_task_id")
  
         # Arrancamos el timer real en Clockify (end_time=None -> cronómetro en marcha)
-        clockify_service.create_time_entry(
+        cs = await _get_user_clockify_service(user_id)
+        cs.create_time_entry(
             description=description or f"Estudiando {subject_name}",
             project_id=subject["clockify_project_id"],
             task_id=clockify_task_id,
@@ -629,6 +761,63 @@ async def get_time_summary(user_id: str, subject_name: str):
     except Exception as e:
         return f"Error al obtener el resumen de tiempo: {str(e)}"
  
+
+@mcp.tool()
+async def log_study_hours(user_id: str, subject_name: str, hours: float,
+                          task_title: str = None, description: str = ""):
+    """
+    Registra una sesión de estudio indicando solo cuántas horas se han dedicado,
+    sin necesidad de especificar hora de inicio ni fin. El sistema calcula automáticamente
+    que la sesión terminó ahora y empezó hace X horas.
+    Úsala cuando el usuario diga 'he dedicado 2 horas a Matemáticas' o 'estudié 3h de Física'.
+    No confundir con start_timer/stop_timer, que son para tiempo en tiempo real.
+    """
+    try:
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(hours=hours)
+        start_time = start.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_time = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        subject = await _find_subject_by_name(user_id, subject_name)
+        if not subject:
+            return f"No encontré ninguna asignatura llamada '{subject_name}'."
+
+        task_id = None
+        clockify_task_id = None
+        if task_title:
+            task = await _find_task_by_title(subject["_id"], task_title)
+            if task:
+                task_id = task["_id"]
+                clockify_task_id = task.get("clockify_task_id")
+
+        # Registrar en Clockify
+        cs = await _get_user_clockify_service(user_id)
+        cs.create_time_entry(
+            description=description or f"Estudiando {subject_name}",
+            project_id=subject["clockify_project_id"],
+            task_id=clockify_task_id,
+            start_time=start_time,
+            end_time=end_time
+        )
+
+        # Registrar en BD
+        await db_service.create_time_entry(
+            user_id=user_id,
+            subject_id=subject["_id"],
+            task_id=task_id,
+            start_time=start_time,
+            end_time=end_time,
+            description=description or f"Estudiando {subject_name}"
+        )
+
+        h = int(hours)
+        m = int((hours - h) * 60)
+        return f"Registradas {h}h {m}m de estudio en '{subject_name}'{' (' + task_title + ')' if task_title else ''}."
+    except Exception as e:
+        return f"Error al registrar las horas: {str(e)}"
+        
+         
  
 # ############################################################################
 # TOOLS FOR WELLBEING
@@ -683,6 +872,23 @@ async def wb_get_wellbeing_trends(user_id: str):
         return trends
     except Exception as e:
         return f"Error al obtener las tendencias de bienestar: {str(e)}"
+
+
+@mcp.tool()
+async def set_subject_grade(user_id: str, subject_name: str, grade: float):
+    """
+    Registra o actualiza la nota de una asignatura (de 0 a 10).
+    Úsala cuando el usuario mencione la nota de un examen o asignatura (ej: 'saqué un 8.5 en Matemáticas').
+    """
+    try:
+        subject = await _find_subject_by_name(user_id, subject_name)
+        if not subject:
+            return f"No encontré ninguna asignatura llamada '{subject_name}'."
+        
+        await db_service.update_subject_grade(subject["_id"], grade)
+        return f"Nota de {grade} guardada para la asignatura '{subject_name}'."
+    except Exception as e:
+        return f"Error al guardar la nota: {str(e)}"
 
 
 if __name__ == "__main__":
