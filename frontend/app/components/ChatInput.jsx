@@ -1,8 +1,26 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Send } from "lucide-react";
 
 export default function ChatInput({ onSend, isLoading }) {
   const [text, setText] = useState("");
+  const textareaRef = useRef(null);
+
+  // Recalcular la altura en función del texto ingresado
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "42px";
+      const scrollH = textareaRef.current.scrollHeight;
+      const maxH = window.innerHeight * 0.2;
+
+      if (scrollH > maxH) {
+        textareaRef.current.style.height = `${maxH}px`;
+        textareaRef.current.style.overflowY = "auto";
+      } else {
+        textareaRef.current.style.height = `${scrollH}px`;
+        textareaRef.current.style.overflowY = "hidden";
+      }
+    }
+  }, [text]);
 
   const handleSend = () => {
     const trimmed = text.trim();
@@ -31,11 +49,11 @@ export default function ChatInput({ onSend, isLoading }) {
       }}
     >
       <textarea
+        ref={textareaRef}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="Escribe un mensaje... (Enter para enviar)"
-        rows={1}
         style={{
           flex: 1,
           resize: "none",
@@ -46,14 +64,16 @@ export default function ChatInput({ onSend, isLoading }) {
           fontFamily: "inherit",
           outline: "none",
           lineHeight: "1.5",
-          maxHeight: "120px",
-          overflowY: "auto",
+          minHeight: "42px",
+          maxHeight: "20vh",
+          overflowY: "hidden",
           color: "var(--text-primary)",
           background: "var(--bg-input)",
           transition: "border-color 0.15s",
+          boxSizing: "border-box",
         }}
         onFocus={(e) => (e.target.style.borderColor = "var(--border-focus)")}
-        onBlur={(e) => (e.target.style.borderColor = "var(--border) ")}
+        onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
       />
 
       <button
@@ -77,7 +97,6 @@ export default function ChatInput({ onSend, isLoading }) {
         aria-label="Enviar mensaje"
       >
         <Send size={16} />
-
       </button>
     </div>
   );

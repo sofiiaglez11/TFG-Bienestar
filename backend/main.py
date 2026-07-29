@@ -382,6 +382,17 @@ async def get_clockify_status(user_id: str = Depends(get_current_user_id)):
     }
 
 
+@app.get("/api/user/me")
+async def get_user_me(user_id: str = Depends(get_current_user_id)):
+    user = await db_service.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return {
+        "email": user.get("email"),
+        "name": user.get("name")
+    }
+
+
 @app.post("/api/subjects/{subject_id}/grades")
 async def update_grade(subject_id: str, request: SubjectGradeRequest, user_id: str = Depends(get_current_user_id)):
     """

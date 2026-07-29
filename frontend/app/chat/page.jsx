@@ -16,6 +16,11 @@ export default function ChatPage() {
   const [showClockifyModal, setShowClockifyModal] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [clockifyConnected, setClockifyConnected] = useState(false);
+  const [activeTab, setActiveTab] = useState("chat");
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [userName, setUserName] = useState("Estudiante");
+  const [userEmail, setUserEmail] = useState("Cargando...");
 
   const router = useRouter();
 
@@ -26,6 +31,31 @@ export default function ChatPage() {
       router.push("/login");
       return;
     }
+
+    // Obtener información del usuario
+    const fetchUserInfo = async () => {
+      const cachedName = localStorage.getItem("userName");
+      const cachedEmail = localStorage.getItem("userEmail");
+      if (cachedName) setUserName(cachedName);
+      if (cachedEmail) setUserEmail(cachedEmail);
+
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/user/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setUserName(data.name || "Estudiante");
+          setUserEmail(data.email || "");
+          localStorage.setItem("userName", data.name || "Estudiante");
+          localStorage.setItem("userEmail", data.email || "");
+        }
+      } catch (err) {
+        console.error("Error al cargar información del usuario:", err);
+      }
+    };
+
+    fetchUserInfo();
 
     // Comprobar si el usuario tiene Clockify conectado
     const checkClockifyStatus = async () => {
@@ -179,6 +209,8 @@ export default function ChatPage() {
 
   const handleLogout = () => {
     localStorage.removeItem("token");
+    localStorage.removeItem("userName");
+    localStorage.removeItem("userEmail");
     router.push("/login");
   };
 
@@ -186,125 +218,375 @@ export default function ChatPage() {
     <div
       style={{
         display: "flex",
-        flexDirection: "column",
+        flexDirection: "row",
         height: "100vh",
         background: "var(--bg-page)",
       }}
     >
-      {/* Header */}
+      {/* Sidebar */}
       <div
         style={{
-          padding: "14px 20px",
-          borderBottom: "1px solid var(--border)",
+          width: isSidebarCollapsed ? "80px" : "260px",
+          borderRight: "1px solid var(--border)",
           background: "var(--bg-header)",
           display: "flex",
-          alignItems: "center",
-          gap: "10px",
+          flexDirection: "column",
+          justifyContent: "space-between",
+          padding: "20px 12px",
+          boxSizing: "border-box",
+          overflow: "hidden",
+          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          whiteSpace: "nowrap",
         }}
       >
-        <div
-          style={{
-            width: "32px",
-            height: "32px",
-            borderRadius: "50%",
-            background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-          }}
-        />
-        <div>
-          <div
-            style={{
-              fontWeight: 600,
-              fontSize: "14px",
-              color: "var(--text-primary)",
-            }}
-          >
-            Tutor de Bienestar & Académico
+        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+          {/* Logo / Title & Collapse/Expand Button */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: isSidebarCollapsed ? "center" : "space-between", gap: "10px" }}>
+            {!isSidebarCollapsed ? (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      width: "32px",
+                      height: "32px",
+                      borderRadius: "50%",
+                      background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--text-primary)" }}>
+                      Tutor de Bienestar
+                    </div>
+                    <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                      Académico & Personal
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsSidebarCollapsed(true)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--text-secondary)",
+                    cursor: "pointer",
+                    fontSize: "18px",
+                    padding: "6px",
+                    borderRadius: "6px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    transition: "background-color 0.2s",
+                  }}
+                  title="Contraer barra lateral"
+                  onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "var(--bg-page)")}
+                  onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                >
+                  ◀
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setIsSidebarCollapsed(false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--text-secondary)",
+                  cursor: "pointer",
+                  fontSize: "18px",
+                  padding: "6px",
+                  borderRadius: "6px",
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  transition: "background-color 0.2s",
+                }}
+                title="Expandir barra lateral"
+                onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "var(--bg-page)")}
+                onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+              >
+                ▶
+              </button>
+            )}
           </div>
-          <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-            Sistema Multiagente Inteligente
+
+          {/* Navigation Windows/Tabs */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {/* Botón Chat */}
+            <button
+              onClick={() => setActiveTab("chat")}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: isSidebarCollapsed ? "center" : "flex-start",
+                gap: isSidebarCollapsed ? "0" : "10px",
+                padding: isSidebarCollapsed ? "12px" : "10px 14px",
+                borderRadius: "8px",
+                border: "none",
+                // Cambia el fondo según la pestaña activa
+                backgroundColor: activeTab === "chat" ? "rgba(99, 102, 241, 0.15)" : "transparent",
+                // Color de texto siempre fijo
+                color: "var(--text-primary)",
+                fontSize: "14px",
+                fontWeight: activeTab === "chat" ? "600" : "500",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+                width: "100%",
+              }}
+              title={isSidebarCollapsed ? "Chat" : ""}
+            >
+              <span style={{ fontSize: "16px" }}>💬</span>
+              {!isSidebarCollapsed && <span>Chat</span>}
+            </button>
+
+            {/* Botón Estadísticas */}
+            <button
+              onClick={() => setActiveTab("stats")}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: isSidebarCollapsed ? "center" : "flex-start",
+                gap: isSidebarCollapsed ? "0" : "10px",
+                padding: isSidebarCollapsed ? "12px" : "10px 14px",
+                borderRadius: "8px",
+                border: "none",
+                // Cambia el fondo según la pestaña activa
+                backgroundColor: activeTab === "stats" ? "rgba(99, 102, 241, 0.15)" : "transparent",
+                // Color de texto siempre fijo
+                color: "var(--text-primary)",
+                fontSize: "14px",
+                fontWeight: activeTab === "stats" ? "600" : "500",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+                width: "100%",
+              }}
+              title={isSidebarCollapsed ? "Estadísticas" : ""}
+            >
+              <span style={{ fontSize: "16px" }}>📊</span>
+              {!isSidebarCollapsed && <span>Estadísticas</span>}
+            </button>
           </div>
         </div>
 
-        {/* Acciones del Header */}
-        <div style={{ marginLeft: "auto", display: "flex", gap: "8px", alignItems: "center" }}>
+        {/* Profile and Settings (Bottom of Sidebar) */}
+        <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center" }}>
 
-          {/* Indicador + botón de Clockify */}
+
+
           <button
-            onClick={() => setShowClockifyModal(true)}
-            title={clockifyConnected ? "Clockify conectado" : "Conectar Clockify"}
+            onClick={() => setShowProfileMenu(!showProfileMenu)}
             style={{
+              width: "100%",
               display: "flex",
               alignItems: "center",
-              gap: "6px",
-              padding: "6px 12px",
-              background: clockifyConnected ? "#f0fdf4" : "#fef2f2",
-              border: `1px solid ${clockifyConnected ? "#bbf7d0" : "#fecaca"}`,
-              borderRadius: "6px",
-              color: clockifyConnected ? "#166534" : "#991b1b",
-              fontSize: "13px",
+              justifyContent: isSidebarCollapsed ? "center" : "flex-start",
+              gap: isSidebarCollapsed ? "0" : "10px",
+              padding: isSidebarCollapsed ? "8px" : "10px",
+              borderRadius: "8px",
+              border: "1px solid var(--border)",
+              backgroundColor: "var(--bg-page)",
               cursor: "pointer",
-              fontWeight: "500",
             }}
+            title={isSidebarCollapsed ? "Ajustes de Perfil" : ""}
           >
-            <span style={{ fontSize: "10px" }}>{clockifyConnected ? "●" : "●"}</span>
-            {clockifyConnected ? "Clockify ✓" : "Conectar Clockify"}
+            <div
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "50%",
+                backgroundColor: "#cbd5e1",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: "600",
+                color: "#475569",
+                fontSize: "14px",
+                flexShrink: 0,
+              }}
+            >
+              👤
+            </div>
+            {!isSidebarCollapsed && (
+              <div style={{ flex: 1, textAlign: "left", overflow: "hidden" }}>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    color: "var(--text-primary)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis", // Para que no rompa el diseño si el nombre es largo
+                  }}
+                >
+                  {userName}
+                </div>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "var(--text-secondary)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis", // Para que no rompa el diseño si el email es largo
+                  }}
+                >
+                  {userEmail}
+                </div>
+              </div>
+            )}
           </button>
 
-          {/* Botón Dashboard */}
-          <button
-            onClick={() => setShowDashboard(true)}
-            style={{
-              padding: "6px 12px",
-              background: "transparent",
-              border: "1px solid var(--border)",
-              borderRadius: "6px",
-              color: "var(--text-secondary)",
-              fontSize: "13px",
-              cursor: "pointer",
-            }}
-          >
-            📊 Dashboard
-          </button>
-
-          <button
-            onClick={handleLogout}
-            style={{
-              padding: "6px 12px",
-              background: "transparent",
-              border: "1px solid var(--border)",
-              borderRadius: "6px",
-              color: "var(--text-secondary)",
-              fontSize: "13px",
-              cursor: "pointer",
-            }}
-          >
-            Cerrar sesión
-          </button>
+          {/* Profile Dropdown Menu */}
+          {showProfileMenu && (
+            <>
+              {/* Overlay backdrop to close menu when clicking outside */}
+              <div
+                onClick={() => setShowProfileMenu(false)}
+                style={{
+                  position: "fixed",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  zIndex: 998,
+                }}
+              />
+              <div
+                style={{
+                  position: "fixed",
+                  bottom: "84px",
+                  left: "12px",
+                  width: "236px",
+                  backgroundColor: "var(--bg-header)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "8px",
+                  boxShadow: "0 -4px 12px rgba(0,0,0,0.15)",
+                  zIndex: 999,
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                {clockifyConnected ? (
+                  <button
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      setShowClockifyModal(true);
+                    }}
+                    style={{
+                      padding: "10px 14px",
+                      border: "none",
+                      background: "none",
+                      color: "var(--text-primary)",
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      width: "100%"
+                    }}
+                    onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "var(--bg-page)")}
+                    onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                  >
+                    <span style={{ color: "#22c55e", fontSize: "10px" }}>●</span> Clockify Conectado
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      setShowClockifyModal(true);
+                    }}
+                    style={{
+                      padding: "10px 14px",
+                      border: "none",
+                      background: "none",
+                      color: "var(--text-primary)",
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      width: "100%"
+                    }}
+                    onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "var(--bg-page)")}
+                    onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                  >
+                    <span style={{ color: "#ef4444", fontSize: "10px" }}>●</span> Configurar Clockify
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    handleLogout();
+                  }}
+                  style={{
+                    padding: "10px 14px",
+                    border: "none",
+                    borderTop: "1px solid var(--border)",
+                    background: "none",
+                    color: "#ef4444",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                  onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "var(--bg-page)")}
+                  onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                >
+                  🚪 Cerrar sesión
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Message Area */}
-      <ChatWindow messages={messages} isLoading={isLoading} />
+      {/* Main Area */}
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          height: "100vh",
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
+        {activeTab === "chat" ? (
+          <>
+            {/* Message Area */}
+            <ChatWindow messages={messages} isLoading={isLoading} />
 
-      {/* Error Banner */}
-      {error && (
-        <div
-          style={{
-            margin: "0 16px 8px",
-            padding: "10px 14px",
-            background: "#fef2f2",
-            border: "1px solid #fecaca",
-            borderRadius: "8px",
-            color: "#dc2626",
-            fontSize: "13px",
-          }}
-        >
-          {error}
-        </div>
-      )}
+            {/* Error Banner */}
+            {error && (
+              <div
+                style={{
+                  margin: "0 16px 8px",
+                  padding: "10px 14px",
+                  background: "#fef2f2",
+                  border: "1px solid #fecaca",
+                  borderRadius: "8px",
+                  color: "#dc2626",
+                  fontSize: "13px",
+                }}
+              >
+                {error}
+              </div>
+            )}
 
-      {/* Input */}
-      <ChatInput onSend={sendMessage} isLoading={isLoading} />
+            {/* Input */}
+            <ChatInput onSend={sendMessage} isLoading={isLoading} />
+          </>
+        ) : (
+          <div style={{ flex: 1, padding: "24px", overflow: "hidden" }}>
+            <StudentDashboard isInline={true} />
+          </div>
+        )}
+      </div>
 
       {/* Modals */}
       <ClockifyConfigModal
@@ -322,11 +604,6 @@ export default function ChatPage() {
               .catch(() => { });
           }
         }}
-      />
-
-      <StudentDashboard
-        isOpen={showDashboard}
-        onClose={() => setShowDashboard(false)}
       />
     </div>
   );

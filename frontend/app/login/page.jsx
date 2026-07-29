@@ -13,29 +13,6 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false);
 
 
-    // const handleLogin = async (email, password) => {
-    //     try {
-    //         const response = await fetch(`${BACKEND_URL}/api/login`, {
-    //             method: "POST",
-    //             headers: {
-    //                 "Content-Type": "application/json",
-    //             },
-    //             body: JSON.stringify({ email, password }),
-    //         });
-
-    //         if (!response.ok) {
-    //             throw new Error(`Error del servidor: ${response.status}`);
-    //         }
-
-    //         const data = await response.json();
-    //         localStorage.setItem("token", data.token); // guardar el token en localStorage
-    //         router.push("/chat"); // navegar a la página de chat
-    //         console.log("Respuesta del servidor:", data);
-    //     } catch (error) {
-    //         console.error("Error al iniciar sesión:", error);
-    //     }
-    // };
-
     const handleLogin = async (email, password) => {
         setMessage(null);
         setLoading(true);
@@ -61,6 +38,10 @@ export default function LoginPage() {
 
             const data = await response.json();
             localStorage.setItem("token", data.token);
+            if (data.user) {
+                localStorage.setItem("userName", data.user.name || "");
+                localStorage.setItem("userEmail", data.user.email || "");
+            }
             setMessage({ type: 'success', text: "¡Inicio de sesión correcto! Redirigiendo..." });
 
             // Pausa de 1 segundo para mostrar el mensaje de éxito antes de navegar al chat
@@ -87,7 +68,6 @@ export default function LoginPage() {
             gap: '16px',
         }}>
             <h1 style={{ color: 'var(--text-primary)', marginBottom: '8px' }}>Iniciar sesión</h1>
-            {/* <LoginForm onLogin={handleLogin} /> */}
             <LoginForm
                 onLogin={handleLogin}
                 message={message}
