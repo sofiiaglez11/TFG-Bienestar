@@ -52,6 +52,9 @@ class GeminiService(BaseChatbotService):
     def append_user_message(self, user_message: str):
         self.history.append({"role": "user", "parts": [{"text": user_message}]})
 
+    def append_assistant_message(self, content: str):
+        self.history.append({"role": "model", "parts": [{"text": content}]})
+
     async def call_model(self):
         return await self.client.aio.models.generate_content(
             model=self.model,

@@ -395,70 +395,72 @@ class DatabaseService:
         return events
  
  
-    ############################################################################
-    # METHODS FOR TIME ENTRIES
+    # ############################################################################
+    # # METHODS FOR TIME ENTRIES
  
-    async def create_time_entry(self, user_id: str, subject_id: str,
-                                start_time: str, end_time: str = None,
-                                task_id: str = None, description: str = "") -> dict:
-        """
-        Crea una nueva entrada de tiempo.
-        - subject_id es siempre obligatorio.
-        - task_id es opcional: puede dedicarse tiempo a la asignatura en general,
-          sin tarea concreta asociada.
-        - end_time es opcional: si es None, se interpreta como un cronómetro en marcha
-          (equivalente al timer activo de Clockify).
-        """
-        time_entry = {
-            "user_id": user_id,
-            "subject_id": subject_id,
-            "task_id": task_id,
-            "description": description,
-            "start_time": start_time,
-            "end_time": end_time
-        }
-        result = await self.time_entries.insert_one(time_entry)
-        time_entry["_id"] = str(result.inserted_id)
-        return time_entry
+    # async def create_time_entry(self, user_id: str, subject_id: str,
+    #                             start_time: str, end_time: str = None,
+    #                             task_id: str = None, description: str = "") -> dict:
+    #     """
+    #     Crea una nueva entrada de tiempo.
+    #     - subject_id es siempre obligatorio.
+    #     - task_id es opcional: puede dedicarse tiempo a la asignatura en general,
+    #       sin tarea concreta asociada.
+    #     - end_time es opcional: si es None, se interpreta como un cronómetro en marcha
+    #       (equivalente al timer activo de Clockify).
+    #     """
+    #     time_entry = {
+    #         "user_id": user_id,
+    #         "subject_id": subject_id,
+    #         "task_id": task_id,
+    #         "description": description,
+    #         "start_time": start_time,
+    #         "end_time": end_time
+    #     }
+    #     result = await self.time_entries.insert_one(time_entry)
+    #     time_entry["_id"] = str(result.inserted_id)
+    #     return time_entry
  
-    async def get_time_entries_by_subject(self, subject_id: str) -> list:
-        """Devuelve todas las entradas de tiempo de una asignatura, más recientes primero."""
-        cursor = self.time_entries.find({"subject_id": subject_id}).sort("start_time", -1)
-        time_entries = await cursor.to_list(100)
-        for te in time_entries:
-            te["_id"] = str(te["_id"])
-        return time_entries
+    # async def get_time_entries_by_subject(self, subject_id: str) -> list:
+    #     """Devuelve todas las entradas de tiempo de una asignatura, más recientes primero."""
+    #     cursor = self.time_entries.find({"subject_id": subject_id}).sort("start_time", -1)
+    #     time_entries = await cursor.to_list(100)
+    #     for te in time_entries:
+    #         te["_id"] = str(te["_id"])
+    #     return time_entries
  
-    async def get_time_entries_by_task(self, task_id: str) -> list:
-        """Devuelve todas las entradas de tiempo de una tarea concreta."""
-        cursor = self.time_entries.find({"task_id": task_id}).sort("start_time", -1)
-        time_entries = await cursor.to_list(100)
-        for te in time_entries:
-            te["_id"] = str(te["_id"])
-        return time_entries
+    # async def get_time_entries_by_task(self, task_id: str) -> list:
+    #     """Devuelve todas las entradas de tiempo de una tarea concreta."""
+    #     cursor = self.time_entries.find({"task_id": task_id}).sort("start_time", -1)
+    #     time_entries = await cursor.to_list(100)
+    #     for te in time_entries:
+    #         te["_id"] = str(te["_id"])
+    #     return time_entries
  
-    async def get_active_time_entry(self, user_id: str) -> dict | None:
-        """
-        Devuelve la entrada de tiempo en marcha del usuario (end_time == None), si hay una.
-        Útil para comprobar si ya hay un cronómetro corriendo antes de arrancar otro.
-        """
-        entry = await self.time_entries.find_one({"user_id": user_id, "end_time": None})
-        if entry:
-            entry["_id"] = str(entry["_id"])
-        return entry
+    # async def get_active_time_entry(self, user_id: str) -> dict | None:
+    #     """
+    #     Devuelve la entrada de tiempo en marcha del usuario (end_time == None), si hay una.
+    #     Útil para comprobar si ya hay un cronómetro corriendo antes de arrancar otro.
+    #     """
+    #     entry = await self.time_entries.find_one({"user_id": user_id, "end_time": None})
+    #     print(f"ENTRY BD: ${entry}")
+    #     if entry:
+    #         entry["_id"] = str(entry["_id"])
+    #     return entry
  
-    async def stop_time_entry(self, time_entry_id: str, end_time: str = None) -> dict | None:
-        """Detiene un cronómetro en marcha, fijando su end_time (por defecto, ahora mismo)."""
-        end_time = end_time or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        await self.time_entries.update_one(
-            {"_id": ObjectId(time_entry_id)},
-            {"$set": {"end_time": end_time}}
-        )
-        return await self.time_entries.find_one({"_id": ObjectId(time_entry_id)})
+    # async def stop_time_entry(self, time_entry_id: str, end_time: str = None) -> dict | None:
+    #     """Detiene un cronómetro en marcha, fijando su end_time (por defecto, ahora mismo)."""
+    #     print(f"TIME ENTRY ID: ${time_entry_id}")
+    #     end_time = end_time or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    #     await self.time_entries.update_one(
+    #         {"_id": ObjectId(time_entry_id)},
+    #         {"$set": {"end_time": end_time}}
+    #     )
+    #     return await self.time_entries.find_one({"_id": ObjectId(time_entry_id)})
  
-    async def delete_time_entry(self, time_entry_id: str):
-        """Elimina una entrada de tiempo por su ID."""
-        await self.time_entries.delete_one({"_id": ObjectId(time_entry_id)})
+    # async def delete_time_entry(self, time_entry_id: str):
+    #     """Elimina una entrada de tiempo por su ID."""
+    #     await self.time_entries.delete_one({"_id": ObjectId(time_entry_id)})
  
  
     # ############################################################################

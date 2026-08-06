@@ -50,7 +50,11 @@ class BaseChatbotService(ABC):
 
     @abstractmethod
     def append_model_message(self, response):
-        '''Agrega el mensaje del modelo al historial de conversación.'''
+        '''
+        Agrega el mensaje del modelo al historial de conversación.
+        Recibe el objeto de respuesta crudo del SDK del proveedor de IA (p.ej. GenerateContentResponse o Choice),
+        que contiene metadatos, texto y llamadas a funciones/herramientas realizadas en caliente.
+        '''
         pass
 
     @abstractmethod
@@ -129,6 +133,28 @@ class BaseChatbotService(ABC):
  
         return standard
  
+
+    @abstractmethod
+    def append_assistant_message(self, content: str):
+        '''
+        Agrega un mensaje de texto plano del asistente al historial de conversación.
+        A diferencia de append_model_message, este recibe un simple string (útil al reconstruir el historial
+        desde la base de datos).
+        '''
+        pass
+
+    def load_history(self, messages: list[dict]):
+        '''Carga una lista de mensajes (diccionarios con role y content) en el historial del agente.'''
+        self.clear_history()
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content")
+            if not content:
+                continue
+            if role == "user":
+                self.append_user_message(content)
+            elif role == "assistant":
+                self.append_assistant_message(content)
 
     def clear_history(self):
         '''Limpia el historial de conversación.'''

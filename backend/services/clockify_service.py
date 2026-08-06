@@ -2,6 +2,7 @@ import requests
 import os
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
+import sys
 
 load_dotenv()
 
@@ -131,6 +132,8 @@ class ClockifyService:
 
     def create_time_entry(self, description: str, project_id: str = None, task_id: str = None,
                           start_time: str = None, end_time: str = None, workspace_id: str = None) -> dict:
+
+        # print(f"CREATE TIME ENTRY -> DESCRIPTION: {description}, PROJECT ID: {project_id}, TASK ID: {task_id}, START TIME: {start_time}, END TIME: {end_time}", file=sys.stderr, flush=True)
         workspace_id = self._set_workspace_if_null(workspace_id)
         url = f"{self.base_url}/workspaces/{workspace_id}/time-entries"
 
@@ -152,16 +155,32 @@ class ClockifyService:
         response.raise_for_status()
         return response.json()
 
-    def stop_time_entry(self, time_entry_id: str, workspace_id: str = None) -> dict:
+
+
+    def stop_time_entry(self, time_entry_id: str = None, workspace_id: str = None) -> dict:
+        """Para el timer activo del usuario en Clockify."""
         workspace_id = self._set_workspace_if_null(workspace_id)
-        url = f"{self.base_url}/workspaces/{workspace_id}/time-entries/{time_entry_id}"
+        user_id = self.get_user_id()
+        url = f"{self.base_url}/workspaces/{workspace_id}/user/{user_id}/time-entries"
         payload = {
             "end": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         }
         response = requests.patch(url, headers=self.headers, json=payload)
+        print(f"STOP TIME ENTRY RESPONSE: {response.status_code}", file=sys.stderr, flush=True)
         response.raise_for_status()
         return response.json()
-
+        
+    def get_active_time_entry(self) -> dict | None:
+        """Devuelve el timer activo del usuario en Clockify, si hay uno."""
+        user_id = self.get_user_id()
+        workspace_id = self.get_current_workspace_id()
+        url = f"{self.base_url}/workspaces/{workspace_id}/user/{user_id}/time-entries"
+        params = {"in-progress": "true"}
+        response = requests.get(url, headers=self.headers, params=params)
+        response.raise_for_status()
+        entries = response.json()
+        return entries[0] if entries else None
+    
     ############################################################################
     # METHODS FOR USERS
  

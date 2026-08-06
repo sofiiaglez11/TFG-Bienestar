@@ -228,7 +228,7 @@ export default function ChatPage() {
         style={{
           width: isSidebarCollapsed ? "80px" : "260px",
           borderRight: "1px solid var(--border)",
-          background: "var(--bg-header)",
+          background: "var(--bg-surface)",
           display: "flex",
           flexDirection: "column",
           justifyContent: "space-between",
@@ -325,7 +325,7 @@ export default function ChatPage() {
                 borderRadius: "8px",
                 border: "none",
                 // Cambia el fondo según la pestaña activa
-                backgroundColor: activeTab === "chat" ? "rgba(99, 102, 241, 0.15)" : "transparent",
+                backgroundColor: activeTab === "chat" ? "var(--pressed-button-bg)" : "transparent",
                 // Color de texto siempre fijo
                 color: "var(--text-primary)",
                 fontSize: "14px",
@@ -352,7 +352,7 @@ export default function ChatPage() {
                 borderRadius: "8px",
                 border: "none",
                 // Cambia el fondo según la pestaña activa
-                backgroundColor: activeTab === "stats" ? "rgba(99, 102, 241, 0.15)" : "transparent",
+                backgroundColor: activeTab === "stats" ? "var(--pressed-button-bg)" : "transparent",
                 // Color de texto siempre fijo
                 color: "var(--text-primary)",
                 fontSize: "14px",
@@ -457,7 +457,7 @@ export default function ChatPage() {
                   bottom: "84px",
                   left: "12px",
                   width: "236px",
-                  backgroundColor: "var(--bg-header)",
+                  backgroundColor: "var(--bg-surface)",
                   border: "1px solid var(--border)",
                   borderRadius: "8px",
                   boxShadow: "0 -4px 12px rgba(0,0,0,0.15)",
@@ -693,7 +693,7 @@ export default function ChatPage() {
 //         style={{
 //           padding: "14px 20px",
 //           borderBottom: "1px solid var(--border)",
-//           background: "var(--bg-header)",
+//           background: "var(--bg-surface)",
 //           display: "flex",
 //           alignItems: "center",
 //           gap: "10px",

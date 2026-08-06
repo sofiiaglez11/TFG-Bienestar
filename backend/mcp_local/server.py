@@ -46,11 +46,25 @@ mcp = FastMCP(name="Clockify")
  
 ############################################################################
 # HELPERS INTERNOS (no son tools, el LLM no las ve directamente)
- 
+
+import unicodedata
+
+def _normalize(text: str) -> str:
+    """Elimina tildes y pasa a minúsculas para comparación."""
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', text.lower())
+        if unicodedata.category(c) != 'Mn'
+    )
+
 async def _find_subject_by_name(user_id: str, name: str) -> dict | None:
-    """Busca una asignatura por nombre (case-insensitive) entre las del usuario."""
+    """Busca una asignatura por nombre (case-insensitive, sin tildes) entre las del usuario."""
     subjects = await db_service.get_subjects_by_user(user_id)
-    return next((s for s in subjects if s["name"].lower() == name.lower()), None)
+    return next((s for s in subjects if _normalize(s["name"]) == _normalize(name)), None)
+ 
+# async def _find_subject_by_name(user_id: str, name: str) -> dict | None:
+#     """Busca una asignatura por nombre (case-insensitive) entre las del usuario."""
+#     subjects = await db_service.get_subjects_by_user(user_id)
+#     return next((s for s in subjects if s["name"].lower() == name.lower()), None)
  
  
 async def _find_task_by_title(subject_id: str, title: str) -> dict | None:
@@ -634,10 +648,9 @@ async def start_timer(user_id: str, subject_name: str, task_title: str = None, d
     usuario que debe pararlo antes de empezar uno nuevo (usa stop_timer).
     """
     try:
-        existing = await db_service.get_active_time_entry(user_id)
-        if existing:
-            return "Ya tienes un cronómetro en marcha. Para antes uno con stop_timer."
- 
+        # existing = await db_service.get_active_time_entry(user_id)
+        # if existing:
+        #     return "Ya tienes un cronómetro en marcha. Para antes uno con stop_timer."
         subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
@@ -662,39 +675,50 @@ async def start_timer(user_id: str, subject_name: str, task_title: str = None, d
             workspace_id=workspace_id
         )
  
-        # Y lo reflejamos en nuestra propia base de datos
-        start_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        await db_service.create_time_entry(
-            user_id=user_id,
-            subject_id=subject["_id"],
-            task_id=task_id,
-            start_time=start_time,
-            end_time=None,
-            description=description or f"Estudiando {subject_name}"
-        )
+        print(f"FIN TOOL START TIMER", file=sys.stderr, flush=True)
+        # # Y lo reflejamos en nuestra propia base de datos
+        # start_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # await db_service.create_time_entry(
+        #     user_id=user_id,
+        #     subject_id=subject["_id"],
+        #     task_id=task_id,
+        #     start_time=start_time,
+        #     end_time=None,
+        #     description=description or f"Estudiando {subject_name}"
+        # )
  
         return f"Cronómetro iniciado para '{subject_name}'{' (' + task_title + ')' if task_title else ''}."
     except Exception as e:
         return f"Error al iniciar el cronómetro: {str(e)}"
  
  
+ 
 @mcp.tool()
 async def stop_timer(user_id: str):
     """
     Detiene el cronómetro que esté en marcha ahora mismo.
-    Úsala cuando el usuario diga 'para el cronómetro' o 'ya he terminado de estudiar'.
+    Úsala cuando el usuario diga 'para el cronómetro', 'ya he terminado de estudiar' o 'ya paré'.
+    NO necesita ningún parámetro de asignatura — para el cronómetro que esté activo, sea cual sea.
+    NO llames a start_timer después de esta herramienta salvo que el usuario lo pida explícitamente.
     """
     try:
-        entry = await db_service.get_active_time_entry(user_id)
-        if not entry:
+        cs = await _get_user_clockify_service(user_id)
+        
+        # Obtener el timer activo directamente de Clockify
+        active_entry = cs.get_active_time_entry()
+        # print(f"TOOL STOP TIMER: active_entry={active_entry}", file=sys.stderr, flush=True)
+        
+        if not active_entry:
             return "No tienes ningún cronómetro en marcha ahora mismo."
- 
-        await db_service.stop_time_entry(entry["_id"])
+        
+        # cs.stop_time_entry(active_entry["id"])
+        cs.stop_time_entry()
+
         return "Cronómetro detenido y guardado correctamente."
     except Exception as e:
+        # print(f"Error al detener el cronómetro: {str(e)}", file=sys.stderr, flush=True)
         return f"Error al detener el cronómetro: {str(e)}"
- 
- 
+
 @mcp.tool()
 async def log_time_entry(user_id: str, subject_name: str, start_time: str, end_time: str,
                           task_title: str = None, description: str = ""):
@@ -736,15 +760,20 @@ async def log_time_entry(user_id: str, subject_name: str, start_time: str, end_t
  
 
  
+
 @mcp.tool()
 async def get_time_summary(user_id: str, subject_name: str):
     """
-    Devuelve el resumen de tiempo dedicado a una asignatura, con sus últimas sesiones.
-    Úsala cuando el usuario pregunte 'cuánto tiempo llevo en X' o 'muéstrame mis sesiones de X'.
-    devuelve el tiempo dedicado en un formato amigable (horas y minutos) para el usuario.
+    Consulta de solo lectura: devuelve el tiempo total dedicado a una asignatura
+    y sus últimas sesiones registradas, SIN detener ningún cronómetro en marcha.
+    NO usar esta herramienta para parar el tiempo — para eso existe stop_timer.
+    Úsala cuando el usuario pregunte 'cuánto tiempo llevo estudiando X' o 
+    'cuántas horas le he dedicado a X'.
     """
     try:
+        print(f"[DEBUG] get_time_summary - user_id: {user_id}, subject_name: '{subject_name}'", file=sys.stderr, flush=True)
         subject = await _find_subject_by_name(user_id, subject_name)
+        print(f"[DEBUG] subject encontrado: {subject}", file=sys.stderr, flush=True)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
  

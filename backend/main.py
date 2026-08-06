@@ -59,11 +59,10 @@ ACADEMIC_PROMPT = (
     "que estás limitado a estas funciones. "
     "REGLA DE EXTRACCIÓN DE ARGUMENTOS:\n"
     "Cuando llames a cualquier herramienta que requiera el parámetro 'subject_name', "
-    "debes usar ÚNICAMENTE el nombre exacto de la asignatura tal y como está registrada "
-    "en el sistema (por ejemplo: 'Matemáticas', 'Programación').\n"
-    "NUNCA uses abreviaturas (como 'Matem'), ni arrastres erratas del usuario (como 'Matemómáticas'). "
-    "Si el nombre que menciona el usuario no coincide exactamente con las asignaturas activas, "
-    "usa primero la herramienta 'get_subjects' para verificar el nombre real antes de invocar otra herramienta."
+    "debes usar ÚNICAMENTE el nombre exacto de la asignatura tal y como el usuario la escriba en el chat."
+    "Si la asignatura no existe como la ha mencionado en el chat, usa primero get_subjects para obtener la lista de asignaturas"    
+    "Cuando el usuario mencione una asignatura, usa get_subjects para verificar el nombre exacto "
+    "antes de llamar a cualquier otra herramienta."
 )
 
 WELLBEING_PROMPT = (
@@ -180,6 +179,9 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
     try:
 
 
+        # Recuperamos los últimos 5 mensajes de historial del usuario para tener contexto de la conversación
+        history_msgs = await db_service.get_history(user_id=user_id, limit=5)
+
         await db_service.insert_message(
             user_id=user_id, 
             role="user", 
@@ -207,9 +209,7 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
                 "parameters": schema
             })
 
-        #NOTE: PARA DEPURACIÓN
-        print(f"Mensaje recibido del usuario con ID: {user_id}")
-
+    
         domain = await orchestrator.route_intent(request.message)
         print(f"Dominio detectado por el orquestador: {domain}")
 
@@ -227,6 +227,8 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
             filtered_tools = []
 
         active_agent.set_config(filtered_tools)
+        # Cargamos los últimos 5 mensajes al agente para contextualizar la respuesta
+        active_agent.load_history(history_msgs)
 
         async def custom_tool_executor(name: str, arguments: dict):
             # Inyectamos el user_id del token en los argumentos de la herramienta
@@ -339,7 +341,6 @@ async def reset_chat(user_id: str = Depends(get_current_user_id)):
 
 
 
-# Endpoint actualizado para recibir la API key:
 @app.post("/api/user/clockify-credentials")
 async def set_clockify_credentials(request: ClockifyCredentialsRequest, user_id: str = Depends(get_current_user_id)):
     """

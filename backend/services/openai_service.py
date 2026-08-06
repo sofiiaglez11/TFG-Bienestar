@@ -37,6 +37,9 @@ class OpenAIService(BaseChatbotService):
     def append_user_message(self, user_message: str):
         self.history.append({"role": "user", "content": user_message})
 
+    def append_assistant_message(self, content: str):
+        self.history.append({"role": "assistant", "content": content})
+
     async def call_model(self):
         sys_instr = self.config["system_instruction"] if self.config else self.system_instruction
         messages = [{"role": "system", "content": sys_instr}] + self.history

@@ -9,11 +9,19 @@ class AgentOrchestrator:
         else:
             self.classifier = OpenAIService()
 
-    async def route_intent(self, user_message: str) -> str:
+    async def route_intent(self, user_message: str, history_msgs: list[dict] = None) -> str:
         """
         Analiza el mensaje del usuario y decide qué agente debe responder.
         Devuelve: 'ACADEMICO', 'BIENESTAR' o 'GENERAL'
         """
+        history_str = ""
+        if history_msgs:
+            history_str = "Historial reciente de la conversación:\n"
+            for msg in history_msgs:
+                role_label = "Usuario" if msg.get("role") == "user" else "Asistente"
+                history_str += f"- {role_label}: {msg.get('content')}\n"
+            history_str += "\n"
+
         prompt = f"""
         Eres el enrutador principal de un sistema de tutoría académica y bienestar.
         Tu ÚNICA función es clasificar la intención del mensaje del usuario en una de estas 3 categorías:
@@ -22,7 +30,7 @@ class AgentOrchestrator:
         2. BIENESTAR: Si habla de su estado físico o mental (sueño, cansancio, estrés, fatiga, pausas, hábitos de descanso, cómo se siente).
         3. GENERAL: Si es un saludo ('hola', 'qué tal'), una pregunta sobre qué puedes hacer, o una despedida.
 
-        Mensaje del usuario: "{user_message}"
+        {history_str}Último mensaje del usuario (a clasificar, utilizando el historial superior como contexto de ser necesario): "{user_message}"
 
         Responde ÚNICAMENTE con un JSON con el siguiente formato, sin bloques de código ni texto adicional:
         {{"domain": "ACADEMICO" | "BIENESTAR" | "GENERAL"}}

@@ -2,6 +2,7 @@ import os
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp import ClientSession
 from contextlib import AsyncExitStack
+import sys
 
 # PARA QUE NO IMPORTE DESDE DONDE SE LANCE LA APLICACIÓN
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,8 +26,9 @@ class MCPClientService:
         server_params = StdioServerParameters(
             command="python3",
             args=[_SERVER_SCRIPT_PATH], 
-            env=current_env
-        )       
+            env=current_env,
+            stderr=sys.stderr  
+        )      
         
         self._exit_stack = AsyncExitStack()
         
