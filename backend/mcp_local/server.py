@@ -11,21 +11,13 @@ from mcp.server.session import ServerSession
  
 from services.clockify_service import ClockifyService
 from services.database_service import DatabaseService
-
+import asyncio
+from typing import Optional
+import sys
 
 db_service = DatabaseService()
 
-# async def _get_user_clockify_service(user_id: str) -> ClockifyService:
-#     """Devuelve una instancia de ClockifyService inicializada con el token o API Key del usuario."""
-#     user = await db_service.get_user_by_id(user_id)
-#     if user and user.get("clockify"):
-#         cdata = user["clockify"]
-#         return ClockifyService(
-#             token=cdata.get("token"),
-#             auth_type=cdata.get("auth_type", "api_key"),
-#             workspace_id=cdata.get("workspace_id")
-#         )
-#     return ClockifyService()
+
 
 
 async def _get_user_clockify_service(user_id: str) -> ClockifyService:
@@ -61,10 +53,6 @@ async def _find_subject_by_name(user_id: str, name: str) -> dict | None:
     subjects = await db_service.get_subjects_by_user(user_id)
     return next((s for s in subjects if _normalize(s["name"]) == _normalize(name)), None)
  
-# async def _find_subject_by_name(user_id: str, name: str) -> dict | None:
-#     """Busca una asignatura por nombre (case-insensitive) entre las del usuario."""
-#     subjects = await db_service.get_subjects_by_user(user_id)
-#     return next((s for s in subjects if s["name"].lower() == name.lower()), None)
  
  
 async def _find_task_by_title(subject_id: str, title: str) -> dict | None:
@@ -73,6 +61,8 @@ async def _find_task_by_title(subject_id: str, title: str) -> dict | None:
     return next((t for t in tasks if t["title"].lower() == title.lower()), None)
  
  
+
+
  
 @mcp.tool()
 async def get_agent_capabilities() -> str:
@@ -159,19 +149,56 @@ async def get_user_progress(user_id: str):
 @mcp.tool()
 async def get_time_spent_summary(user_id: str):
     """
-    Devuelve un resumen del tiempo total dedicado a cada asignatura.
+    Devuelve un resumen del tiempo total dedicado a cada asignatura de forma agregada desde Clockify.
     Úsala cuando el usuario pregunte 'cuánto tiempo he dedicado a X' o 'resumen de tiempo'.
     """
     try:
         subjects = await db_service.get_subjects_by_user(user_id)
-        time_summary = []
- 
-        for s in subjects:
-            entries = await db_service.get_time_entries_by_subject(s["_id"])
-            total_seconds = sum(
-                (datetime.fromisoformat(e["end_time"]) - datetime.fromisoformat(e["start_time"])).total_seconds()
-                for e in entries if e.get("end_time")
+        
+        # Obtener periodo activo si lo hay
+        active_period = await db_service.get_active_period(user_id)
+        start_date = None
+        end_date = None
+        if active_period:
+            start_date = active_period.get("start_date")
+            end_date = active_period.get("end_date")
+
+        # Obtener credenciales y service
+        cs = await _get_user_clockify_service(user_id)
+        if not cs.api_key:
+            return "No tienes configurada tu API Key de Clockify para poder consultar las horas dedicadas."
+
+        if start_date or end_date:
+            clockify_entries = await asyncio.to_thread(
+                cs.get_time_entries, start_date=start_date, end_date=end_date
             )
+        else:
+            clockify_entries = await asyncio.to_thread(
+                cs.get_time_entries, days_back=365
+            )
+
+        # Agrupar segundos de Clockify por projectId
+        project_seconds = {}
+        for entry in clockify_entries:
+            pid = entry.get("projectId")
+            if not pid:
+                continue
+            start_iso = entry.get("start")
+            end_iso = entry.get("end")
+            if start_iso and end_iso:
+                try:
+                    dt1 = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))
+                    dt2 = datetime.fromisoformat(end_iso.replace('Z', '+00:00'))
+                    seconds = (dt2 - dt1).total_seconds()
+                    project_seconds[pid] = project_seconds.get(pid, 0.0) + seconds
+                except Exception:
+                    pass
+
+        time_summary = []
+        for s in subjects:
+            pid = s.get("clockify_project_id")
+            total_seconds = project_seconds.get(pid, 0.0) if pid else 0.0
+            
             hours, remainder = divmod(total_seconds, 3600)
             minutes, _ = divmod(remainder, 60)
             time_summary.append(f"- {s['name']}: {int(hours)}h {int(minutes)}m")
@@ -739,57 +766,119 @@ async def log_time_entry(user_id: str, subject_name: str, start_time: str, end_t
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
  
-        task_id = None
+        clockify_task_id = None
         if task_title:
             task = await _find_task_by_title(subject["_id"], task_title)
             if not task:
                 return f"No encontré ninguna tarea llamada '{task_title}' en '{subject_name}'."
-            task_id = task["_id"]
+            clockify_task_id = task.get("clockify_task_id")
  
-        await db_service.create_time_entry(
-            user_id=user_id,
-            subject_id=subject["_id"],
-            task_id=task_id,
+        cs = await _get_user_clockify_service(user_id)
+        if not cs.api_key:
+            return "No tienes configurada tu API Key de Clockify para poder registrar la entrada de tiempo."
+
+        await asyncio.to_thread(
+            cs.create_time_entry,
+            description=description or f"Estudiando {subject_name}",
+            project_id=subject.get("clockify_project_id"),
+            task_id=clockify_task_id,
             start_time=start_time,
-            end_time=end_time,
-            description=description or f"Estudiando {subject_name}"
+            end_time=end_time
         )
-        return f"Entrada registrada: '{subject_name}' de {start_time} a {end_time}."
+        return f"Entrada registrada en Clockify: '{subject_name}' de {start_time} a {end_time}."
     except Exception as e:
         return f"Error al registrar la entrada de tiempo: {str(e)}"
  
 
  
 
+# @mcp.tool()
+# async def get_time_summary(user_id: str, subject_name: str):
+#     """
+#     Consulta de solo lectura: devuelve el tiempo total dedicado a una asignatura
+#     y sus últimas sesiones registradas, SIN detener ningún cronómetro en marcha.
+#     NO usar esta herramienta para parar el tiempo — para eso existe stop_timer.
+#     Úsala cuando el usuario pregunte 'cuánto tiempo llevo estudiando X' o 
+#     'cuántas horas le he dedicado a X'.
+#     """
+#     try:
+#         print(f"[DEBUG] get_time_summary - user_id: {user_id}, subject_name: '{subject_name}'", file=sys.stderr, flush=True)
+#         subject = await _find_subject_by_name(user_id, subject_name)
+#         print(f"[DEBUG] subject encontrado: {subject}", file=sys.stderr, flush=True)
+#         if not subject:
+#             return f"No encontré ninguna asignatura llamada '{subject_name}'."
+ 
+#         entries = await db_service.get_time_entries_by_subject(subject["_id"])
+#         if not entries:
+#             return f"No tienes ninguna sesión registrada para '{subject_name}' todavía."
+ 
+#         result = f"Sesiones de {subject_name}:\n"
+#         # for e in entries[:10]:
+#         for e in entries:
+#             fin = e.get("end_time") or "en curso"
+#             result += f"- {e['start_time']} -> {fin}\n"
+#         return result
+#     except Exception as e:
+#         return f"Error al obtener el resumen de tiempo: {str(e)}"
+
+
+
 @mcp.tool()
-async def get_time_summary(user_id: str, subject_name: str):
+async def get_time_summary(user_id: str, subject_name: Optional[str] = None):
     """
-    Consulta de solo lectura: devuelve el tiempo total dedicado a una asignatura
-    y sus últimas sesiones registradas, SIN detener ningún cronómetro en marcha.
-    NO usar esta herramienta para parar el tiempo — para eso existe stop_timer.
-    Úsala cuando el usuario pregunte 'cuánto tiempo llevo estudiando X' o 
-    'cuántas horas le he dedicado a X'.
+    Consulta de solo lectura: devuelve el resumen de tiempo directamente desde Clockify.
+    - Si se pasa `subject_name`, filtra por esa asignatura.
+    - Si `subject_name` es None o "todas", devuelve el resumen general.
+    NO usar esta herramienta para detener timers.
     """
     try:
-        print(f"[DEBUG] get_time_summary - user_id: {user_id}, subject_name: '{subject_name}'", file=sys.stderr, flush=True)
-        subject = await _find_subject_by_name(user_id, subject_name)
-        print(f"[DEBUG] subject encontrado: {subject}", file=sys.stderr, flush=True)
-        if not subject:
-            return f"No encontré ninguna asignatura llamada '{subject_name}'."
- 
-        entries = await db_service.get_time_entries_by_subject(subject["_id"])
+        # 1. Obtener la API Key guardada del usuario desde la BD
+        user_creds = await db_service.get_clockify_credentials(user_id)
+        if not user_creds or not user_creds.get("api_key"):
+            return "No tienes configurada tu API Key de Clockify."
+
+        # 2. Instanciar tu servicio existente
+        clockify = ClockifyService(api_key=user_creds["api_key"])
+
+        # 3. Consultar las entradas (por ejemplo, de los últimos 30 días) sin bloquear la app
+        # Usamos asyncio.to_thread porque 'requests' es síncrono
+        entries = await asyncio.to_thread(clockify.get_time_entries, days_back=30)
+
         if not entries:
-            return f"No tienes ninguna sesión registrada para '{subject_name}' todavía."
- 
-        result = f"Sesiones de {subject_name}:\n"
-        # for e in entries[:10]:
-        for e in entries:
-            fin = e.get("end_time") or "en curso"
-            result += f"- {e['start_time']} -> {fin}\n"
+            return "No tienes ninguna sesión registrada en Clockify en los últimos 30 días."
+
+        # 4. Comprobar si pide todas las asignaturas o una específica
+        is_all = not subject_name or subject_name.strip().lower() in ["todas", "all"]
+
+        result = "📊 Resumen general de Clockify:\n\n" if is_all else f"📚 Sesiones de '{subject_name}':\n\n"
+        found = False
+
+        for entry in entries:
+            desc = entry.get("description", "Sin descripción")
+            
+            # Si se busca una asignatura concreta, filtramos por la descripción del registro
+            if not is_all and subject_name.lower() not in desc.lower():
+                continue
+
+            found = True
+            
+            # Formatear fechas
+            start_raw = entry.get("start") or ""
+            start_str = start_raw[:16].replace("T", " ") if start_raw else "Fecha desconocida"
+            
+            end_raw = entry.get("end")
+            fin_str = end_raw[:16].replace("T", " ") if end_raw else "⏱️ En curso"
+
+            result += f"- [{desc}] {start_str} -> {fin_str}\n"
+
+        if not found:
+            return f"No encontré registros guardados para '{subject_name}' en los últimos 30 días."
+
         return result
+
     except Exception as e:
-        return f"Error al obtener el resumen de tiempo: {str(e)}"
- 
+        print(f"[ERROR] get_time_summary: {str(e)}", file=sys.stderr, flush=True)
+        return f"Error al consultar Clockify: {str(e)}"
 
 @mcp.tool()
 async def log_study_hours(user_id: str, subject_name: str, hours: float,
@@ -812,17 +901,19 @@ async def log_study_hours(user_id: str, subject_name: str, hours: float,
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
 
-        task_id = None
         clockify_task_id = None
         if task_title:
             task = await _find_task_by_title(subject["_id"], task_title)
             if task:
-                task_id = task["_id"]
                 clockify_task_id = task.get("clockify_task_id")
 
         # Registrar en Clockify
         cs = await _get_user_clockify_service(user_id)
-        cs.create_time_entry(
+        if not cs.api_key:
+            return "No tienes configurada tu API Key de Clockify para poder registrar las horas."
+
+        await asyncio.to_thread(
+            cs.create_time_entry,
             description=description or f"Estudiando {subject_name}",
             project_id=subject["clockify_project_id"],
             task_id=clockify_task_id,
@@ -830,19 +921,9 @@ async def log_study_hours(user_id: str, subject_name: str, hours: float,
             end_time=end_time
         )
 
-        # Registrar en BD
-        await db_service.create_time_entry(
-            user_id=user_id,
-            subject_id=subject["_id"],
-            task_id=task_id,
-            start_time=start_time,
-            end_time=end_time,
-            description=description or f"Estudiando {subject_name}"
-        )
-
         h = int(hours)
         m = int((hours - h) * 60)
-        return f"Registradas {h}h {m}m de estudio en '{subject_name}'{' (' + task_title + ')' if task_title else ''}."
+        return f"Registradas {h}h {m}m de estudio en '{subject_name}'{' (' + task_title + ')' if task_title else ''} en Clockify."
     except Exception as e:
         return f"Error al registrar las horas: {str(e)}"
         
@@ -920,7 +1001,136 @@ async def set_subject_grade(user_id: str, subject_name: str, grade: float):
         return f"Error al guardar la nota: {str(e)}"
 
 
+############################################################################
+# TOOLS PARA ESTADÍSTICAS
+
+# @mcp.tool()
+# async def get_hours_by_subject_analytics(user_id: str, subject_name: str = None):
+#     """
+#     Esta herramienta devuelve la relación entre horas estudiadas (Clockify) y notas obtenidas por cada asignatura.
+    
+#     - Si se especifica 'subject_name', devuelve las estadísticas solo de esa asignatura.
+#     - Si no se especifica 'subject_name', devuelve las estadísticas de todas las asignaturas.
+    
+#     Usa esta herramienta cuando el usuario quiera saber su rendimiento por asignatura.
+#     """
+#     try:
+#         subject = await _find_subject_by_name(user_id, subject_name) if subject_name else None
+#         if subject_name and not subject:
+#             return f"No encontré ninguna asignatura llamada '{subject_name}'."
+        
+#         analytics = await db_service.get_analytics_by_subject(user_id, subject["_id"] if subject else None)
+#         return analytics
+#     except Exception as e:
+#         return f"Error al obtener las estadísticas de horas por asignatura: {str(e)}"
+
+
+@mcp.tool()
+async def analyze_student_performance(user_id: str) -> str:
+    """
+    Realiza un análisis inteligente de las estadísticas de estudio y calificaciones del alumno utilizando IA.
+    Examina la relación entre las horas dedicadas (desde Clockify), las metas semanales y las notas obtenidas,
+    ofreciendo recomendaciones personalizadas.
+    """
+    try:
+        subjects = await db_service.get_subjects_by_user(user_id)
+        if not subjects:
+            return "No tienes asignaturas registradas para poder realizar el análisis."
+            
+        # Obtener periodo activo si lo hay
+        active_period = await db_service.get_active_period(user_id)
+        start_date = None
+        end_date = None
+        period_name = "periodo actual"
+        if active_period:
+            start_date = active_period.get("start_date")
+            end_date = active_period.get("end_date")
+            period_name = active_period.get("name", "periodo actual")
+
+        # Obtener credenciales de Clockify del usuario
+        clockify_creds = await db_service.get_clockify_credentials(user_id)
+        
+        # Obtener entradas de tiempo de Clockify
+        clockify_entries = []
+        if clockify_creds and clockify_creds.get("api_key"):
+            try:
+                cs = ClockifyService(
+                    api_key=clockify_creds["api_key"] or clockify_creds.get("token"),
+                    workspace_id=clockify_creds.get("workspace_id")
+                )
+                if start_date or end_date:
+                    clockify_entries = await asyncio.to_thread(
+                        cs.get_time_entries, start_date=start_date, end_date=end_date
+                    )
+                else:
+                    clockify_entries = await asyncio.to_thread(
+                        cs.get_time_entries, days_back=365
+                    )
+            except Exception as e:
+                print(f"Error fetching Clockify entries: {e}")
+
+        # Agrupar segundos de Clockify por projectId
+        project_seconds = {}
+        for entry in clockify_entries:
+            pid = entry.get("projectId")
+            if not pid:
+                continue
+            start_iso = entry.get("start")
+            end_iso = entry.get("end")
+            if start_iso and end_iso:
+                try:
+                    dt1 = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))
+                    dt2 = datetime.fromisoformat(end_iso.replace('Z', '+00:00'))
+                    seconds = (dt2 - dt1).total_seconds()
+                    project_seconds[pid] = project_seconds.get(pid, 0.0) + seconds
+                except Exception:
+                    pass
+
+        analytics_data = []
+        for subject in subjects:
+            s_id = str(subject["_id"])
+            clockify_project_id = subject.get("clockify_project_id")
+            
+            # Obtener segundos del proyecto desde Clockify
+            seconds = 0.0
+            if clockify_project_id and clockify_project_id in project_seconds:
+                seconds = project_seconds[clockify_project_id]
+                
+            total_hours = round(seconds / 3600.0, 2)
+            analytics_data.append({
+                "name": subject.get("name", "Asignatura"),
+                "hours": total_hours,
+                "weekly_hours_goal": subject.get("weekly_hours_goal", 0),
+                "grade": subject.get("grade")
+            })
+
+        # Preparar prompt para Gemini
+        prompt = f"""
+        Como un asesor académico inteligente y experto en bienestar estudiantil, analiza el siguiente rendimiento del alumno en el periodo "{period_name}".
+        
+        Datos de las asignaturas (horas reales registradas en Clockify vs metas semanales y calificaciones obtenidas):
+        {analytics_data}
+        
+        Por favor, realiza un análisis detallado que incluya:
+        1. **Resumen General**: Una valoración de cómo va el alumno en general.
+        2. **Relación Esfuerzo vs. Resultados**: Identifica asignaturas donde el esfuerzo (horas) se traduzca en buenas notas, o si hay asignaturas de alto esfuerzo y baja nota (donde tal vez necesite cambiar de método), o asignaturas con notas bajas y pocas horas (donde falte dedicación).
+        3. **Cumplimiento de Metas**: Evalúa si está alcanzando las metas semanales de estudio.
+        4. **Consejos y Recomendaciones**: Da 3 consejos prácticos, realistas y motivadores para mejorar su bienestar y rendimiento en el estudio.
+        
+        Responde en español de manera empática, clara y estructurada usando formato Markdown.
+        """
+        
+        # Llamar a Gemini utilizando el SDK configurado en la app
+        from google import genai
+        client = genai.Client()
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
+        return response.text
+    except Exception as e:
+        return f"Error al generar el análisis de rendimiento: {str(e)}"
+
+
 if __name__ == "__main__":
     mcp.run()
-
-    

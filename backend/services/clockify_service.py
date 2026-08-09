@@ -104,15 +104,39 @@ class ClockifyService:
     ############################################################################
     # METHODS FOR TIME ENTRIES
  
-    def get_time_entries(self, workspace_id: str = None, days_back: int = 7) -> list:
+    def get_time_entries(self, workspace_id: str = None, days_back: int = None,
+                         start_date = None, end_date = None) -> list:
         workspace_id = self._set_workspace_if_null(workspace_id)
-        end_time = datetime.now(timezone.utc)
-        start_time = end_time - timedelta(days=days_back)
+        
+        if start_date or end_date:
+            if not start_date:
+                start_dt = datetime.now(timezone.utc) - timedelta(days=30)
+            elif isinstance(start_date, str):
+                if 'T' not in start_date:
+                    start_dt = datetime.fromisoformat(f"{start_date}T00:00:00Z".replace('Z', '+00:00'))
+                else:
+                    start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            else:
+                start_dt = start_date
+
+            if not end_date:
+                end_dt = datetime.now(timezone.utc)
+            elif isinstance(end_date, str):
+                if 'T' not in end_date:
+                    end_dt = datetime.fromisoformat(f"{end_date}T23:59:59Z".replace('Z', '+00:00'))
+                else:
+                    end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            else:
+                end_dt = end_date
+        else:
+            days = days_back if days_back is not None else 7
+            end_dt = datetime.now(timezone.utc)
+            start_dt = end_dt - timedelta(days=days)
  
         url = f"{self.base_url}/workspaces/{workspace_id}/user/{self.get_user_id()}/time-entries"
         params = {
-            "start": start_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "end": end_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "start": start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "end": end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "page-size": 50
         }
  
@@ -126,7 +150,9 @@ class ClockifyService:
                 "description": entry.get("description", "Sin descripción"),
                 "start": entry.get("timeInterval", {}).get("start"),
                 "end": entry.get("timeInterval", {}).get("end"),
-                "duration": entry.get("timeInterval", {}).get("duration")
+                "duration": entry.get("timeInterval", {}).get("duration"),
+                "projectId": entry.get("projectId"),
+                "taskId": entry.get("taskId")
             })
         return simplified_entries
 

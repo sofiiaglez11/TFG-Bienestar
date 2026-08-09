@@ -63,6 +63,9 @@ ACADEMIC_PROMPT = (
     "Si la asignatura no existe como la ha mencionado en el chat, usa primero get_subjects para obtener la lista de asignaturas"    
     "Cuando el usuario mencione una asignatura, usa get_subjects para verificar el nombre exacto "
     "antes de llamar a cualquier otra herramienta."
+    "También puedes analizar el rendimiento del estudiante combinando horas de estudio y notas "
+"para dar recomendaciones personalizadas. Usa get_time_spent_summary y get_subjects para "
+"obtener los datos y ofrecer consejos concretos."
 )
 
 WELLBEING_PROMPT = (
@@ -75,10 +78,19 @@ WELLBEING_PROMPT = (
     "personalizado y útil. "
 )
 
+# GENERAL_PROMPT = (
+#     "Eres un asistente amigable y conversacional. Responde cordialmente a los saludos y "
+#     "preguntas generales. Si el usuario necesita ayuda con sus estudios, recomiéndale hablar de sus asignaturas "
+#     "o tiempos de estudio; y si se siente estresado o cansado, ofrécete a escucharle y ayudarle con su bienestar."
+# )
+
 GENERAL_PROMPT = (
-    "Eres un asistente amigable y conversacional. Responde cordialmente a los saludos y "
-    "preguntas generales. Si el usuario necesita ayuda con sus estudios, recomiéndale hablar de sus asignaturas "
-    "o tiempos de estudio; y si se siente estresado o cansado, ofrécete a escucharle y ayudarle con su bienestar."
+    "Eres un asistente amigable y conversacional. Responde cordialmente a los saludos. "
+    "Si el usuario pregunta qué puedes hacer o pide ayuda, usa SIEMPRE la herramienta "
+    "get_agent_capabilities para obtener la lista real de funciones disponibles y explícasela "
+    "de forma amigable, sin inventarte nada. "
+    "Si necesita ayuda con estudios, recomiéndale hablar de asignaturas o tiempos de estudio. "
+    "Si se siente estresado, ofrécete a escucharle."
 )
 
 academic_agent.set_system_instruction(ACADEMIC_PROMPT)
@@ -221,10 +233,9 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
             active_agent = academic_agent
             filtered_tools = [t for t in tools_raw if not t["name"].startswith("wb_") and t["name"] != "get_agent_capabilities"]
             
-        else:
+        else:  # GENERAL
             active_agent = general_agent
-            # El general no usa herramientas
-            filtered_tools = []
+            filtered_tools = [t for t in tools_raw if t["name"] == "get_agent_capabilities"]
 
         active_agent.set_config(filtered_tools)
         # Cargamos los últimos 5 mensajes al agente para contextualizar la respuesta
@@ -409,30 +420,72 @@ async def update_grade(subject_id: str, request: SubjectGradeRequest, user_id: s
 async def get_student_analytics(user_id: str = Depends(get_current_user_id)):
     """
     Devuelve las analíticas agregadas para el dashboard del alumno:
-    Cruza las horas dedicadas (desde MongoDB / Clockify) con las notas de cada asignatura.
+    Cruza las horas dedicadas (desde Clockify) con las notas de cada asignatura.
     """
     try:
         subjects = await db_service.get_subjects_by_user(user_id)
-        analytics = []
         
+        # Obtener periodo activo si lo hay
+        active_period = await db_service.get_active_period(user_id)
+        start_date = None
+        end_date = None
+        if active_period:
+            start_date = active_period.get("start_date")
+            end_date = active_period.get("end_date")
+
+        # Obtener credenciales de Clockify del usuario
+        clockify_creds = await db_service.get_clockify_credentials(user_id)
+        
+        # Obtener entradas de tiempo de Clockify
+        clockify_entries = []
+        if clockify_creds and clockify_creds.get("api_key"):
+            try:
+                import asyncio
+                cs = ClockifyService(
+                    api_key=clockify_creds["api_key"] or clockify_creds.get("token"),
+                    workspace_id=clockify_creds.get("workspace_id")
+                )
+                if start_date or end_date:
+                    clockify_entries = await asyncio.to_thread(
+                        cs.get_time_entries, start_date=start_date, end_date=end_date
+                    )
+                else:
+                    clockify_entries = await asyncio.to_thread(
+                        cs.get_time_entries, days_back=365
+                    )
+            except Exception as e:
+                # Loggear el error pero no fallar la petición completa
+                print(f"Error fetching Clockify entries: {e}")
+                clockify_entries = []
+
+        # Agrupar segundos de Clockify por projectId
+        project_seconds = {}
+        for entry in clockify_entries:
+            pid = entry.get("projectId")
+            if not pid:
+                continue
+            start_iso = entry.get("start")
+            end_iso = entry.get("end")
+            if start_iso and end_iso:
+                try:
+                    dt1 = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))
+                    dt2 = datetime.fromisoformat(end_iso.replace('Z', '+00:00'))
+                    seconds = (dt2 - dt1).total_seconds()
+                    project_seconds[pid] = project_seconds.get(pid, 0.0) + seconds
+                except Exception:
+                    pass
+
+        analytics = []
         for subject in subjects:
             s_id = str(subject["_id"])
-            entries = await db_service.get_time_entries_by_subject(s_id)
+            clockify_project_id = subject.get("clockify_project_id")
             
-            # Calcular total de segundos acumulados
-            total_seconds = 0
-            for entry in entries:
-                start_iso = entry.get("start_time")
-                end_iso = entry.get("end_time")
-                if start_iso and end_iso:
-                    try:
-                        dt1 = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))
-                        dt2 = datetime.fromisoformat(end_iso.replace('Z', '+00:00'))
-                        total_seconds += (dt2 - dt1).total_seconds()
-                    except Exception:
-                        pass
-            
-            total_hours = round(total_seconds / 3600.0, 2)
+            # Obtener segundos del proyecto desde Clockify
+            seconds = 0.0
+            if clockify_project_id and clockify_project_id in project_seconds:
+                seconds = project_seconds[clockify_project_id]
+                
+            total_hours = round(seconds / 3600.0, 2)
             analytics.append({
                 "id": s_id,
                 "name": subject.get("name", "Asignatura"),
