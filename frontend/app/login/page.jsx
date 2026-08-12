@@ -66,6 +66,7 @@ export default function LoginPage() {
             alignItems: 'center',
             height: '100vh',
             gap: '16px',
+            backgroundColor: 'var(--bg-page)'
         }}>
             <h1 style={{ color: 'var(--text-primary)', marginBottom: '8px' }}>Iniciar sesión</h1>
             <LoginForm

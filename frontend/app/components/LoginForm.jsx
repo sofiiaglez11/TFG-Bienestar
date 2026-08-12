@@ -15,11 +15,6 @@ export default function LoginForm({ onLogin, message, loading }) {
         e.preventDefault(); // para evitar que la página se recargue al enviar
 
         await onLogin(email, password);
-
-        // console.log("Datos enviaodos:", { email, password });
-
-        // alert("Intentando iniciar sesión con:\nEmail: " + email + "\nPassword: " + password);
-
     }
 
 
@@ -41,16 +36,6 @@ export default function LoginForm({ onLogin, message, loading }) {
 
             }}>
 
-
-
-            {/* <label htmlFor="email">Email:</label>
-            <input
-                type="email"
-                id="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-            /> */}
 
             <label htmlFor="email" style={{ marginBottom: '4px', marginTop: '12px' }}>
                 Email:
@@ -75,14 +60,7 @@ export default function LoginForm({ onLogin, message, loading }) {
             />
 
 
-            {/* <label htmlFor="password">Password:</label>
-            <input
-                type="password"
-                id="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-            /> */}
+
 
             <label htmlFor="password" style={{ marginBottom: '4px', marginTop: '12px' }}>
                 Contraseña:

@@ -33,6 +33,17 @@ export default function RegisterForm({ onRegister }) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
+                style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border, #cbd5e1)',
+                    background: 'var(--bg-input, #f8fafc)',
+                    color: 'var(--text-primary, #0f172a)',
+                    fontSize: '14px',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                }}
             />
 
             <label htmlFor="email">Email:</label>
@@ -42,6 +53,17 @@ export default function RegisterForm({ onRegister }) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border, #cbd5e1)',
+                    background: 'var(--bg-input, #f8fafc)',
+                    color: 'var(--text-primary, #0f172a)',
+                    fontSize: '14px',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                }}
             />
 
             <label htmlFor="password">Contraseña:</label>
@@ -51,6 +73,17 @@ export default function RegisterForm({ onRegister }) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border, #cbd5e1)',
+                    background: 'var(--bg-input, #f8fafc)',
+                    color: 'var(--text-primary, #0f172a)',
+                    fontSize: '14px',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                }}
             />
 
             <button type="submit" style={{ marginTop: '12px' }}>Crear cuenta</button>

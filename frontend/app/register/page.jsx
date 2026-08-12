@@ -39,6 +39,7 @@ export default function RegisterPage() {
             alignItems: 'center',
             height: '100vh',
             gap: '16px',
+            backgroundColor: 'var(--bg-page)'
         }}>
             <h1 style={{ color: 'var(--text-primary)', marginBottom: '8px' }}>Crear cuenta</h1>
             <RegisterForm onRegister={handleRegister} />
