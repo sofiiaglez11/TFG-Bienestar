@@ -1,3 +1,6 @@
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
 export default function MessageBubble({ message }) {
   const isUser = message.role === "user";
 
@@ -38,12 +41,132 @@ export default function MessageBubble({ message }) {
           background: isUser ? "var(--bubble-user-bg)" : "var(--bubble-ai-bg)",
           color: isUser ? "var(--bubble-user-text)" : "var(--text-primary)",
           fontSize: "14px",
-          lineHeight: "1.5",
-          whiteSpace: "pre-wrap",
+          lineHeight: "1.6",
           wordBreak: "break-word",
         }}
       >
-        {message.content}
+        {isUser ? (
+          // Mensajes del usuario: texto plano con saltos de línea
+          <span style={{ whiteSpace: "pre-wrap" }}>{message.content}</span>
+        ) : (
+          // Mensajes del asistente: renderizado markdown completo
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              // Párrafos sin margen extra en el primero
+              p: ({ children }) => (
+                <p style={{ margin: "0 0 8px 0" }}>{children}</p>
+              ),
+              // Listas
+              ul: ({ children }) => (
+                <ul style={{ margin: "4px 0 8px 0", paddingLeft: "20px" }}>{children}</ul>
+              ),
+              ol: ({ children }) => (
+                <ol style={{ margin: "4px 0 8px 0", paddingLeft: "20px" }}>{children}</ol>
+              ),
+              li: ({ children }) => (
+                <li style={{ marginBottom: "2px" }}>{children}</li>
+              ),
+              // Código inline
+              code: ({ inline, children }) =>
+                inline ? (
+                  <code
+                    style={{
+                      background: "rgba(0,0,0,0.12)",
+                      borderRadius: "4px",
+                      padding: "1px 5px",
+                      fontSize: "13px",
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    {children}
+                  </code>
+                ) : (
+                  <code>{children}</code>
+                ),
+              // Bloque de código
+              pre: ({ children }) => (
+                <pre
+                  style={{
+                    background: "rgba(0,0,0,0.15)",
+                    borderRadius: "6px",
+                    padding: "10px 12px",
+                    overflowX: "auto",
+                    fontSize: "13px",
+                    fontFamily: "monospace",
+                    margin: "6px 0",
+                  }}
+                >
+                  {children}
+                </pre>
+              ),
+              // Encabezados
+              h1: ({ children }) => (
+                <h1 style={{ fontSize: "18px", fontWeight: "700", margin: "8px 0 4px" }}>{children}</h1>
+              ),
+              h2: ({ children }) => (
+                <h2 style={{ fontSize: "16px", fontWeight: "700", margin: "8px 0 4px" }}>{children}</h2>
+              ),
+              h3: ({ children }) => (
+                <h3 style={{ fontSize: "15px", fontWeight: "600", margin: "6px 0 4px" }}>{children}</h3>
+              ),
+              // Negrita y cursiva (heredan del padre, solo aseguramos el peso)
+              strong: ({ children }) => (
+                <strong style={{ fontWeight: "700" }}>{children}</strong>
+              ),
+              em: ({ children }) => <em>{children}</em>,
+              // Separador horizontal
+              hr: () => (
+                <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "8px 0" }} />
+              ),
+              // Tablas (remark-gfm)
+              table: ({ children }) => (
+                <table
+                  style={{
+                    borderCollapse: "collapse",
+                    width: "100%",
+                    margin: "6px 0",
+                    fontSize: "13px",
+                  }}
+                >
+                  {children}
+                </table>
+              ),
+              th: ({ children }) => (
+                <th
+                  style={{
+                    border: "1px solid var(--border)",
+                    padding: "4px 8px",
+                    background: "rgba(0,0,0,0.1)",
+                    textAlign: "left",
+                  }}
+                >
+                  {children}
+                </th>
+              ),
+              td: ({ children }) => (
+                <td style={{ border: "1px solid var(--border)", padding: "4px 8px" }}>
+                  {children}
+                </td>
+              ),
+              // Blockquote
+              blockquote: ({ children }) => (
+                <blockquote
+                  style={{
+                    borderLeft: "3px solid var(--border)",
+                    margin: "6px 0",
+                    paddingLeft: "12px",
+                    opacity: 0.8,
+                  }}
+                >
+                  {children}
+                </blockquote>
+              ),
+            }}
+          >
+            {message.content}
+          </ReactMarkdown>
+        )}
       </div>
     </div>
   );
