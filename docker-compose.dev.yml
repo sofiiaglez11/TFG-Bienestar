@@ -1,0 +1,61 @@
+services:
+  # BASE DE DATOS MONGODB LOCAL
+  db:
+    image: mongo:latest
+    container_name: tfg_mongodb_dev
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data_dev:/data/db
+    networks:
+      - tfg_network
+
+  # BACKEND FASTAPI — modo desarrollo con hot-reload
+  backend:
+    build:
+      context: ./backend
+    container_name: tfg_backend_dev
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    # Montamos el código fuente local directamente en el contenedor:
+    # cualquier cambio en ./backend se refleja inmediatamente sin reconstruir
+    volumes:
+      - ./backend:/app
+    # --reload activa el hot-reload de uvicorn (detecta cambios en archivos .py)
+    # --loop asyncio es necesario para compatibilidad con el cliente MCP
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --loop asyncio
+    networks:
+      - tfg_network
+
+  # FRONTEND NEXT.JS — modo desarrollo con hot-reload
+  frontend:
+    build:
+      context: ./frontend
+    container_name: tfg_frontend_dev
+    ports:
+      - "3000:3000"
+    env_file:
+      - frontend/.env.local
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+      # Necesario para que Next.js detecte cambios de archivo dentro del contenedor (polling)
+      - WATCHPACK_POLLING=true
+    depends_on:
+      - backend
+    volumes:
+      # Montamos el código fuente local
+      - ./frontend:/app
+      # Volumen anónimo para node_modules: el contenedor usa los suyos propios,
+      # no los de tu máquina host (evita conflictos de plataforma linux/mac)
+      - /app/node_modules
+      # Excluimos también .next para no mezclar builds de host y contenedor
+      - /app/.next
+    networks:
+      - tfg_network
+
+volumes:
+  mongo_data_dev:
+networks:
+  tfg_network:
