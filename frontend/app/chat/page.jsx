@@ -7,7 +7,7 @@ import ChatInput from "../components/ChatInput";
 import ClockifyConfigModal from "../components/ClockifyConfigModal";
 import StudentDashboard from "../components/StudentDashboard";
 
-const BACKEND_URL = "http://localhost:8000";
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 export default function ChatPage() {
   const [messages, setMessages] = useState([]);
