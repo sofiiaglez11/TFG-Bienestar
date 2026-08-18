@@ -117,8 +117,23 @@ export default function LoginForm({ onLogin, message, loading }) {
 
 
 
-            <button type="submit" style={{ marginTop: '20px' }}>Login</button>
-        </form>
+            {message && (
+                <div style={{
+                    marginTop: '14px',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    backgroundColor: message.type === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
+                    color: message.type === 'error' ? '#ef4444' : '#22c55e',
+                    border: `1px solid ${message.type === 'error' ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`,
+                }}>
+                    {message.text}
+                </div>
+            )}
+
+            <button type="submit" style={{ marginTop: '20px' }} disabled={loading}>
+                {loading ? 'Cargando...' : 'Login'}
+            </button>        </form>
 
 
     );
