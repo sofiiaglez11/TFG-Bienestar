@@ -1,15 +1,11 @@
 import requests
-import os
-from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 import sys
-
-load_dotenv()
 
 class ClockifyService:
 
     def __init__(self, api_key: str = None, workspace_id: str = None):
-        self.api_key = api_key or os.getenv("CLOCKIFY_API_KEY")
+        self.api_key = api_key
         self.base_url = "https://api.clockify.me/api/v1"
         self.headers = {
             "Content-Type": "application/json",

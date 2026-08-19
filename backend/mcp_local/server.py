@@ -221,6 +221,8 @@ async def add_subject(user_id: str, name: str, weekly_hours_goal: int = 0, works
     """
     try:
         cs = await _get_user_clockify_service(user_id)
+        if not cs.api_key:
+            return "No tienes configurada tu API Key de Clockify. Conéctala desde el menú de perfil antes de añadir asignaturas."
         # 1. Crear el proyecto en Clockify
         project = cs.add_new_project(name, workspace_id)
         clockify_project_id = project.get("id")
@@ -245,6 +247,8 @@ async def add_multiple_subjects(user_id: str, names: list[str], workspace_id: st
         added = []
         skipped = []
         cs = await _get_user_clockify_service(user_id)
+        if not cs.api_key:
+            return "No tienes configurada tu API Key de Clockify. Conéctala desde el menú de perfil antes de añadir asignaturas."
 
         # Obtenemos los proyectos ya existentes en Clockify
         existing_projects = cs.get_projects(workspace_id)
@@ -543,14 +547,15 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
                 return f"No encontré ninguna tarea llamada '{parent_task_title}' en '{subject_name}'."
             parent_task_id = parent_task["_id"]
         else:
-            # Es una tarea raíz: la reflejamos también en Clockify
+            # Es una tarea raíz: la reflejamos también en Clockify (si hay API key)
             cs = await _get_user_clockify_service(user_id)
-            clockify_task = cs.add_new_task(
-                project_id=subject["clockify_project_id"],
-                task_name=title,
-                workspace_id=workspace_id
-            )
-            clockify_task_id = clockify_task.get("id")
+            if cs.api_key:
+                clockify_task = cs.add_new_task(
+                    project_id=subject["clockify_project_id"],
+                    task_name=title,
+                    workspace_id=workspace_id
+                )
+                clockify_task_id = clockify_task.get("id")
  
         await db_service.create_task(
             user_id=user_id,
@@ -694,6 +699,8 @@ async def start_timer(user_id: str, subject_name: str, task_title: str = None, d
  
         # Arrancamos el timer real en Clockify (end_time=None -> cronómetro en marcha)
         cs = await _get_user_clockify_service(user_id)
+        if not cs.api_key:
+            return "No tienes configurada tu API Key de Clockify. Conéctala desde el menú de perfil para poder registrar tiempo."
         cs.create_time_entry(
             description=description or f"Estudiando {subject_name}",
             project_id=subject["clockify_project_id"],

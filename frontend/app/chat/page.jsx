@@ -24,7 +24,6 @@ export default function ChatPage() {
 
   const router = useRouter();
 
-  // 1. Cargar historial o lanzar saludo proactivo al iniciar
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -66,26 +65,28 @@ export default function ChatPage() {
         if (res.ok) {
           const data = await res.json();
           setClockifyConnected(data.connected);
+          // Si ya está conectado, cargamos el historial normalmente
+          if (data.connected) {
+            loadChatHistory(token);
+          }
+          // Si no está conectado, no cargamos historial ni saludo proactivo;
+          // el banner de bienvenida se encargará de guiar al usuario.
         }
       } catch (err) {
         console.error("Error al comprobar estado de Clockify:", err);
       }
     };
 
-    checkClockifyStatus();
-
-    const loadChatHistory = async () => {
+    const loadChatHistory = async (tok) => {
       setIsLoading(true);
       try {
-        // Pedimos los mensajes previos del usuario a la BD
         const res = await fetch(`${BACKEND_URL}/api/chat/history`, {
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${tok}`,
           },
         });
 
         if (res.status === 401) {
-          // Token caducado o inválido
           localStorage.removeItem("token");
           router.push("/login");
           return;
@@ -95,12 +96,10 @@ export default function ChatPage() {
 
         const data = await res.json();
 
-        // Si el usuario ya tiene conversación, la pintamos
         if (data.history && data.history.length > 0) {
           setMessages(data.history);
         } else {
-          // Si la conversación está vacía, solicitamos un saludo proactivo al Agente de Bienestar
-          triggerProactiveGreeting(token);
+          triggerProactiveGreeting(tok);
         }
       } catch (err) {
         console.error(err);
@@ -110,8 +109,9 @@ export default function ChatPage() {
       }
     };
 
-    loadChatHistory();
+    checkClockifyStatus();
   }, [router]);
+
 
   // 2. Función para disparar el saludo proactivo inicial
   const triggerProactiveGreeting = async (token) => {
@@ -336,13 +336,13 @@ export default function ChatPage() {
               }}
               title={isSidebarCollapsed ? "Chat" : ""}
             >
-              <span style={{ fontSize: "16px" }}>💬</span>
+
               {!isSidebarCollapsed && <span>Chat</span>}
             </button>
 
             {/* Botón Estadísticas */}
             <button
-              onClick={() => setActiveTab("stats")}
+              onClick={() => clockifyConnected && setActiveTab("stats")}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -351,20 +351,19 @@ export default function ChatPage() {
                 padding: isSidebarCollapsed ? "12px" : "10px 14px",
                 borderRadius: "8px",
                 border: "none",
-                // Cambia el fondo según la pestaña activa
                 backgroundColor: activeTab === "stats" ? "var(--pressed-button-bg)" : "transparent",
-                // Color de texto siempre fijo
-                color: "var(--text-primary)",
+                color: clockifyConnected ? "var(--text-primary)" : "var(--text-secondary)",
                 fontSize: "14px",
                 fontWeight: activeTab === "stats" ? "600" : "500",
-                cursor: "pointer",
+                cursor: clockifyConnected ? "pointer" : "not-allowed",
                 transition: "all 0.2s ease",
                 width: "100%",
+                opacity: clockifyConnected ? 1 : 0.5,
               }}
-              title={isSidebarCollapsed ? "Estadísticas" : ""}
+              title={isSidebarCollapsed ? "Estadísticas" : (!clockifyConnected ? "Conecta Clockify para ver las estadísticas" : "")}
             >
-              <span style={{ fontSize: "16px" }}>📊</span>
-              {!isSidebarCollapsed && <span>Estadísticas</span>}
+              <span style={{ fontSize: "16px" }}>{clockifyConnected ? "📊" : "🔒"}</span>
+              {!isSidebarCollapsed && <span>Estadísticas{!clockifyConnected && <span style={{ fontSize: "11px", marginLeft: "4px", color: "var(--text-secondary)" }}></span>}</span>}
             </button>
           </div>
         </div>
@@ -489,7 +488,9 @@ export default function ChatPage() {
                     onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "var(--bg-page)")}
                     onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                   >
-                    <span style={{ color: "#22c55e", fontSize: "10px" }}>●</span> Clockify Conectado
+
+                    <span>Clockify conectado</span>
+
                   </button>
                 ) : (
                   <button
@@ -513,7 +514,7 @@ export default function ChatPage() {
                     onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "var(--bg-page)")}
                     onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                   >
-                    <span style={{ color: "#ef4444", fontSize: "10px" }}>●</span> Configurar Clockify
+                    Configurar Clockify
                   </button>
                 )}
                 <button
@@ -537,7 +538,7 @@ export default function ChatPage() {
                   onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "var(--bg-page)")}
                   onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                 >
-                  🚪 Cerrar sesión
+                  Cerrar sesión
                 </button>
               </div>
             </>
@@ -558,30 +559,113 @@ export default function ChatPage() {
       >
         {activeTab === "chat" ? (
           <>
-            {/* Message Area */}
-            <ChatWindow messages={messages} isLoading={isLoading} />
-
-            {/* Error Banner */}
-            {error && (
+            {/* Banner de bienvenida/onboarding si Clockify no está configurado */}
+            {/* Si Clockify no está conectado, mostramos la tarjeta centrada en el chat */}
+            {!clockifyConnected ? (
               <div
                 style={{
-                  margin: "0 16px 8px",
-                  padding: "10px 14px",
-                  background: "#fef2f2",
-                  border: "1px solid #fecaca",
-                  borderRadius: "8px",
-                  color: "#dc2626",
-                  fontSize: "13px",
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "20px",
                 }}
               >
-                {error}
-              </div>
-            )}
+                <div
+                  style={{
+                    maxWidth: "480px",
+                    width: "100%",
+                    padding: "32px",
+                    borderRadius: "20px",
+                    background: "var(--bg-surface)",
+                    border: "1px solid var(--border)",
+                    boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.05)",
+                    textAlign: "center",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "18px",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "56px",
+                      height: "56px",
+                      borderRadius: "16px",
+                      background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "28px",
+                    }}
+                  >
+                    🎓
+                  </div>
 
-            {/* Input */}
-            <ChatInput onSend={sendMessage} isLoading={isLoading} />
+                  <div>
+                    <h2 style={{ margin: "0 0 6px 0", fontSize: "20px", color: "var(--text-primary)" }}>
+                      ¡Bienvenido/a, {userName}!
+                    </h2>
+                    <p style={{ margin: 0, fontSize: "14px", color: "var(--text-secondary)", lineHeight: "1.5" }}>
+                      Conecta tu cuenta de Clockify para que te pueda ayudar a analizar tus hábitos de estudio.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => setShowClockifyModal(true)}
+                    style={{
+                      width: "100%",
+                      padding: "12px 20px",
+                      borderRadius: "10px",
+                      border: "none",
+                      background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                      color: "#ffffff",
+                      fontWeight: "600",
+                      fontSize: "14px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "8px",
+                      boxShadow: "0 4px 12px rgba(99,102,241,0.25)",
+                      transition: "transform 0.1s ease, opacity 0.2s",
+                    }}
+                    onMouseOver={(e) => (e.currentTarget.style.opacity = "0.9")}
+                    onMouseOut={(e) => (e.currentTarget.style.opacity = "1")}
+                  >
+                    Vincular Clockify
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Message Area */}
+                <ChatWindow messages={messages} isLoading={isLoading} />
+
+                {/* Error Banner */}
+                {error && (
+                  <div
+                    style={{
+                      margin: "0 16px 8px",
+                      padding: "10px 14px",
+                      background: "#fef2f2",
+                      border: "1px solid #fecaca",
+                      borderRadius: "8px",
+                      color: "#dc2626",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {error}
+                  </div>
+                )}
+
+                {/* Input */}
+                <ChatInput onSend={sendMessage} isLoading={isLoading} />
+              </>
+            )}
           </>
         ) : (
+
           <div style={{ flex: 1, padding: "24px", overflow: "hidden" }}>
             <StudentDashboard isInline={true} />
           </div>

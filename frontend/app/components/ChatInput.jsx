@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Send } from "lucide-react";
 
-export default function ChatInput({ onSend, isLoading }) {
+export default function ChatInput({ onSend, isLoading, disabled = false }) {
   const [text, setText] = useState("");
   const textareaRef = useRef(null);
 
@@ -24,7 +24,7 @@ export default function ChatInput({ onSend, isLoading }) {
 
   const handleSend = () => {
     const trimmed = text.trim();
-    if (!trimmed || isLoading) return;
+    if (!trimmed || isLoading || disabled) return;
     onSend(trimmed);
     setText("");
   };
@@ -50,14 +50,19 @@ export default function ChatInput({ onSend, isLoading }) {
     >
       <textarea
         ref={textareaRef}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
+        value={disabled ? "" : text}
+        onChange={(e) => { if (!disabled) setText(e.target.value); }}
         onKeyDown={handleKeyDown}
-        placeholder="Escribe un mensaje... (Enter para enviar)"
+        readOnly={disabled}
+        placeholder={
+          disabled
+            ? "⚠️ Configura Clockify desde tu perfil para empezar a chatear..."
+            : "Escribe un mensaje... (Enter para enviar)"
+        }
         style={{
           flex: 1,
           resize: "none",
-          border: "1px solid var(--border)",
+          border: `1px solid ${disabled ? "var(--border)" : "var(--border)"}`,
           borderRadius: "12px",
           padding: "10px 14px",
           fontSize: "14px",
@@ -67,32 +72,37 @@ export default function ChatInput({ onSend, isLoading }) {
           minHeight: "42px",
           maxHeight: "20vh",
           overflowY: "hidden",
-          color: "var(--text-primary)",
-          background: "var(--bg-input)",
+          color: disabled ? "var(--text-secondary)" : "var(--text-primary)",
+          background: disabled ? "var(--bg-page)" : "var(--bg-input)",
           transition: "border-color 0.15s",
           boxSizing: "border-box",
+          cursor: disabled ? "not-allowed" : "text",
+          opacity: disabled ? 0.6 : 1,
         }}
-        onFocus={(e) => (e.target.style.borderColor = "var(--border-focus)")}
+        onFocus={(e) => {
+          if (!disabled) e.target.style.borderColor = "var(--border-focus)";
+        }}
         onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
       />
 
       <button
         onClick={handleSend}
-        disabled={!text.trim() || isLoading}
+        disabled={!text.trim() || isLoading || disabled}
         style={{
           width: "40px",
           height: "40px",
           borderRadius: "10px",
           border: "none",
-          background: !text.trim() || isLoading ? "var(--bg-input)" : "var(--brand)",
+          background: !text.trim() || isLoading || disabled ? "var(--bg-input)" : "var(--brand)",
           color: "var(--text-primary)",
-          cursor: !text.trim() || isLoading ? "not-allowed" : "pointer",
+          cursor: !text.trim() || isLoading || disabled ? "not-allowed" : "pointer",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           flexShrink: 0,
           transition: "background 0.15s",
           fontSize: "16px",
+          opacity: disabled ? 0.5 : 1,
         }}
         aria-label="Enviar mensaje"
       >
