@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -32,8 +33,7 @@ db_service = DatabaseService()
 mcp_client = MCPClientService()
 
 
-ACTIVE_MODEL = "openai" 
-# ACTIVE_MODEL = "gemini"
+ACTIVE_MODEL = os.getenv("LLM_PROVIDER", "gemini")
 
 orchestrator = AgentOrchestrator(provider=ACTIVE_MODEL)
 
