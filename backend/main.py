@@ -355,26 +355,32 @@ async def reset_chat(user_id: str = Depends(get_current_user_id)):
 @app.post("/api/user/clockify-credentials")
 async def set_clockify_credentials(request: ClockifyCredentialsRequest, user_id: str = Depends(get_current_user_id)):
     """
-    Guarda la API Key de Clockify del usuario y verifica la conexión.
+    Valida la API Key de Clockify contra su API y, si es correcta, la guarda.
     """
+    # 1. Validar la clave ANTES de guardar nada
     try:
-        cs = ClockifyService(api_key=request.api_key, workspace_id=request.workspace_id)
-        workspaces = cs.get_workspaces()
-        workspace_id = request.workspace_id or (workspaces[0]["id"] if workspaces else None)
-        
-        await db_service.update_clockify_credentials(
-            user_id=user_id,
-            api_key=request.api_key,
-            workspace_id=workspace_id
-        )
-        return {
-            "message": "Cuenta de Clockify vinculada correctamente",
-            "connected": True,
-            "workspace_id": workspace_id,
-            "workspaces_count": len(workspaces)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"No se pudo verificar la API Key de Clockify: {str(e)}")
+        clockify_user = await ClockifyService.validate_api_key(request.api_key)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # 2. La clave es válida → obtener workspace por defecto
+    clockify_user_id = clockify_user.get("id")
+    default_workspace_id = request.workspace_id or clockify_user.get("defaultWorkspace")
+
+    # 3. Guardar en base de datos
+    await db_service.update_clockify_credentials(
+        user_id=user_id,
+        api_key=request.api_key,
+        workspace_id=default_workspace_id,
+        clockify_user_id=clockify_user_id
+    )
+
+    return {
+        "message": "Cuenta de Clockify vinculada correctamente",
+        "connected": True,
+        "workspace_id": default_workspace_id,
+        "clockify_user_id": clockify_user_id,
+    }
 
 
 @app.get("/api/user/clockify-status")

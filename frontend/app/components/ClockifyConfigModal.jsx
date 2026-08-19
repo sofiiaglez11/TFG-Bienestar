@@ -207,47 +207,10 @@ export default function ClockifyConfigModal({ isOpen, onClose }) {
                 </div>
               )}
             </div>
-            {isConnected && (
-              <button
-                onClick={handleDisconnect}
-                disabled={loading}
-                style={{
-                  fontSize: "12px",
-                  padding: "5px 11px",
-                  borderRadius: "6px",
-                  border: "1px solid rgba(239,68,68,0.35)",
-                  background: "transparent",
-                  color: "#ef4444",
-                  cursor: loading ? "not-allowed" : "pointer",
-                  fontWeight: "500",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                Desconectar
-              </button>
-            )}
+
           </div>
 
-          {/* Mensaje feedback */}
-          {message && (
-            <div
-              style={{
-                padding: "10px 14px",
-                borderRadius: "8px",
-                marginBottom: "16px",
-                fontSize: "13px",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                backgroundColor: message.type === "success" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
-                color: message.type === "success" ? "#16a34a" : "#dc2626",
-                border: `1px solid ${message.type === "success" ? "rgba(34,197,94,0.25)" : "rgba(239,68,68,0.25)"}`,
-              }}
-            >
-              <span style={{ fontWeight: "700" }}>{message.type === "success" ? "✓" : "!"}</span>
-              {message.text}
-            </div>
-          )}
+
 
           {/* Guía paso a paso (desplegable) */}
           <div
@@ -422,6 +385,26 @@ export default function ClockifyConfigModal({ isOpen, onClose }) {
               </div>
             </div>
 
+            {/* Mensaje feedback */}
+            {message && (
+              <div
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: "8px",
+                  marginBottom: "16px",
+                  fontSize: "13px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  backgroundColor: message.type === "success" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
+                  color: message.type === "success" ? "#16a34a" : "#dc2626",
+                  border: `1px solid ${message.type === "success" ? "rgba(34,197,94,0.25)" : "rgba(239,68,68,0.25)"}`,
+                }}
+              >
+                {message.text}
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
               <button
                 type="button"
@@ -466,6 +449,8 @@ export default function ClockifyConfigModal({ isOpen, onClose }) {
               </button>
             </div>
           </form>
+
+
         </div>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import requests
+import httpx
 from datetime import datetime, timedelta, timezone
 import sys
 
@@ -13,6 +14,34 @@ class ClockifyService:
         }
         self._workspace_id = workspace_id
         self._current_workspace = None
+
+    @staticmethod
+    async def validate_api_key(api_key: str) -> dict:
+        """
+        Valida una API Key contra el endpoint /user de Clockify.
+        Devuelve los datos del usuario (id, name, defaultWorkspace) si es válida.
+        Lanza ValueError si la clave es inválida o hay error de red.
+        """
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            try:
+                response = await client.get(
+                    "https://api.clockify.me/api/v1/user",
+                    headers={"X-Api-Key": api_key}
+                )
+            except httpx.RequestError as exc:
+                raise ValueError(f"No se pudo conectar con Clockify: {exc}")
+
+        if response.status_code == 401:
+            raise ValueError(
+                "La API Key introducida no es válida. "
+                "Compruébala en tu perfil de Clockify."
+            )
+        if response.status_code != 200:
+            raise ValueError(
+                f"Error inesperado al conectar con Clockify (código {response.status_code})."
+            )
+
+        return response.json()  # contiene id, name, defaultWorkspace, etc.
 
     def get_workspaces(self):
         """Devuelve la lista de espacios de trabajo del usuario autenticado."""

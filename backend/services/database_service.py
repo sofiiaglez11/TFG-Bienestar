@@ -122,13 +122,15 @@ class DatabaseService:
             return None
 
     
-    async def update_clockify_credentials(self, user_id: str, api_key: str, workspace_id: str = None):
+    async def update_clockify_credentials(self, user_id: str, api_key: str, workspace_id: str = None, clockify_user_id: str = None):
         """Actualiza la API Key y Workspace de Clockify del usuario."""
         clockify_data = {
             "api_key": api_key,
             "workspace_id": workspace_id,
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
+        if clockify_user_id:
+            clockify_data["clockify_user_id"] = clockify_user_id
         await self.users.update_one(
             {"_id": ObjectId(user_id)},
             {"$set": {"clockify": clockify_data}}
