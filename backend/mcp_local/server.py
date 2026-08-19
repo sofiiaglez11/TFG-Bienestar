@@ -1,6 +1,7 @@
  
 import os
 import sys
+import json
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from datetime import datetime, timezone
  
@@ -541,21 +542,19 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
         clockify_task_id = None
  
         if parent_task_title:
-            # Es una subtarea: no se refleja en Clockify (no soporta tareas anidadas)
             parent_task = await _find_task_by_title(subject["_id"], parent_task_title)
             if not parent_task:
                 return f"No encontré ninguna tarea llamada '{parent_task_title}' en '{subject_name}'."
             parent_task_id = parent_task["_id"]
-        else:
-            # Es una tarea raíz: la reflejamos también en Clockify (si hay API key)
-            cs = await _get_user_clockify_service(user_id)
-            if cs.api_key:
-                clockify_task = cs.add_new_task(
-                    project_id=subject["clockify_project_id"],
-                    task_name=title,
-                    workspace_id=workspace_id
-                )
-                clockify_task_id = clockify_task.get("id")
+        
+        cs = await _get_user_clockify_service(user_id)
+        if cs.api_key:
+            clockify_task = cs.add_new_task(
+                project_id=subject["clockify_project_id"],
+                task_name=title,
+                workspace_id=workspace_id
+            )
+            clockify_task_id = clockify_task.get("id")
  
         await db_service.create_task(
             user_id=user_id,
@@ -571,31 +570,103 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
         return f"Error al añadir la tarea: {str(e)}"
  
  
+# @mcp.tool()
+# async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False):
+#     """
+#     Devuelve la lista de tareas de una asignatura.
+#     Úsala cuando el usuario pregunte 'qué tareas tengo de X' o 'muéstrame las tareas de X'.
+#     only_pending=True para mostrar solo las que faltan por completar.
+#     Si hay subtareas, muestralas de forma jerarquizada, se tiene que entender en el mensaje
+#     cuál es la tarea principal y cuáles son sus subtareas.
+#     """
+#     try:
+#         subject = await _find_subject_by_name(user_id, subject_name)
+#         if not subject:
+#             return f"No encontré ninguna asignatura llamada '{subject_name}'."
+ 
+#         tasks = await db_service.get_tasks_by_subject(subject["_id"], include_completed=not only_pending)
+#         if not tasks:
+#             return f"No tienes tareas registradas para '{subject_name}'."
+ 
+#         result = f"Tareas de {subject_name}:\n"
+#         for t in tasks:
+#             state = "✅" if t["completed"] else "⏳"
+#             date = f" (vence: {t['due_date']})" if t.get("due_date") else ""
+#             result += f"- {state} {t['title']}{date}\n"
+#         return result
+#     except Exception as e:
+#         return f"Error al obtener las tareas: {str(e)}"
+ 
+
 @mcp.tool()
 async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False):
     """
-    Devuelve la lista de tareas de una asignatura.
+    Devuelve las tareas de una asignatura como datos estructurados (JSON).
     Úsala cuando el usuario pregunte 'qué tareas tengo de X' o 'muéstrame las tareas de X'.
-    only_pending=True para mostrar solo las que faltan por completar.
+    only_pending=True para mostrar solo las pendientes.
+
+    La respuesta es un JSON con esta estructura:
+    {
+      "subject": "Nombre asignatura",
+      "total": N,
+      "tasks": [
+        {
+          "title": "...",
+          "completed": bool,
+          "due_date": "...",      // null si no tiene fecha
+          "description": "...",
+          "subtasks": [           // lista vacía si no tiene subtareas
+            { "title": "...", "completed": bool, "due_date": "...", "description": "..." }
+          ]
+        }
+      ]
+    }
+
+    Interpreta estos datos para presentarlos de forma clara al usuario:
+    - Muestra cada tarea principal y debajo sus subtareas con jerarquía visible
+    - Indica siempre si están completadas o pendientes
+    - Menciona la fecha de vencimiento si existe
     """
     try:
         subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
- 
-        tasks = await db_service.get_tasks_by_subject(subject["_id"], include_completed=not only_pending)
-        if not tasks:
+
+        all_tasks = await db_service.get_tasks_by_subject(subject["_id"], include_completed=not only_pending)
+        if not all_tasks:
             return f"No tienes tareas registradas para '{subject_name}'."
- 
-        result = f"Tareas de {subject_name}:\n"
-        for t in tasks:
-            estado = "✅" if t["completed"] else "⏳"
-            fecha = f" (vence: {t['due_date']})" if t.get("due_date") else ""
-            result += f"- {estado} {t['title']}{fecha}\n"
-        return result
+
+        # Separar tareas raíz de subtareas y agruparlas por padre
+        root_tasks = [t for t in all_tasks if not t.get("parent_task_id")]
+        subtasks_by_parent = {}
+        for t in all_tasks:
+            pid = t.get("parent_task_id")
+            if pid:
+                subtasks_by_parent.setdefault(pid, []).append(t)
+
+        def serialize(t):
+            return {
+                "title": t.get("title"),
+                "completed": t.get("completed", False),
+                "due_date": t.get("due_date"),
+                "description": t.get("description") or "",
+            }
+
+        tasks_data = []
+        for root in root_tasks:
+            entry = serialize(root)
+            entry["subtasks"] = [serialize(s) for s in subtasks_by_parent.get(root["_id"], [])]
+            tasks_data.append(entry)
+
+        return json.dumps({
+            "subject": subject_name,
+            "total": len(all_tasks),
+            "tasks": tasks_data
+        }, ensure_ascii=False, indent=2)
+
     except Exception as e:
         return f"Error al obtener las tareas: {str(e)}"
- 
+
  
 @mcp.tool()
 async def complete_task(user_id: str, subject_name: str, task_title: str):
@@ -710,16 +781,7 @@ async def start_timer(user_id: str, subject_name: str, task_title: str = None, d
         )
  
         print(f"FIN TOOL START TIMER", file=sys.stderr, flush=True)
-        # # Y lo reflejamos en nuestra propia base de datos
-        # start_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        # await db_service.create_time_entry(
-        #     user_id=user_id,
-        #     subject_id=subject["_id"],
-        #     task_id=task_id,
-        #     start_time=start_time,
-        #     end_time=None,
-        #     description=description or f"Estudiando {subject_name}"
-        # )
+
  
         return f"Cronómetro iniciado para '{subject_name}'{' (' + task_title + ')' if task_title else ''}."
     except Exception as e:
