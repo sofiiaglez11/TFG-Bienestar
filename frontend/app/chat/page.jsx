@@ -57,6 +57,26 @@ export default function ChatPage() {
     fetchUserInfo();
 
     // Comprobar si el usuario tiene Clockify conectado
+    // const checkClockifyStatus = async () => {
+    //   try {
+    //     const res = await fetch(`${BACKEND_URL}/api/user/clockify-status`, {
+    //       headers: { Authorization: `Bearer ${token}` },
+    //     });
+    //     if (res.ok) {
+    //       const data = await res.json();
+    //       setClockifyConnected(data.connected);
+    //       // Si ya está conectado, cargamos el historial normalmente
+    //       if (data.connected) {
+    //         loadChatHistory(token);
+    //       }
+    //       // Si no está conectado, no cargamos historial ni saludo proactivo;
+    //       // el banner de bienvenida se encargará de guiar al usuario.
+    //     }
+    //   } catch (err) {
+    //     console.error("Error al comprobar estado de Clockify:", err);
+    //   }
+    // };
+
     const checkClockifyStatus = async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/api/user/clockify-status`, {
@@ -65,15 +85,16 @@ export default function ChatPage() {
         if (res.ok) {
           const data = await res.json();
           setClockifyConnected(data.connected);
+          localStorage.setItem("clockifyConnected", data.connected.toString());
           // Si ya está conectado, cargamos el historial normalmente
           if (data.connected) {
             loadChatHistory(token);
           }
-          // Si no está conectado, no cargamos historial ni saludo proactivo;
-          // el banner de bienvenida se encargará de guiar al usuario.
         }
       } catch (err) {
         console.error("Error al comprobar estado de Clockify:", err);
+        const cached = localStorage.getItem("clockifyConnected");
+        if (cached) setClockifyConnected(cached === "true");
       }
     };
 
