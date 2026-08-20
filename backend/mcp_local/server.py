@@ -699,16 +699,35 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
         subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
- 
+
         parent_task_id = None
         clockify_task_id = None
- 
+
         if parent_task_title:
             parent_task = await _find_task_by_title(subject["_id"], parent_task_title)
             if not parent_task:
                 return f"No encontré ninguna tarea llamada '{parent_task_title}' en '{subject_name}'."
             parent_task_id = parent_task["_id"]
-        
+
+        # Comprobar duplicados: misma asignatura, mismo titulo (case-insensitive) y mismo padre
+        existing_tasks = await db_service.get_tasks_by_subject(subject["_id"])
+        duplicate = next(
+            (t for t in existing_tasks
+             if t["title"].lower() == title.lower()
+             and t.get("parent_task_id") == parent_task_id),
+            None
+        )
+        if duplicate:
+            nivel = (
+                f"como subtarea de '{parent_task_title}'"
+                if parent_task_id
+                else f"en '{subject_name}' (nivel raiz)"
+            )
+            return (
+                f"Ya existe una tarea llamada '{title}' {nivel}. "
+                f"Usa un nombre diferente para evitar confusiones."
+            )
+
         cs = await _get_user_clockify_service(user_id)
         if cs.api_key:
             clockify_task = cs.add_new_task(
@@ -717,7 +736,7 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
                 workspace_id=workspace_id
             )
             clockify_task_id = clockify_task.get("id")
- 
+
         await db_service.create_task(
             user_id=user_id,
             subject_id=subject["_id"],

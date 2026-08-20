@@ -32,6 +32,13 @@ class DatabaseService:
         await self.subjects.create_index([("user_id", 1), ("period_id", 1)])
         await self.tasks.create_index([("subject_id", 1)])
         await self.tasks.create_index([("parent_task_id", 1)])
+        # Indice unico: no puede haber dos tareas con el mismo titulo en la misma asignatura
+        # y con el mismo padre (o ambas sin padre). Garantiza unicidad a nivel de BD.
+        await self.tasks.create_index(
+            [("subject_id", 1), ("parent_task_id", 1), ("title", 1)],
+            unique=True,
+            name="unique_task_per_subject_and_parent"
+        )
         await self.time_entries.create_index([("subject_id", 1), ("start_time", -1)])
         await self.time_entries.create_index([("task_id", 1)])
         # await self.deadlines.create_index([("user_id", 1), ("date", 1)])
