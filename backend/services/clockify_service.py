@@ -159,8 +159,33 @@ class ClockifyService:
         response.raise_for_status()
         return response.json()
 
-    def update_task(self, project_id: str, task_id: str, new_name: str = None, note: str = None, is_archived: bool = None, workspace_id: str = None) -> dict:
-        """Actualiza una tarea de Clockify por su ID."""
+    # def update_task(self, project_id: str, task_id: str, new_name: str = None, note: str = None, is_archived: bool = None, workspace_id: str = None) -> dict:
+    #     """Actualiza una tarea de Clockify por su ID."""
+    #     if not task_id:
+    #         return {}
+    #     workspace_id = self._set_workspace_if_null(workspace_id)
+    #     url = f"{self.base_url}/workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}"
+
+    #     payload = {}
+    #     if new_name:
+    #         payload["name"] = new_name
+    #     if note:
+    #         payload["note"] = note
+    #     if is_archived:
+    #         payload["archived"] = is_archived
+
+    #     response = requests.put(url, json=payload, headers=self.headers)
+    #     print(f"UPDATE TASK RESPONSE: {response.status_code} \n {response.content}", file=sys.stderr, flush=True)
+    #     response.raise_for_status()
+    #     return response.json() if response.content else {}
+
+
+    def update_task(self, project_id: str, task_id: str,
+                new_name: str = None, status: str = None,
+                workspace_id: str = None) -> dict:
+        """Actualiza nombre y/o status de una tarea de Clockify.
+        status puede ser 'ACTIVE' o 'DONE'.
+        """
         if not task_id:
             return {}
         workspace_id = self._set_workspace_if_null(workspace_id)
@@ -169,15 +194,19 @@ class ClockifyService:
         payload = {}
         if new_name:
             payload["name"] = new_name
-        if note:
-            payload["note"] = note
-        if is_archived:
-            payload["archived"] = is_archived
+        if status:
+            payload["status"] = status  # "ACTIVE" o "DONE"
+
+        if not payload:
+            return {}
 
         response = requests.put(url, json=payload, headers=self.headers)
-        print(f"UPDATE TASK RESPONSE: {response.status_code} \n {response.content}", file=sys.stderr, flush=True)
+        print(f"[UPDATE TASK RESPONSE]: {response.status_code} \t {payload} \t {response.content}", file=sys.stderr, flush=True)
+        if response.status_code == 404:
+            return {}
         response.raise_for_status()
         return response.json() if response.content else {}
+
 
     ############################################################################
     # METHODS FOR TIME ENTRIES

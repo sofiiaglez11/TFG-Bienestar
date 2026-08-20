@@ -684,39 +684,55 @@ async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False)
         return f"Error al obtener las tareas: {str(e)}"
 
  
+    
 @mcp.tool()
-async def complete_task(user_id: str, subject_name: str, task_title: str):
+async def complete_task(user_id: str, subject_name: str, task_title: str, completed: bool = True):
     """
-    Marca una tarea como completada.
+    Marca una tarea como completada o pendiente.
     Úsala cuando el usuario diga 'ya terminé X' o 'marca X como hecha'.
+    Para revertirla: completed=False.
     """
     try:
         subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
- 
+
         task = await _find_task_by_title(subject["_id"], task_title)
         if not task:
             return f"No encontré ninguna tarea llamada '{task_title}' en '{subject_name}'."
- 
-        await db_service.mark_task_completed(task["_id"])
-        return f"Tarea '{task_title}' marcada como completada."
+
+        # 1. Actualizar en MongoDB
+        await db_service.mark_task_completed(task["_id"], completed)
+
+        # 2. Sincronizar en Clockify (no crítico)
+        try:
+            cs = await _get_user_clockify_service(user_id)
+            if cs.api_key and task.get("clockify_task_id") and subject.get("clockify_project_id"):
+                clockify_status = "DONE" if completed else "ACTIVE"
+                cs.update_task(
+                    project_id=subject["clockify_project_id"],
+                    task_id=task["clockify_task_id"],
+                    status=clockify_status,
+                    new_name=task['title']
+                )
+        except Exception:
+            pass  # no crítico
+
+        estado = "completada" if completed else "pendiente"
+        return f"Tarea '{task_title}' marcada como {estado}."
     except Exception as e:
         return f"Error al completar la tarea: {str(e)}"
-    
+
+
 
 @mcp.tool()
 async def edit_task(user_id: str, subject_name: str, task_title: str,
                     new_title: str = None, description: str = None,
-                    due_date: str = None, status: str = None):
+                    due_date: str = None):
     """
-    Edita una tarea existente de una asignatura. Permite cambiar su título,
-    descripción o fecha de vencimiento.
-    Úsala cuando el usuario diga 'cambia la fecha de X', 'renombra la tarea X a Y'
-    o 'actualiza la descripción de X'.
-    Solo se actualizan los campos que el usuario especifique.
-    due_date, si se indica, debe tener formato ISO 8601 (ej: '2026-07-20').
-    status puede ser "DONE", "ACTIVE" o "ALL"
+    Edita una tarea existente: título, descripción o fecha de vencimiento.
+    Para marcar una tarea como completada o revertirla, usa complete_task.
+    due_date debe tener formato ISO 8601 (ej: '2026-07-20').
     """
     try:
         subject = await _find_subject_by_name(user_id, subject_name)
@@ -734,21 +750,35 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
             updates["description"] = description
         if due_date is not None:
             updates["due_date"] = due_date
-        if status is not None:
-            updates["status"] = status
 
         if not updates:
             return "No me has indicado qué quieres cambiar de la tarea."
 
+        # 1. Actualizar en MongoDB
         await db_service.update_task(task["_id"], **updates)
+
+        # 2. Si cambia el nombre, sincronizar con Clockify (no crítico)
+        if new_title:
+            try:
+                cs = await _get_user_clockify_service(user_id)
+                if cs.api_key and task.get("clockify_task_id") and subject.get("clockify_project_id"):
+                    cs.update_task(
+                        project_id=subject["clockify_project_id"],
+                        task_id=task["clockify_task_id"],
+                        new_name=new_title
+                    )
+            except Exception:
+                pass  # no crítico
+
+        print(f"[UPDATE TASK] {updates}", file=sys.stderr, flush=True)
 
         cambios = []
         if new_title:
-            cambios.append(f"título → '{new_title}'")
+            cambios.append(f"título: '{new_title}'")
         if description is not None:
             cambios.append("descripción actualizada")
         if due_date is not None:
-            cambios.append(f"fecha límite → '{due_date}'")
+            cambios.append(f"fecha límite: '{due_date}'")
 
         return f"Tarea '{task_title}' actualizada: {', '.join(cambios)}."
     except Exception as e:
