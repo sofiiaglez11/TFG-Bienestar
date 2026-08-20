@@ -315,8 +315,8 @@ async def get_subjects(user_id: str):
 
 
 @mcp.tool()
-async def edit_subject(user_id: str, subject_name: str, new_name: str = None,
-                       weekly_hours_goal: int = None, period_name: str = None):
+async def edit_subject(user_id: str, subject_name: str, new_name: str = None, note: str = None,
+                       weekly_hours_goal: int = None, period_name: str = None, is_archived: bool = None):
     """
     Edita una asignatura existente. Permite cambiar su nombre, su objetivo de horas
     semanales y/o el periodo académico al que pertenece.
@@ -330,6 +330,9 @@ async def edit_subject(user_id: str, subject_name: str, new_name: str = None,
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
 
         updates = {}
+
+        cs = await _get_user_clockify_service(user_id)
+        cs.update_project(subject["clockify_project_id"], new_name, note, is_archived)
 
         if new_name:
             updates["name"] = new_name
@@ -345,6 +348,8 @@ async def edit_subject(user_id: str, subject_name: str, new_name: str = None,
             return "No me has indicado qué quieres cambiar de la asignatura."
 
         await db_service.update_subject(subject["_id"], **updates)
+        
+
 
         cambios = []
         if new_name:
@@ -372,8 +377,19 @@ async def delete_subject(user_id: str, subject_name: str):
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
 
+        # Borrar de la BD primero (tareas, sesiones, asignatura)
         await db_service.delete_subject(subject["_id"])
-        return f"Asignatura '{subject_name}' eliminada correctamente junto con todas sus tareas y sesiones."
+
+        # Intentar borrar el proyecto en Clockify (no crítico si falla)
+        clockify_note = ""
+        try:
+            cs = await _get_user_clockify_service(user_id)
+            if cs.api_key and subject.get("clockify_project_id"):
+                cs.delete_project(subject["clockify_project_id"])
+        except Exception as ce:
+            clockify_note = f" (aviso: no se pudo eliminar el proyecto de Clockify: {ce})"
+
+        return f"Asignatura '{subject_name}' eliminada correctamente junto con todas sus tareas y sesiones.{clockify_note}"
     except Exception as e:
         return f"Error al eliminar la asignatura: {str(e)}"
 
@@ -692,7 +708,7 @@ async def complete_task(user_id: str, subject_name: str, task_title: str):
 @mcp.tool()
 async def edit_task(user_id: str, subject_name: str, task_title: str,
                     new_title: str = None, description: str = None,
-                    due_date: str = None):
+                    due_date: str = None, status: str = None):
     """
     Edita una tarea existente de una asignatura. Permite cambiar su título,
     descripción o fecha de vencimiento.
@@ -700,6 +716,7 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
     o 'actualiza la descripción de X'.
     Solo se actualizan los campos que el usuario especifique.
     due_date, si se indica, debe tener formato ISO 8601 (ej: '2026-07-20').
+    status puede ser "DONE", "ACTIVE" o "ALL"
     """
     try:
         subject = await _find_subject_by_name(user_id, subject_name)
@@ -717,6 +734,8 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
             updates["description"] = description
         if due_date is not None:
             updates["due_date"] = due_date
+        if status is not None:
+            updates["status"] = status
 
         if not updates:
             return "No me has indicado qué quieres cambiar de la tarea."

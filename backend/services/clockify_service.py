@@ -14,6 +14,7 @@ class ClockifyService:
         }
         self._workspace_id = workspace_id
         self._current_workspace = None
+        self._cached_user_id = None  # evita llamadas repetidas a /user
 
     @staticmethod
     async def validate_api_key(api_key: str) -> dict:
@@ -101,6 +102,38 @@ class ClockifyService:
         response.raise_for_status()
         return response.json()
 
+    def delete_project(self, project_id: str, workspace_id: str = None) -> dict:
+        """Elimina un proyecto de Clockify por su ID."""
+        if not project_id:
+            return {}
+        workspace_id = self._set_workspace_if_null(workspace_id)
+        url = f"{self.base_url}/workspaces/{workspace_id}/projects/{project_id}"
+        response = requests.delete(url, headers=self.headers)
+        if response.status_code == 404:
+            return {}
+        response.raise_for_status()
+        return response.json() if response.content else {}
+
+    def update_project(self, project_id: str, new_name: str = None, note: str = None, is_archived: bool = None, workspace_id: str = None) -> dict:
+        """Actualiza el nombre de un proyecto de Clockify por su ID."""
+        if not project_id:
+            return {}
+        workspace_id = self._set_workspace_if_null(workspace_id)
+        url = f"{self.base_url}/workspaces/{workspace_id}/projects/{project_id}"
+
+        payload = {}
+        if new_name:
+            payload["name"] = new_name
+        if note:
+            payload["note"] = note
+        if is_archived:
+            payload["archived"] = is_archived
+
+        response = requests.put(url, json=payload, headers=self.headers)
+        print(f"UPDATE PROJECT RESPONSE: {response.status_code} \n {response.content}", file=sys.stderr, flush=True)
+        response.raise_for_status()
+        return response.json() if response.content else {}
+
     ############################################################################
     # METHODS FOR TASKS
  
@@ -126,19 +159,39 @@ class ClockifyService:
         response.raise_for_status()
         return response.json()
 
+    def update_task(self, project_id: str, task_id: str, new_name: str = None, note: str = None, is_archived: bool = None, workspace_id: str = None) -> dict:
+        """Actualiza una tarea de Clockify por su ID."""
+        if not task_id:
+            return {}
+        workspace_id = self._set_workspace_if_null(workspace_id)
+        url = f"{self.base_url}/workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}"
+
+        payload = {}
+        if new_name:
+            payload["name"] = new_name
+        if note:
+            payload["note"] = note
+        if is_archived:
+            payload["archived"] = is_archived
+
+        response = requests.put(url, json=payload, headers=self.headers)
+        print(f"UPDATE TASK RESPONSE: {response.status_code} \n {response.content}", file=sys.stderr, flush=True)
+        response.raise_for_status()
+        return response.json() if response.content else {}
+
     ############################################################################
     # METHODS FOR TIME ENTRIES
  
     def get_time_entries(self, workspace_id: str = None, days_back: int = None,
-                         start_date = None, end_date = None) -> list:
+                         start_date=None, end_date=None) -> list:
         workspace_id = self._set_workspace_if_null(workspace_id)
-        
+
         if start_date or end_date:
             if not start_date:
                 start_dt = datetime.now(timezone.utc) - timedelta(days=30)
             elif isinstance(start_date, str):
                 if 'T' not in start_date:
-                    start_dt = datetime.fromisoformat(f"{start_date}T00:00:00Z".replace('Z', '+00:00'))
+                    start_dt = datetime.fromisoformat(f"{start_date}T00:00:00+00:00")
                 else:
                     start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
             else:
@@ -148,7 +201,7 @@ class ClockifyService:
                 end_dt = datetime.now(timezone.utc)
             elif isinstance(end_date, str):
                 if 'T' not in end_date:
-                    end_dt = datetime.fromisoformat(f"{end_date}T23:59:59Z".replace('Z', '+00:00'))
+                    end_dt = datetime.fromisoformat(f"{end_date}T23:59:59+00:00")
                 else:
                     end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
             else:
@@ -157,29 +210,38 @@ class ClockifyService:
             days = days_back if days_back is not None else 7
             end_dt = datetime.now(timezone.utc)
             start_dt = end_dt - timedelta(days=days)
- 
+
         url = f"{self.base_url}/workspaces/{workspace_id}/user/{self.get_user_id()}/time-entries"
-        params = {
+        base_params = {
             "start": start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "end": end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "page-size": 50
+            "page-size": 200,
         }
- 
-        response = requests.get(url, headers=self.headers, params=params)
-        response.raise_for_status()
-        
-        entries = response.json()
-        simplified_entries = []
-        for entry in entries:
-            simplified_entries.append({
-                "description": entry.get("description", "Sin descripción"),
-                "start": entry.get("timeInterval", {}).get("start"),
-                "end": entry.get("timeInterval", {}).get("end"),
-                "duration": entry.get("timeInterval", {}).get("duration"),
-                "projectId": entry.get("projectId"),
-                "taskId": entry.get("taskId")
-            })
-        return simplified_entries
+
+        # Paginación: recorre todas las páginas hasta que devuelva menos de page-size
+        all_entries = []
+        page = 1
+        while True:
+            params = {**base_params, "page": page}
+            response = requests.get(url, headers=self.headers, params=params)
+            response.raise_for_status()
+            page_entries = response.json()
+            if not page_entries:
+                break
+            for entry in page_entries:
+                all_entries.append({
+                    "description": entry.get("description", "Sin descripción"),
+                    "start": entry.get("timeInterval", {}).get("start"),
+                    "end": entry.get("timeInterval", {}).get("end"),
+                    "duration": entry.get("timeInterval", {}).get("duration"),
+                    "projectId": entry.get("projectId"),
+                    "taskId": entry.get("taskId"),
+                })
+            if len(page_entries) < 200:
+                break  # última página
+            page += 1
+
+        return all_entries
 
     def create_time_entry(self, description: str, project_id: str = None, task_id: str = None,
                           start_time: str = None, end_time: str = None, workspace_id: str = None) -> dict:
@@ -236,7 +298,11 @@ class ClockifyService:
     # METHODS FOR USERS
  
     def get_user_id(self) -> str:
+        """Devuelve el ID del usuario autenticado. Usa caché para evitar llamadas repetidas."""
+        if self._cached_user_id:
+            return self._cached_user_id
         url = f"{self.base_url}/user"
         response = requests.get(url, headers=self.headers)
         response.raise_for_status()
-        return response.json().get("id")
+        self._cached_user_id = response.json().get("id")
+        return self._cached_user_id
