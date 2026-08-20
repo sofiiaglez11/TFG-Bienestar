@@ -49,11 +49,11 @@ def _normalize(text: str) -> str:
         if unicodedata.category(c) != 'Mn'
     )
 
-async def _find_subject_by_name(user_id: str, name: str) -> dict | None:
+async def _find_subject_by_name(user_id: str, name: str, include_archived: bool = False) -> dict | None:
     """Busca una asignatura por nombre (case-insensitive, sin tildes) entre las del usuario."""
-    subjects = await db_service.get_subjects_by_user(user_id)
+    subjects = await db_service.get_subjects_by_user(user_id, include_archived=include_archived)
     return next((s for s in subjects if _normalize(s["name"]) == _normalize(name)), None)
- 
+
  
  
 async def _find_task_by_title(subject_id: str, title: str) -> dict | None:
@@ -291,13 +291,16 @@ async def add_multiple_subjects(user_id: str, names: list[str], workspace_id: st
     
  
 @mcp.tool()
-async def get_subjects(user_id: str):
+async def get_subjects(user_id: str, include_archived: bool = False):
     """
     Devuelve la lista de asignaturas del usuario.
-    Úsala cuando el usuario pregunte 'Qué asignaturas tengo' o 'Muéstrame mis asignaturas'.
+    Por defecto solo muestra las activas. Usa include_archived=True si el usuario
+    pregunta por asignaturas archivadas o quiere ver todas.
+    Úsala cuando el usuario pregunte 'Qué asignaturas tengo', 'Muéstrame mis asignaturas'
+    o cuando busques una asignatura que el usuario menciona y no aparece en la lista activa.
     """
     try:
-        subjects = await db_service.get_subjects_by_user(user_id=user_id)
+        subjects = await db_service.get_subjects_by_user(user_id=user_id, include_archived=include_archived)
  
         if not subjects:
             return "No tienes ninguna asignatura registrada todavía."
@@ -364,32 +367,94 @@ async def edit_subject(user_id: str, subject_name: str, new_name: str = None, no
         return f"Error al editar la asignatura: {str(e)}"
 
 
+# @mcp.tool()
+# async def delete_subject(user_id: str, subject_name: str):
+#     """
+#     Elimina permanentemente una asignatura y todo su historial (tareas, sesiones de tiempo).
+#     Antes de llamar a esta herramienta, SIEMPRE pide confirmación explícita al usuario,
+#     ya que la acción no se puede deshacer. Si el usuario solo quiere dejar de trabajar
+#     en ella sin perder el historial, sugiere usar archive_subject en su lugar.
+#     """
+#     try:
+#         subject = await _find_subject_by_name(user_id, subject_name)
+#         if not subject:
+#             return f"No encontré ninguna asignatura llamada '{subject_name}'."
+
+#         # Borrar de la BD primero (tareas, sesiones, asignatura)
+#         await db_service.delete_subject(subject["_id"])
+
+#         # Intentar borrar el proyecto en Clockify (no crítico si falla)
+#         clockify_note = ""
+#         try:
+#             cs = await _get_user_clockify_service(user_id)
+#             if cs.api_key and subject.get("clockify_project_id"):
+#                 cs.delete_project(subject["clockify_project_id"])
+#         except Exception as ce:
+#             clockify_note = f" (aviso: no se pudo eliminar el proyecto de Clockify: {ce})"
+
+#         return f"Asignatura '{subject_name}' eliminada correctamente junto con todas sus tareas y sesiones.{clockify_note}"
+#     except Exception as e:
+#         return f"Error al eliminar la asignatura: {str(e)}"
+
 @mcp.tool()
 async def delete_subject(user_id: str, subject_name: str):
     """
-    Elimina permanentemente una asignatura y todo su historial (tareas, sesiones de tiempo).
-    Antes de llamar a esta herramienta, SIEMPRE pide confirmación explícita al usuario,
-    ya que la acción no se puede deshacer. Si el usuario solo quiere dejar de trabajar
-    en ella sin perder el historial, sugiere usar archive_subject en su lugar.
+    Elimina PERMANENTEMENTE una asignatura y todo su historial (tareas, sesiones de tiempo).
+    Esta acción NO se puede deshacer.
+
+    FLUJO OBLIGATORIO antes de llamar a esta herramienta:
+    1. Pide SIEMPRE confirmación explícita al usuario: '¿Estás seguro de que quieres eliminar
+       permanentemente la asignatura o prefieres archivarla?'
+       - Si prefiere archivar: usa archive_subject y no hagas nada más.
+       - Si confirma eliminar: continúa con este flujo.
+    2. La asignatura debe estar archivada primero (is_archived=True).
+       Si no lo está, llama a archive_subject antes de llamar a esta herramienta.
+    3. Si Clockify indica que el proyecto no está archivado, llama a archive_subject
+       para sincronizar el estado en Clockify y luego vuelve a llamar a delete_subject.
     """
     try:
-        subject = await _find_subject_by_name(user_id, subject_name)
+        # Buscar incluyendo archivadas
+        subject = await _find_subject_by_name(user_id, subject_name, include_archived=True)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
 
-        # Borrar de la BD primero (tareas, sesiones, asignatura)
+        if not subject.get("is_archived"):
+            return (
+                f"La asignatura '{subject_name}' no está archivada. "
+                f"Llama a archive_subject primero para archivarla, "
+                f"y luego vuelve a llamar a delete_subject."
+            )
+
+        # Intentar borrar de Clockify  
+        cs = await _get_user_clockify_service(user_id)
+        if cs.api_key and subject.get("clockify_project_id"):
+            try:
+                cs.delete_project(subject["clockify_project_id"])
+            except Exception as ce:
+                error_str = str(ce)
+                print(f"[Clockify delete error] {ce}", file=sys.stderr, flush=True)
+
+                if "active project" in error_str.lower() or "501" in error_str:
+                    return (
+                        f"Clockify indica que el proyecto '{subject_name}' no está archivado allí. "
+                        f"Llama a archive_subject para sincronizar el estado en Clockify "
+                        f"y luego vuelve a llamar a delete_subject."
+                    )
+
+                # Si hay cualquier otro error de Clockify
+                return (
+                    f"No se pudo eliminar el proyecto de Clockify ({ce}). "
+                    f"La asignatura NO ha sido eliminada del sistema para evitar inconsistencias. "
+                    f"Informa al usuario y pregúntale cómo quiere proceder."
+                )
+
+        # Solo si Clockify ha ido bien: borrar de MongoDB
         await db_service.delete_subject(subject["_id"])
 
-        # Intentar borrar el proyecto en Clockify (no crítico si falla)
-        clockify_note = ""
-        try:
-            cs = await _get_user_clockify_service(user_id)
-            if cs.api_key and subject.get("clockify_project_id"):
-                cs.delete_project(subject["clockify_project_id"])
-        except Exception as ce:
-            clockify_note = f" (aviso: no se pudo eliminar el proyecto de Clockify: {ce})"
-
-        return f"Asignatura '{subject_name}' eliminada correctamente junto con todas sus tareas y sesiones.{clockify_note}"
+        return (
+            f"Asignatura '{subject_name}' eliminada permanentemente junto con todas sus "
+            f"tareas y sesiones de tiempo."
+        )
     except Exception as e:
         return f"Error al eliminar la asignatura: {str(e)}"
 
@@ -481,22 +546,103 @@ async def get_current_period(user_id: str):
 ############################################################################
 # TOOLS FOR SUBJECTS (adicionales)
  
+# @mcp.tool()
+# async def archive_subject(user_id: str, subject_name: str):
+#     """
+#     Archiva una asignatura sin borrar su historial (tareas, tiempo dedicado, deadlines).
+#     Úsala cuando el usuario ya no vaya a trabajar más en una asignatura, por ejemplo al
+#     terminar un cuatrimestre, en vez de eliminarla del todo.
+#     """
+#     try:
+#         subject = await _find_subject_by_name(user_id, subject_name)
+#         if not subject:
+#             return f"No encontré ninguna asignatura llamada '{subject_name}'."
+#         await db_service.update_subject(subject["_id"], is_archived=True)
+#         return f"Asignatura '{subject_name}' archivada correctamente."
+#     except Exception as e:
+#         return f"Error al archivar la asignatura: {str(e)}"
+ 
 @mcp.tool()
 async def archive_subject(user_id: str, subject_name: str):
     """
-    Archiva una asignatura sin borrar su historial (tareas, tiempo dedicado, deadlines).
-    Úsala cuando el usuario ya no vaya a trabajar más en una asignatura, por ejemplo al
-    terminar un cuatrimestre, en vez de eliminarla del todo.
+    Archiva una asignatura: la marca como inactiva en el sistema y la oculta en Clockify.
+    Úsala cuando el usuario ya no vaya a trabajar más en una asignatura (por ejemplo, al
+    terminar un cuatrimestre) pero quiera conservar el historial de tiempo y tareas.
+    Una asignatura archivada NO aparece en las listas normales.
+    IMPORTANTE: archivar es el paso previo obligatorio antes de poder eliminar una asignatura.
+    Si el usuario quiere eliminarla definitivamente, primero archívala con esta herramienta
+    y luego usa delete_subject.
     """
     try:
         subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
+
+        if subject.get("is_archived"):
+            return f"La asignatura '{subject_name}' ya está archivada."
+
+        # rchivar en Clockify 
+        cs = await _get_user_clockify_service(user_id)
+        if cs.api_key and subject.get("clockify_project_id"):
+            try:
+                cs.archive_project(subject["clockify_project_id"])
+            except Exception as ce:
+                print(f"[Clockify archive error] {ce}", file=sys.stderr, flush=True)
+                return (
+                    f"No se pudo archivar el proyecto '{subject_name}' en Clockify: {ce}. "
+                    f"La asignatura NO ha sido archivada para evitar inconsistencias."
+                )
+
+        # Archivar en MongoDB
         await db_service.update_subject(subject["_id"], is_archived=True)
-        return f"Asignatura '{subject_name}' archivada correctamente."
+
+        return (
+            f"Asignatura '{subject_name}' archivada correctamente. "
+            f"Ya no aparecerá en tus listas activas ni en Clockify. "
+            f"Si quieres eliminarla definitivamente (esto borrará todo su historial), usa delete_subject."
+        )
     except Exception as e:
         return f"Error al archivar la asignatura: {str(e)}"
- 
+
+@mcp.tool()
+async def unarchive_subject(user_id: str, subject_name: str):
+    """
+    Desarchiva una asignatura: la vuelve a marcar como activa en el sistema y en Clockify.
+    Úsala cuando el usuario quiera recuperar una asignatura que había archivado previamente,
+    por ejemplo si se equivocó o quiere retomarla.
+    Las asignaturas archivadas no aparecen en las listas normales, pero siguen existiendo.
+    """
+    try:
+        # Buscar incluyendo archivadas, que es donde estará
+        subject = await _find_subject_by_name(user_id, subject_name, include_archived=True)
+        if not subject:
+            return f"No encontré ninguna asignatura llamada '{subject_name}', ni activa ni archivada."
+
+        if not subject.get("is_archived"):
+            return f"La asignatura '{subject_name}' ya está activa, no está archivada."
+
+        # Desarchivar en Clockify
+        cs = await _get_user_clockify_service(user_id)
+        if cs.api_key and subject.get("clockify_project_id"):
+            try:
+                cs.unarchive_project(subject["clockify_project_id"])
+            except Exception as ce:
+                print(f"[Clockify unarchive error] {ce}", file=sys.stderr, flush=True)
+                return (
+                    f"No se pudo desarchivar el proyecto '{subject_name}' en Clockify: {ce}. "
+                    f"La asignatura NO ha sido desarchivada para evitar inconsistencias."
+                )
+
+        # Desarchivar en MongoDB
+        await db_service.update_subject(subject["_id"], is_archived=False)
+
+        return (
+            f"Asignatura '{subject_name}' desarchivada correctamente. "
+            f"Vuelve a aparecer en tus listas activas y en Clockify."
+        )
+    except Exception as e:
+        return f"Error al desarchivar la asignatura: {str(e)}"
+
  
 @mcp.tool()
 async def assign_subject_to_period(user_id: str, subject_name: str, period_name: str):
@@ -728,7 +874,7 @@ async def complete_task(user_id: str, subject_name: str, task_title: str, comple
 @mcp.tool()
 async def edit_task(user_id: str, subject_name: str, task_title: str,
                     new_title: str = None, description: str = None,
-                    due_date: str = None):
+                    due_date: str = None, parent_task_id: str = None):
     """
     Edita una tarea existente: título, descripción o fecha de vencimiento.
     Para marcar una tarea como completada o revertirla, usa complete_task.
@@ -750,6 +896,8 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
             updates["description"] = description
         if due_date is not None:
             updates["due_date"] = due_date
+        if parent_task_id is not None:
+            updates["parent_task_id"] = parent_task_id
 
         if not updates:
             return "No me has indicado qué quieres cambiar de la tarea."
@@ -1143,111 +1291,111 @@ async def set_subject_grade(user_id: str, subject_name: str, grade: float):
 #         return f"Error al obtener las estadísticas de horas por asignatura: {str(e)}"
 
 
-@mcp.tool()
-async def analyze_student_performance(user_id: str) -> str:
-    """
-    Realiza un análisis inteligente de las estadísticas de estudio y calificaciones del alumno utilizando IA.
-    Examina la relación entre las horas dedicadas (desde Clockify), las metas semanales y las notas obtenidas,
-    ofreciendo recomendaciones personalizadas.
-    """
-    try:
-        subjects = await db_service.get_subjects_by_user(user_id)
-        if not subjects:
-            return "No tienes asignaturas registradas para poder realizar el análisis."
+# @mcp.tool()
+# async def analyze_student_performance(user_id: str) -> str:
+#     """
+#     Realiza un análisis inteligente de las estadísticas de estudio y calificaciones del alumno utilizando IA.
+#     Examina la relación entre las horas dedicadas (desde Clockify), las metas semanales y las notas obtenidas,
+#     ofreciendo recomendaciones personalizadas.
+#     """
+#     try:
+#         subjects = await db_service.get_subjects_by_user(user_id)
+#         if not subjects:
+#             return "No tienes asignaturas registradas para poder realizar el análisis."
             
-        # Obtener periodo activo si lo hay
-        active_period = await db_service.get_active_period(user_id)
-        start_date = None
-        end_date = None
-        period_name = "periodo actual"
-        if active_period:
-            start_date = active_period.get("start_date")
-            end_date = active_period.get("end_date")
-            period_name = active_period.get("name", "periodo actual")
+#         # Obtener periodo activo si lo hay
+#         active_period = await db_service.get_active_period(user_id)
+#         start_date = None
+#         end_date = None
+#         period_name = "periodo actual"
+#         if active_period:
+#             start_date = active_period.get("start_date")
+#             end_date = active_period.get("end_date")
+#             period_name = active_period.get("name", "periodo actual")
 
-        # Obtener credenciales de Clockify del usuario
-        clockify_creds = await db_service.get_clockify_credentials(user_id)
+#         # Obtener credenciales de Clockify del usuario
+#         clockify_creds = await db_service.get_clockify_credentials(user_id)
         
-        # Obtener entradas de tiempo de Clockify
-        clockify_entries = []
-        if clockify_creds and clockify_creds.get("api_key"):
-            try:
-                cs = ClockifyService(
-                    api_key=clockify_creds["api_key"] or clockify_creds.get("token"),
-                    workspace_id=clockify_creds.get("workspace_id")
-                )
-                if start_date or end_date:
-                    clockify_entries = await asyncio.to_thread(
-                        cs.get_time_entries, start_date=start_date, end_date=end_date
-                    )
-                else:
-                    clockify_entries = await asyncio.to_thread(
-                        cs.get_time_entries, days_back=365
-                    )
-            except Exception as e:
-                print(f"Error fetching Clockify entries: {e}")
+#         # Obtener entradas de tiempo de Clockify
+#         clockify_entries = []
+#         if clockify_creds and clockify_creds.get("api_key"):
+#             try:
+#                 cs = ClockifyService(
+#                     api_key=clockify_creds["api_key"] or clockify_creds.get("token"),
+#                     workspace_id=clockify_creds.get("workspace_id")
+#                 )
+#                 if start_date or end_date:
+#                     clockify_entries = await asyncio.to_thread(
+#                         cs.get_time_entries, start_date=start_date, end_date=end_date
+#                     )
+#                 else:
+#                     clockify_entries = await asyncio.to_thread(
+#                         cs.get_time_entries, days_back=365
+#                     )
+#             except Exception as e:
+#                 print(f"Error fetching Clockify entries: {e}")
 
-        # Agrupar segundos de Clockify por projectId
-        project_seconds = {}
-        for entry in clockify_entries:
-            pid = entry.get("projectId")
-            if not pid:
-                continue
-            start_iso = entry.get("start")
-            end_iso = entry.get("end")
-            if start_iso and end_iso:
-                try:
-                    dt1 = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))
-                    dt2 = datetime.fromisoformat(end_iso.replace('Z', '+00:00'))
-                    seconds = (dt2 - dt1).total_seconds()
-                    project_seconds[pid] = project_seconds.get(pid, 0.0) + seconds
-                except Exception:
-                    pass
+#         # Agrupar segundos de Clockify por projectId
+#         project_seconds = {}
+#         for entry in clockify_entries:
+#             pid = entry.get("projectId")
+#             if not pid:
+#                 continue
+#             start_iso = entry.get("start")
+#             end_iso = entry.get("end")
+#             if start_iso and end_iso:
+#                 try:
+#                     dt1 = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))
+#                     dt2 = datetime.fromisoformat(end_iso.replace('Z', '+00:00'))
+#                     seconds = (dt2 - dt1).total_seconds()
+#                     project_seconds[pid] = project_seconds.get(pid, 0.0) + seconds
+#                 except Exception:
+#                     pass
 
-        analytics_data = []
-        for subject in subjects:
-            s_id = str(subject["_id"])
-            clockify_project_id = subject.get("clockify_project_id")
+#         analytics_data = []
+#         for subject in subjects:
+#             s_id = str(subject["_id"])
+#             clockify_project_id = subject.get("clockify_project_id")
             
-            # Obtener segundos del proyecto desde Clockify
-            seconds = 0.0
-            if clockify_project_id and clockify_project_id in project_seconds:
-                seconds = project_seconds[clockify_project_id]
+#             # Obtener segundos del proyecto desde Clockify
+#             seconds = 0.0
+#             if clockify_project_id and clockify_project_id in project_seconds:
+#                 seconds = project_seconds[clockify_project_id]
                 
-            total_hours = round(seconds / 3600.0, 2)
-            analytics_data.append({
-                "name": subject.get("name", "Asignatura"),
-                "hours": total_hours,
-                "weekly_hours_goal": subject.get("weekly_hours_goal", 0),
-                "grade": subject.get("grade")
-            })
+#             total_hours = round(seconds / 3600.0, 2)
+#             analytics_data.append({
+#                 "name": subject.get("name", "Asignatura"),
+#                 "hours": total_hours,
+#                 "weekly_hours_goal": subject.get("weekly_hours_goal", 0),
+#                 "grade": subject.get("grade")
+#             })
 
-        # Preparar prompt para Gemini
-        prompt = f"""
-        Como un asesor académico inteligente y experto en bienestar estudiantil, analiza el siguiente rendimiento del alumno en el periodo "{period_name}".
+#         # Preparar prompt para Gemini
+#         prompt = f"""
+#         Como un asesor académico inteligente y experto en bienestar estudiantil, analiza el siguiente rendimiento del alumno en el periodo "{period_name}".
         
-        Datos de las asignaturas (horas reales registradas en Clockify vs metas semanales y calificaciones obtenidas):
-        {analytics_data}
+#         Datos de las asignaturas (horas reales registradas en Clockify vs metas semanales y calificaciones obtenidas):
+#         {analytics_data}
         
-        Por favor, realiza un análisis detallado que incluya:
-        1. **Resumen General**: Una valoración de cómo va el alumno en general.
-        2. **Relación Esfuerzo vs. Resultados**: Identifica asignaturas donde el esfuerzo (horas) se traduzca en buenas notas, o si hay asignaturas de alto esfuerzo y baja nota (donde tal vez necesite cambiar de método), o asignaturas con notas bajas y pocas horas (donde falte dedicación).
-        3. **Cumplimiento de Metas**: Evalúa si está alcanzando las metas semanales de estudio.
-        4. **Consejos y Recomendaciones**: Da 3 consejos prácticos, realistas y motivadores para mejorar su bienestar y rendimiento en el estudio.
+#         Por favor, realiza un análisis detallado que incluya:
+#         1. **Resumen General**: Una valoración de cómo va el alumno en general.
+#         2. **Relación Esfuerzo vs. Resultados**: Identifica asignaturas donde el esfuerzo (horas) se traduzca en buenas notas, o si hay asignaturas de alto esfuerzo y baja nota (donde tal vez necesite cambiar de método), o asignaturas con notas bajas y pocas horas (donde falte dedicación).
+#         3. **Cumplimiento de Metas**: Evalúa si está alcanzando las metas semanales de estudio.
+#         4. **Consejos y Recomendaciones**: Da 3 consejos prácticos, realistas y motivadores para mejorar su bienestar y rendimiento en el estudio.
         
-        Responde en español de manera empática, clara y estructurada usando formato Markdown.
-        """
+#         Responde en español de manera empática, clara y estructurada usando formato Markdown.
+#         """
         
-        # Llamar a Gemini utilizando el SDK configurado en la app
-        from google import genai
-        client = genai.Client()
-        response = client.models.generate_content(
-            model="gemini-3.5-flash-lite",
-            contents=prompt
-        )
-        return response.text
-    except Exception as e:
-        return f"Error al generar el análisis de rendimiento: {str(e)}"
+#         # Llamar a Gemini utilizando el SDK configurado en la app
+#         from google import genai
+#         client = genai.Client()
+#         response = client.models.generate_content(
+#             model="gemini-3.5-flash-lite",
+#             contents=prompt
+#         )
+#         return response.text
+#     except Exception as e:
+#         return f"Error al generar el análisis de rendimiento: {str(e)}"
 
 
 if __name__ == "__main__":

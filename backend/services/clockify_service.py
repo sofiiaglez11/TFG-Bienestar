@@ -109,10 +109,58 @@ class ClockifyService:
         workspace_id = self._set_workspace_if_null(workspace_id)
         url = f"{self.base_url}/workspaces/{workspace_id}/projects/{project_id}"
         response = requests.delete(url, headers=self.headers)
+
+        print(f"[DELETE PROJECT RESPONSE]: {response.status_code} \t {response.content}", file=sys.stderr, flush=True)
+
+        if response.status_code == 404:
+            return {}
+        response.raise_for_status()
+
+
+        return response.json() if response.content else {}
+
+    def archive_project(self, project_id: str, workspace_id: str = None) -> dict:
+        """Archiva un proyecto de Clockify (lo oculta sin borrarlo).
+        Funciona en todos los planes, incluido el gratuito.
+        """
+        if not project_id:
+            return {}
+        workspace_id = self._set_workspace_if_null(workspace_id)
+        url = f"{self.base_url}/workspaces/{workspace_id}/projects/{project_id}"
+        
+        get_response = requests.get(url, headers=self.headers)
+        if get_response.status_code == 404:
+            return {}
+        get_response.raise_for_status()
+        current_name = get_response.json().get("name", "")
+
+        payload = {"name": current_name, "archived": True}
+        response = requests.put(url, json=payload, headers=self.headers)
         if response.status_code == 404:
             return {}
         response.raise_for_status()
         return response.json() if response.content else {}
+
+    def unarchive_project(self, project_id: str, workspace_id: str = None) -> dict:
+        """Desarchiva un proyecto de Clockify (lo vuelve a mostrar como activo)."""
+        if not project_id:
+            return {}
+        workspace_id = self._set_workspace_if_null(workspace_id)
+        url = f"{self.base_url}/workspaces/{workspace_id}/projects/{project_id}"
+
+        get_response = requests.get(url, headers=self.headers)
+        if get_response.status_code == 404:
+            return {}
+        get_response.raise_for_status()
+        current_name = get_response.json().get("name", "")
+
+        payload = {"name": current_name, "archived": False}
+        response = requests.put(url, json=payload, headers=self.headers)
+        if response.status_code == 404:
+            return {}
+        response.raise_for_status()
+        return response.json() if response.content else {}
+
 
     def update_project(self, project_id: str, new_name: str = None, note: str = None, is_archived: bool = None, workspace_id: str = None) -> dict:
         """Actualiza el nombre de un proyecto de Clockify por su ID."""
