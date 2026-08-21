@@ -255,6 +255,35 @@ class ClockifyService:
         response.raise_for_status()
         return response.json() if response.content else {}
 
+    def delete_task(self, project_id: str, task_id: str, workspace_id: str = None) -> bool:
+        """
+        Elimina una tarea de Clockify.
+        Clockify no permite borrar tareas en estado ACTIVE, así que primero
+        las marca como DONE y luego hace el DELETE.
+        Devuelve True si se borró correctamente, False en cualquier otro caso.
+        """
+        if not task_id:
+            return False
+        workspace_id = self._set_workspace_if_null(workspace_id)  
+
+        # 1. Marcar como DONE para que Clockify permita el borrado
+        self.update_task(
+            project_id=project_id,
+            task_id=task_id,
+            status="DONE",
+            workspace_id=workspace_id
+        )
+
+        # 2. Borrar la tarea
+        url = f"{self.base_url}/workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}"
+        print(f"[DELETE TASK] DELETE {url}", file=sys.stderr, flush=True)
+        response = requests.delete(url, headers=self.headers)
+        print(
+            f"[DELETE TASK RESPONSE]: status={response.status_code} body={response.text[:300]}",
+            file=sys.stderr, flush=True
+        )
+        return response.status_code in (200, 204)
+
 
     ############################################################################
     # METHODS FOR TIME ENTRIES

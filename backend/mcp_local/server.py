@@ -407,10 +407,8 @@ async def delete_subject(user_id: str, subject_name: str):
        permanentemente la asignatura o prefieres archivarla?'
        - Si prefiere archivar: usa archive_subject y no hagas nada más.
        - Si confirma eliminar: continúa con este flujo.
-    2. La asignatura debe estar archivada primero (is_archived=True).
-       Si no lo está, llama a archive_subject antes de llamar a esta herramienta.
-    3. Si Clockify indica que el proyecto no está archivado, llama a archive_subject
-       para sincronizar el estado en Clockify y luego vuelve a llamar a delete_subject.
+    2. La asignatura debe estar archivada primero (is_archived=True). Si no lo está, indicáselo al usuario para que la archive
+
     """
     try:
         # Buscar incluyendo archivadas
@@ -421,8 +419,7 @@ async def delete_subject(user_id: str, subject_name: str):
         if not subject.get("is_archived"):
             return (
                 f"La asignatura '{subject_name}' no está archivada. "
-                f"Llama a archive_subject primero para archivarla, "
-                f"y luego vuelve a llamar a delete_subject."
+                f"Dile al usuario que tiene que archivarla primero, "
             )
 
         # Intentar borrar de Clockify  
@@ -893,10 +890,11 @@ async def complete_task(user_id: str, subject_name: str, task_title: str, comple
 @mcp.tool()
 async def edit_task(user_id: str, subject_name: str, task_title: str,
                     new_title: str = None, description: str = None,
-                    due_date: str = None, parent_task_id: str = None):
+                    due_date: str = None):
     """
     Edita una tarea existente: título, descripción o fecha de vencimiento.
     Para marcar una tarea como completada o revertirla, usa complete_task.
+    Para cambiar la jerarquía (padre/subtarea), usa set_task_hierarchy.
     due_date debe tener formato ISO 8601 (ej: '2026-07-20').
     """
     try:
@@ -915,8 +913,6 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
             updates["description"] = description
         if due_date is not None:
             updates["due_date"] = due_date
-        if parent_task_id is not None:
-            updates["parent_task_id"] = parent_task_id
 
         if not updates:
             return "No me has indicado qué quieres cambiar de la tarea."
@@ -950,6 +946,125 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
         return f"Tarea '{task_title}' actualizada: {', '.join(cambios)}."
     except Exception as e:
         return f"Error al editar la tarea: {str(e)}"
+
+
+@mcp.tool()
+async def set_task_hierarchy(user_id: str, subject_name: str,
+                              child_task_titles: list, parent_task_title: str = None):
+    """
+    Establece la jerarquía padre-hijo entre tareas de una asignatura.
+    Usa este tool SIEMPRE que el usuario quiera que una o varias tareas sean
+    subtareas de otra, o que dejen de serlo.
+
+    Parámetros:
+    - child_task_titles: lista de títulos de las tareas que se van a convertir en subtareas.
+    - parent_task_title: título de la tarea padre. Si es None o vacío, las tareas hijas
+      pasan a ser tareas raíz (sin padre).
+
+    IMPORTANTE: usa siempre los títulos exactos de las tareas, nunca sus IDs.
+    Este tool resuelve los IDs internamente para evitar errores.
+    """
+    try:
+        subject = await _find_subject_by_name(user_id, subject_name)
+        if not subject:
+            return f"No encontré ninguna asignatura llamada '{subject_name}'."
+
+        # Resolver ID del padre (o None si se quiere hacer tarea raíz)
+        parent_id = None
+        if parent_task_title:
+            parent_task = await _find_task_by_title(subject["_id"], parent_task_title)
+            if not parent_task:
+                return f"No encontré la tarea padre '{parent_task_title}' en '{subject_name}'."
+            parent_id = parent_task["_id"]
+
+        resultados = []
+        for child_title in child_task_titles:
+            child_task = await _find_task_by_title(subject["_id"], child_title)
+            if not child_task:
+                resultados.append(f"⚠️ No encontré '{child_title}'")
+                continue
+
+            # Evitar ciclos: la tarea hija no puede ser padre de sí misma
+            if parent_id and str(child_task["_id"]) == str(parent_id):
+                resultados.append(f"⚠️ '{child_title}' no puede ser su propio padre")
+                continue
+
+            await db_service.update_task(child_task["_id"], parent_task_id=parent_id)
+
+            if parent_id:
+                resultados.append(f"✅ '{child_title}' → subtarea de '{parent_task_title}'")
+            else:
+                resultados.append(f"✅ '{child_title}' → tarea raíz")
+
+            print(f"[HIERARCHY] {child_title} parent_id={parent_id}", file=sys.stderr, flush=True)
+
+        return "\n".join(resultados)
+    except Exception as e:
+        return f"Error al establecer jerarquía: {str(e)}"
+
+
+@mcp.tool()
+async def delete_task(user_id: str, subject_name: str, task_title: str,
+                      confirmed: bool = False, workspace_id: str = None):
+    """
+    Elimina permanentemente una tarea y todas sus subtareas (en cascada).
+    IMPORTANTE: SIEMPRE pide confirmación explícita al usuario antes de llamar
+    a esta herramienta, ya que la acción NO se puede deshacer.
+    Solo llama a este tool con confirmed=True cuando el usuario haya confirmado
+    explícitamente que quiere borrar la tarea.
+
+    Si la tarea tiene subtareas, también se eliminarán.
+    """
+    if not confirmed:
+        return (
+            "⚠️ Esta acción eliminará la tarea y todas sus subtareas de forma permanente. "
+            "¿Confirmas que quieres borrarla? Dime 'sí, bórrala' para proceder."
+        )
+
+    try:
+        subject = await _find_subject_by_name(user_id, subject_name)
+        if not subject:
+            return f"No encontré ninguna asignatura llamada '{subject_name}'."
+
+        task = await _find_task_by_title(subject["_id"], task_title)
+        if not task:
+            return f"No encontré ninguna tarea llamada '{task_title}' en '{subject_name}'."
+
+        task_id = task["_id"]
+        clockify_task_id = task.get("clockify_task_id")
+
+        # 1. Borrar en MongoDB (cascade=True borra subtareas también)
+        deleted_ids = await db_service.delete_task(task_id, cascade=True)
+        num_deleted = len(deleted_ids)
+
+        # 2. Intentar borrar en Clockify (no crítico — requiere plan de pago)
+        clockify_note = ""
+        try:
+            cs = await _get_user_clockify_service(user_id)
+            if cs.api_key and clockify_task_id and subject.get("clockify_project_id"):
+                ok = cs.delete_task(
+                    project_id=subject["clockify_project_id"],
+                    task_id=clockify_task_id,
+                    workspace_id=workspace_id
+                )
+                if not ok:
+                    clockify_note = " (no se pudo eliminar en Clockify)"
+        except Exception as e:
+            print(f"[DELETE TASK] Error Clockify: {e}", file=sys.stderr, flush=True)
+            pass  # no crítico
+
+        print(f"[DELETE TASK] '{task_title}' → {num_deleted} tarea(s) eliminadas: {deleted_ids}", file=sys.stderr, flush=True)
+
+        if num_deleted == 1:
+            return f"🗑️ Tarea '{task_title}' eliminada correctamente.{clockify_note}"
+        else:
+            return (
+                f"🗑️ Tarea '{task_title}' y {num_deleted - 1} subtarea(s) eliminadas correctamente.{clockify_note}"
+            )
+
+    except Exception as e:
+        return f"Error al eliminar la tarea: {str(e)}"
+
 
  
  

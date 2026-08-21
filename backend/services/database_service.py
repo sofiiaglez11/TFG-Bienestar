@@ -394,9 +394,29 @@ class DatabaseService:
         """Atajo para marcar una tarea como completada/pendiente."""
         await self.update_task(task_id, completed=completed)
  
-    async def delete_task(self, task_id: str):
-        """Elimina una tarea por su ID. No borra en cascada sus subtareas ni time_entries."""
-        await self.tasks.delete_one({"_id": ObjectId(task_id)})
+    async def delete_task(self, task_id: str, cascade: bool = True):
+        """
+        Elimina una tarea por su ID.
+        Si cascade=True (por defecto), elimina también todas sus subtareas recursivamente.
+        """
+        ids_to_delete = [task_id]
+
+        if cascade:
+            # Recoger IDs de subtareas en anchura (BFS)
+            queue = [task_id]
+            while queue:
+                current_id = queue.pop(0)
+                children = await self.tasks.find(
+                    {"parent_task_id": current_id}, {"_id": 1}
+                ).to_list(200)
+                for child in children:
+                    child_id = str(child["_id"])
+                    ids_to_delete.append(child_id)
+                    queue.append(child_id)
+
+        object_ids = [ObjectId(tid) for tid in ids_to_delete]
+        await self.tasks.delete_many({"_id": {"$in": object_ids}})
+        return ids_to_delete  # devuelve los IDs borrados (útil para limpiar Clockify)
 
 
     async def get_chronological_events(self, user_id: str, subject_id: str = None) -> list:
