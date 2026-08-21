@@ -1223,11 +1223,12 @@ async def start_timer(user_id: str, subject_name: str, task_title: str = None, d
     Úsala cuando el usuario diga 'voy a ponerme a estudiar X' o 'empieza a contar el tiempo de X'.
     IMPORTANTE: comprueba primero si ya hay un cronómetro en marcha; si lo hay, dile al
     usuario que debe pararlo antes de empezar uno nuevo (usa stop_timer).
+
+    description: texto descriptivo para la entrada en Clockify. Si el usuario ha mencionado
+    en qué va a trabajar concretamente (ej: "voy a estudiar el tema 3"), úsalo como descripción.
+    Si no, déjalo vacío para que el sistema genere uno automáticamente.
     """
     try:
-        # existing = await db_service.get_active_time_entry(user_id)
-        # if existing:
-        #     return "Ya tienes un cronómetro en marcha. Para antes uno con stop_timer."
         subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
@@ -1242,12 +1243,19 @@ async def start_timer(user_id: str, subject_name: str, task_title: str = None, d
             task_id = task["_id"]
             clockify_task_id = task.get("clockify_task_id")
  
+        # Construir descripción automática si no se proporcionó una
+        if not description:
+            if task_title:
+                description = f"{subject_name} · {task_title}"
+            else:
+                description = f"Estudiando {subject_name}"
+
         # Arrancamos el timer real en Clockify (end_time=None -> cronómetro en marcha)
         cs = await _get_user_clockify_service(user_id)
         if not cs.api_key:
             return "No tienes configurada tu API Key de Clockify. Conéctala desde el menú de perfil para poder registrar tiempo."
         cs.create_time_entry(
-            description=description or f"Estudiando {subject_name}",
+            description=description,
             project_id=subject["clockify_project_id"],
             task_id=clockify_task_id,
             end_time=None,
@@ -1256,7 +1264,6 @@ async def start_timer(user_id: str, subject_name: str, task_title: str = None, d
  
         print(f"FIN TOOL START TIMER", file=sys.stderr, flush=True)
 
- 
         return f"Cronómetro iniciado para '{subject_name}'{' (' + task_title + ')' if task_title else ''}."
     except Exception as e:
         return f"Error al iniciar el cronómetro: {str(e)}"
