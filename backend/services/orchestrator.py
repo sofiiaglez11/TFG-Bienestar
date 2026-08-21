@@ -26,8 +26,10 @@ class AgentOrchestrator:
         Eres el enrutador principal de un sistema de tutoría académica y bienestar.
         Tu ÚNICA función es clasificar la intención del mensaje del usuario en una de estas 3 categorías:
 
-        1. ACADEMICO: Si habla de asignaturas, tareas, exámenes, notas, registrar tiempo de estudio, Clockify, entregas o calendario.
-        2. BIENESTAR: Si habla de su estado físico o mental (sueño, cansancio, estrés, fatiga, pausas, hábitos de descanso, cómo se siente).
+        1. ACADEMICO: Si habla de asignaturas, tareas, exámenes, notas, registrar o consultar tiempo de estudio, iniciar/parar/detener el cronómetro o timer, Clockify, entregas o calendario.
+           Ejemplos ACADEMICO: "para el cronómetro", "detén el timer", "cuánto tiempo llevo estudiando", "inicia el cronómetro de X", "stop timer".
+        2. BIENESTAR: Si habla de su estado físico o mental (sueño, cansancio, estrés, fatiga, hábitos de descanso, cómo se siente emocionalmente).
+           IMPORTANTE: preguntas sobre el cronómetro o el tiempo de estudio NO son BIENESTAR, son ACADEMICO.
         3. GENERAL: Si es un saludo ('hola', 'qué tal'), una pregunta sobre qué puedes hacer, o una despedida.
 
         {history_str}Último mensaje del usuario (a clasificar, utilizando el historial superior como contexto de ser necesario): "{user_message}"

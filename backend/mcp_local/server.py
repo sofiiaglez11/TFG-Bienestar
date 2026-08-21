@@ -5,7 +5,6 @@ import json
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from datetime import datetime, timezone
  
-# Archivo con las tools, resources y prompts
  
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
@@ -15,6 +14,10 @@ from services.database_service import DatabaseService
 import asyncio
 from typing import Optional
 import sys
+
+from collections import defaultdict
+from datetime import timedelta
+
 
 db_service = DatabaseService()
 
@@ -1287,6 +1290,27 @@ async def stop_timer(user_id: str):
         return f"Error al detener el cronómetro: {str(e)}"
 
 @mcp.tool()
+async def get_active_time_entry(user_id: str):
+    """
+    Devuelve el cronómetro que esté en marcha ahora mismo.
+    Úsala cuando el usuario pregunte 'cuánto tiempo llevo estudiando?' o 'cuánto tiempo llevo con el cronómetro en marcha?'.
+    """
+    try:
+        cs = await _get_user_clockify_service(user_id)
+        
+        # Obtener el timer activo directamente de Clockify
+        active_entry = cs.get_active_time_entry()
+        # print(f"TOOL GET ACTIVE TIME ENTRY: active_entry={active_entry}", file=sys.stderr, flush=True)
+        
+        if not active_entry:
+            return "No tienes ningún cronómetro en marcha ahora mismo."
+        
+        return f"Cronómetro activo: {active_entry}"
+    except Exception as e:
+        # print(f"Error al obtener el cronómetro activo: {str(e)}", file=sys.stderr, flush=True)
+        return f"Error al obtener el cronómetro activo: {str(e)}"
+
+@mcp.tool()
 async def log_time_entry(user_id: str, subject_name: str, start_time: str, end_time: str,
                           task_title: str = None, description: str = ""):
     """
@@ -1366,55 +1390,125 @@ async def log_time_entry(user_id: str, subject_name: str, start_time: str, end_t
 @mcp.tool()
 async def get_time_summary(user_id: str, subject_name: Optional[str] = None):
     """
-    Consulta de solo lectura: devuelve el resumen de tiempo directamente desde Clockify.
-    - Si se pasa `subject_name`, filtra por esa asignatura.
-    - Si `subject_name` es None o "todas", devuelve el resumen general.
+    Consulta de solo lectura: devuelve el resumen de tiempo directamente desde Clockify,
+    agrupado por tarea y con el total acumulado.
+
+    - Si se pasa `subject_name`, filtra por esa asignatura usando su projectId real de Clockify.
+    - Si `subject_name` es None o "todas", devuelve el resumen general de todas las asignaturas.
+
+    La respuesta es un JSON estructurado así:
+    {
+      "subject": "Nombre asignatura" | "Todas",
+      "total_minutes": 154,
+      "by_task": [
+        {
+          "task": "Nombre tarea" | "Sin tarea asignada",
+          "total_minutes": 60,
+          "sessions": [
+            { "start": "2026-08-20 10:56", "end": "2026-08-20 11:56", "description": "...", "minutes": 60 }
+          ]
+        }
+      ]
+    }
+
+    Usa este JSON para presentar al usuario:
+    - El tiempo total de la asignatura.
+    - El desglose por tarea (cuánto tiempo le ha dedicado a cada una).
+    - El listado de sesiones de cada tarea con fecha, hora y duración.
     NO usar esta herramienta para detener timers.
     """
     try:
-        # 1. Obtener la API Key guardada del usuario desde la BD
+        # 1. Credenciales y servicio Clockify
         user_creds = await db_service.get_clockify_credentials(user_id)
         if not user_creds or not user_creds.get("api_key"):
             return "No tienes configurada tu API Key de Clockify."
 
-        # 2. Instanciar tu servicio existente
         clockify = ClockifyService(api_key=user_creds["api_key"])
 
-        # 3. Consultar las entradas (por ejemplo, de los últimos 30 días) sin bloquear la app
-        # Usamos asyncio.to_thread porque 'requests' es síncrono
+        # 2. Si hay asignatura concreta, resolver su projectId desde la BD
+        target_project_id = None
+        is_all = not subject_name or subject_name.strip().lower() in ["todas", "all"]
+
+        if not is_all:
+            subject = await _find_subject_by_name(user_id, subject_name)
+            if not subject:
+                return f"No encontré ninguna asignatura llamada '{subject_name}'."
+            target_project_id = subject.get("clockify_project_id")
+            if not target_project_id:
+                return f"La asignatura '{subject_name}' no tiene proyecto vinculado en Clockify."
+
+            # Construir mapa taskId → nombre de tarea desde la BD
+            all_tasks = await db_service.get_tasks_by_subject(subject["_id"])
+            task_id_to_name = {
+                t["clockify_task_id"]: t["title"]
+                for t in all_tasks
+                if t.get("clockify_task_id")
+            }
+        else:
+            task_id_to_name = {}
+
+        # 3. Obtener entradas de Clockify (últimos 30 días)
         entries = await asyncio.to_thread(clockify.get_time_entries, days_back=30)
 
         if not entries:
             return "No tienes ninguna sesión registrada en Clockify en los últimos 30 días."
 
-        # 4. Comprobar si pide todas las asignaturas o una específica
-        is_all = not subject_name or subject_name.strip().lower() in ["todas", "all"]
+        # 4. Filtrar por projectId si se pidió asignatura concreta
+        if not is_all:
+            entries = [e for e in entries if e.get("projectId") == target_project_id]
 
-        result = "📊 Resumen general de Clockify:\n\n" if is_all else f"📚 Sesiones de '{subject_name}':\n\n"
-        found = False
+        if not entries:
+            label = subject_name if not is_all else "ninguna asignatura"
+            return f"No encontré registros en Clockify para '{label}' en los últimos 30 días."
+
+        # 5. Calcular duración en minutos para cada entrada
+        def _parse_duration(iso_dur: str) -> int:
+            """Convierte 'PT1H30M15S' -> minutos totales (redondeado)."""
+            if not iso_dur:
+                return 0
+            import re
+            h = int(re.search(r"(\d+)H", iso_dur).group(1)) if re.search(r"(\d+)H", iso_dur) else 0
+            m = int(re.search(r"(\d+)M", iso_dur).group(1)) if re.search(r"(\d+)M", iso_dur) else 0
+            s = int(re.search(r"(\d+)S", iso_dur).group(1)) if re.search(r"(\d+)S", iso_dur) else 0
+            return h * 60 + m + round(s / 60)
+
+        def _fmt_dt(raw: str) -> str:
+            return raw[:16].replace("T", " ") if raw else "?"
+
+        # 6. Agrupar por tarea
+        groups: dict[str, list] = defaultdict(list)
 
         for entry in entries:
-            desc = entry.get("description", "Sin descripción")
-            
-            # Si se busca una asignatura concreta, filtramos por la descripción del registro
-            if not is_all and subject_name.lower() not in desc.lower():
-                continue
+            task_cid = entry.get("taskId")
+            task_name = task_id_to_name.get(task_cid, "Sin tarea asignada") if task_cid else "Sin tarea asignada"
+            minutes = _parse_duration(entry.get("duration"))
+            groups[task_name].append({
+                "start": _fmt_dt(entry.get("start")),
+                "end": _fmt_dt(entry.get("end")) if entry.get("end") else "⏱️ En curso",
+                "description": entry.get("description") or "",
+                "minutes": minutes
+            })
 
-            found = True
-            
-            # Formatear fechas
-            start_raw = entry.get("start") or ""
-            start_str = start_raw[:16].replace("T", " ") if start_raw else "Fecha desconocida"
-            
-            end_raw = entry.get("end")
-            fin_str = end_raw[:16].replace("T", " ") if end_raw else "⏱️ En curso"
+        # 7. Construir JSON de respuesta
+        by_task = []
+        total_minutes = 0
+        for task_name, sessions in groups.items():
+            task_total = sum(s["minutes"] for s in sessions)
+            total_minutes += task_total
+            by_task.append({
+                "task": task_name,
+                "total_minutes": task_total,
+                "sessions": sessions
+            })
 
-            result += f"- [{desc}] {start_str} -> {fin_str}\n"
+        # Ordenar: tareas con más tiempo primero
+        by_task.sort(key=lambda x: x["total_minutes"], reverse=True)
 
-        if not found:
-            return f"No encontré registros guardados para '{subject_name}' en los últimos 30 días."
-
-        return result
+        return json.dumps({
+            "subject": subject_name if not is_all else "Todas",
+            "total_minutes": total_minutes,
+            "by_task": by_task
+        }, ensure_ascii=False, indent=2)
 
     except Exception as e:
         print(f"[ERROR] get_time_summary: {str(e)}", file=sys.stderr, flush=True)
@@ -1431,7 +1525,7 @@ async def log_study_hours(user_id: str, subject_name: str, hours: float,
     No confundir con start_timer/stop_timer, que son para tiempo en tiempo real.
     """
     try:
-        from datetime import timedelta
+        
         now = datetime.now(timezone.utc)
         start = now - timedelta(hours=hours)
         start_time = start.strftime("%Y-%m-%dT%H:%M:%SZ")
