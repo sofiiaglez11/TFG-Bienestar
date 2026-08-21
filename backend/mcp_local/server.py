@@ -1003,67 +1003,120 @@ async def set_task_hierarchy(user_id: str, subject_name: str,
         return f"Error al establecer jerarquía: {str(e)}"
 
 
+# @mcp.tool()
+# async def delete_task(user_id: str, subject_name: str, task_title: str,
+#                       confirmed: bool = False, workspace_id: str = None):
+#     """
+#     Elimina permanentemente una tarea y todas sus subtareas (en cascada).
+#     IMPORTANTE: SIEMPRE pide confirmación explícita al usuario antes de llamar
+#     a esta herramienta, ya que la acción NO se puede deshacer.
+#     Solo llama a este tool con confirmed=True cuando el usuario haya confirmado
+#     explícitamente que quiere borrar la tarea.
+
+#     Si la tarea tiene subtareas, también se eliminarán.
+#     """
+#     if not confirmed:
+#         return (
+#             "Esta acción eliminará la tarea y todas sus subtareas de forma permanente. "
+#             "¿Confirmas que quieres borrarla? Dime 'sí, bórrala' para proceder."
+#         )
+
+#     try:
+#         subject = await _find_subject_by_name(user_id, subject_name)
+#         if not subject:
+#             return f"No encontré ninguna asignatura llamada '{subject_name}'."
+
+#         task = await _find_task_by_title(subject["_id"], task_title)
+#         if not task:
+#             return f"No encontré ninguna tarea llamada '{task_title}' en '{subject_name}'."
+
+#         task_id = task["_id"]
+#         clockify_task_id = task.get("clockify_task_id")
+
+#         # 1. Borrar en MongoDB (cascade=True borra subtareas también)
+#         deleted_ids = await db_service.delete_task(task_id, cascade=True)
+#         num_deleted = len(deleted_ids)
+
+#         # 2. Intentar borrar en Clockify (no crítico — requiere plan de pago)
+#         clockify_note = ""
+#         try:
+#             cs = await _get_user_clockify_service(user_id)
+#             if cs.api_key and clockify_task_id and subject.get("clockify_project_id"):
+#                 ok = cs.delete_task(
+#                     project_id=subject["clockify_project_id"],
+#                     task_id=clockify_task_id,
+#                     workspace_id=workspace_id
+#                 )
+#                 if not ok:
+#                     clockify_note = " (no se pudo eliminar en Clockify)"
+#         except Exception as e:
+#             print(f"[DELETE TASK] Error Clockify: {e}", file=sys.stderr, flush=True)
+#             pass  # no crítico
+
+#         print(f"[DELETE TASK] '{task_title}' → {num_deleted} tarea(s) eliminadas: {deleted_ids}", file=sys.stderr, flush=True)
+
+#         if num_deleted == 1:
+#             return f"🗑️ Tarea '{task_title}' eliminada correctamente.{clockify_note}"
+#         else:
+#             return (
+#                 f"🗑️ Tarea '{task_title}' y {num_deleted - 1} subtarea(s) eliminadas correctamente.{clockify_note}"
+#             )
+
+#     except Exception as e:
+#         return f"Error al eliminar la tarea: {str(e)}"
+
 @mcp.tool()
-async def delete_task(user_id: str, subject_name: str, task_title: str,
-                      confirmed: bool = False, workspace_id: str = None):
+async def delete_task(user_id: str, subject_name: str, task_title: str):
     """
-    Elimina permanentemente una tarea y todas sus subtareas (en cascada).
-    IMPORTANTE: SIEMPRE pide confirmación explícita al usuario antes de llamar
-    a esta herramienta, ya que la acción NO se puede deshacer.
-    Solo llama a este tool con confirmed=True cuando el usuario haya confirmado
-    explícitamente que quiere borrar la tarea.
+    Elimina PERMANENTEMENTE una tarea y todo su historial de tiempo tanto de MongoDB como de Clockify.
+    Esta acción NO se puede deshacer.
 
-    Si la tarea tiene subtareas, también se eliminarán.
+
+    FLUJO OBLIGATORIO antes de llamar a esta herramienta:
+    1. Pide SIEMPRE confirmación explícita al usuario:
+       '¿Estás seguro de que quieres eliminar permanentemente la tarea "{task_title}" de "{subject_name}"?
+       Ten en cuenta que esta operación es irreversible y se borrarán todos los tiempos y registros asociados a ella.'
+       - Si el usuario NO ha confirmado explícitamente todavía, NO llames a esta herramienta; pregúntale primero y espera su confirmación.
+       - Si confirma eliminar: llama a esta herramienta.
     """
-    if not confirmed:
-        return (
-            "⚠️ Esta acción eliminará la tarea y todas sus subtareas de forma permanente. "
-            "¿Confirmas que quieres borrarla? Dime 'sí, bórrala' para proceder."
-        )
-
     try:
         subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
 
+
         task = await _find_task_by_title(subject["_id"], task_title)
         if not task:
-            return f"No encontré ninguna tarea llamada '{task_title}' en '{subject_name}'."
+            all_tasks = await db_service.get_tasks_by_subject(subject["_id"], include_completed=True)
+            titles = [t.get("title") for t in all_tasks]
+            return f"No encontré ninguna tarea llamada '{task_title}' en '{subject_name}'. Tareas disponibles: {', '.join(titles) if titles else 'ninguna'}."
 
-        task_id = task["_id"]
+
+        # 1. Eliminar en Clockify si existe
         clockify_task_id = task.get("clockify_task_id")
-
-        # 1. Borrar en MongoDB (cascade=True borra subtareas también)
-        deleted_ids = await db_service.delete_task(task_id, cascade=True)
-        num_deleted = len(deleted_ids)
-
-        # 2. Intentar borrar en Clockify (no crítico — requiere plan de pago)
-        clockify_note = ""
-        try:
-            cs = await _get_user_clockify_service(user_id)
-            if cs.api_key and clockify_task_id and subject.get("clockify_project_id"):
-                ok = cs.delete_task(
-                    project_id=subject["clockify_project_id"],
+        clockify_proj_id = subject.get("clockify_project_id")
+        if clockify_task_id and clockify_proj_id:
+            try:
+                cs = await _get_user_clockify_service(user_id)
+                cs_resp = cs.delete_task(
+                    project_id=clockify_proj_id,
                     task_id=clockify_task_id,
-                    workspace_id=workspace_id
+                    task_name=task.get("title")
                 )
-                if not ok:
-                    clockify_note = " (no se pudo eliminar en Clockify)"
-        except Exception as e:
-            print(f"[DELETE TASK] Error Clockify: {e}", file=sys.stderr, flush=True)
-            pass  # no crítico
+            except Exception as ce:
+                # NO BORRAR DE MONGO SI CLOCKIFY FALLA (para evitar inconsistencias)
+                return (
+                    f"No se pudo eliminar la tarea de Clockify ({ce}). "
+                    f"La tarea NO ha sido eliminada del sistema para evitar inconsistencias."
+                )
 
-        print(f"[DELETE TASK] '{task_title}' → {num_deleted} tarea(s) eliminadas: {deleted_ids}", file=sys.stderr, flush=True)
 
-        if num_deleted == 1:
-            return f"🗑️ Tarea '{task_title}' eliminada correctamente.{clockify_note}"
-        else:
-            return (
-                f"🗑️ Tarea '{task_title}' y {num_deleted - 1} subtarea(s) eliminadas correctamente.{clockify_note}"
-            )
-
+        # 2. Eliminar en MongoDB (tarea y sus time_entries)
+        await db_service.delete_task(task["_id"])
+        return f"Tarea '{task_title}' y todos sus tiempos eliminados permanentemente tanto de Clockify como de la base de datos."
     except Exception as e:
         return f"Error al eliminar la tarea: {str(e)}"
+
 
 
  

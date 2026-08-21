@@ -1,3 +1,4 @@
+from asyncio import timeouts
 import requests
 import httpx
 from datetime import datetime, timedelta, timezone
@@ -255,36 +256,85 @@ class ClockifyService:
         response.raise_for_status()
         return response.json() if response.content else {}
 
-    def delete_task(self, project_id: str, task_id: str, workspace_id: str = None) -> bool:
-        """
-        Elimina una tarea de Clockify.
-        Clockify no permite borrar tareas en estado ACTIVE, así que primero
-        las marca como DONE y luego hace el DELETE.
-        Devuelve True si se borró correctamente, False en cualquier otro caso.
-        """
+    # def delete_task(self, project_id: str, task_id: str, workspace_id: str = None) -> bool:
+    #     """
+    #     Elimina una tarea de Clockify.
+    #     Clockify no permite borrar tareas en estado ACTIVE, así que primero
+    #     las marca como DONE y luego hace el DELETE.
+    #     Devuelve True si se borró correctamente, False en cualquier otro caso.
+    #     """
+    #     if not task_id:
+    #         return False
+    #     workspace_id = self._set_workspace_if_null(workspace_id)  
+
+    #     # 1. Marcar como DONE para que Clockify permita el borrado
+    #     self.update_task(
+    #         project_id=project_id,
+    #         task_id=task_id,
+    #         status="DONE",
+    #         workspace_id=workspace_id
+    #     )
+
+    #     # 2. Borrar la tarea
+    #     url = f"{self.base_url}/workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}"
+    #     print(f"[DELETE TASK] DELETE {url}", file=sys.stderr, flush=True)
+    #     response = requests.delete(url, headers=self.headers)
+    #     print(
+    #         f"[DELETE TASK RESPONSE]: status={response.status_code} body={response.text[:300]}",
+    #         file=sys.stderr, flush=True
+    #     )
+    #     return response.status_code in (200, 204)
+
+
+    def delete_task(self, project_id: str, task_id: str, task_name: str, workspace_id: str = None) -> bool:
+        """Elimina una tarea de Clockify por su ID, eliminando antes sus tiempos y marcándola como DONE"""
+
         if not task_id:
             return False
-        workspace_id = self._set_workspace_if_null(workspace_id)  
 
-        # 1. Marcar como DONE para que Clockify permita el borrado
-        self.update_task(
-            project_id=project_id,
-            task_id=task_id,
-            status="DONE",
-            workspace_id=workspace_id
-        )
+        workspace_id = self._set_workspace_if_null(workspace_id)
 
-        # 2. Borrar la tarea
+        # 1. Eliminar todas las entradas de tiempo asociadas a la tarea
+        try: 
+            self.delete_time_entries_for_task(project_id=project_id, task_id=task_id, workspace_id=workspace_id)
+        except Exception as e:
+            print(f"[ERROR] Al eliminar entradas de tiempo para la tarea {task_id}: {e}", file=sys.stderr, flush=True)
+            return False
+
+        # 2. Marcar la tarea como DONE para permitir su borrado
+        try: 
+            if not task_name:
+                try: 
+                    task_info = self.get_task_by_id(project_id=project_id, task_id=task_id, workspace_id=workspace_id)
+                    task_name = task_info.get("name")
+                except Exception as e:
+                    print(f"[ERROR] Al obtener el nombre de la tarea {task_id}: {e}", file=sys.stderr, flush=True)
+                    task_name = "Tarea"
+
+
+            self.update_task(project_id=project_id, task_id=task_id, new_name=task_name, status="DONE", workspace_id=workspace_id)
+
+        except Exception as e:
+            print(f"[ERROR] Al marcar la tarea {task_id} como DONE: {e}", file=sys.stderr, flush=True)
+            return False
+
+        # 3. Borrar la tarea enviando DELETE
         url = f"{self.base_url}/workspaces/{workspace_id}/projects/{project_id}/tasks/{task_id}"
-        print(f"[DELETE TASK] DELETE {url}", file=sys.stderr, flush=True)
         response = requests.delete(url, headers=self.headers)
-        print(
-            f"[DELETE TASK RESPONSE]: status={response.status_code} body={response.text[:300]}",
-            file=sys.stderr, flush=True
-        )
-        return response.status_code in (200, 204)
+        print(f"[DELETE TASK RESPONSE]: {response.status_code} \t {response.content}",
+                file=sys.stderr, flush=True)
+
+        if response.status_code == 404:
+            return False
+        response.raise_for_status()
+
+        return response.json() if response.content else {}
 
 
+        
+
+
+                
     ############################################################################
     # METHODS FOR TIME ENTRIES
  
@@ -399,7 +449,50 @@ class ClockifyService:
         response.raise_for_status()
         entries = response.json()
         return entries[0] if entries else None
-    
+
+
+    def delete_time_entry(self, time_entry_id: str, workspace_id: str = None) -> dict:
+        """""Elimina una entrada de tiempo de Clockify por su ID"""
+
+        if not time_entry_id:
+            raise ValueError("Se requiere un ID de entrada de tiempo para eliminarla.")
+        workspace_id = self._set_workspace_if_null(workspace_id)
+
+        url = f"{self.base_url}/workspaces/{workspace_id}/time-entries/{time_entry_id}"
+
+        response = requests.delete(url, headers=self.headers)
+        print(f"[DELETE TIME ENTRY RESPONSE]: {response.status_code} \t {response.content}", file=sys.stderr, flush=True)
+
+        if response.status_code == 404:
+            return {}
+        response.raise_for_status()
+        return response.json() if response.content else {}
+
+    def delete_time_entries_for_task(self, project_id: str, task_id: str, workspace_id: str = None) -> dict:
+        """"Busca y elimina todas las entradas de tiempo asociadas a una tarea en Clockify"""
+
+        if not task_id:
+            raise ValueError("Se requiere un ID de tarea para eliminar sus entradas de tiempo.")
+        workspace_id = self._set_workspace_if_null(workspace_id)
+        user_id = self.get_user_id()
+        url = f"{self.base_url}/workspaces/{workspace_id}/user/{user_id}/time-entries"
+        params = {"page-size": 200}
+        deleted_count = 0
+
+        try: 
+            res = requests.get(url, headers=self.headers, params=params)
+            if res.ok:
+                for entry in res.json():
+                    entry_task_id = entry.get("taskId") or (entry.get("task") and entry["task"].get("id"))
+                    if entry_task_id == task_id:
+                        entry_id = entry.get("id")
+                        if entry_id:
+                            self.delete_time_entry(entry_id, workspace_id)
+                            deleted_count += 1
+        except Exception as e:
+            print(f"[ERROR] Al eliminar entradas de tiempo para la tarea {task_id}: {e}", file=sys.stderr, flush=True)
+            return {"deleted_count": deleted_count, "error": str(e)}
+
     ############################################################################
     # METHODS FOR USERS
  
