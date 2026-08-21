@@ -62,6 +62,50 @@ async def _find_task_by_title(subject_id: str, title: str) -> dict | None:
     return next((t for t in tasks if t["title"].lower() == title.lower()), None)
  
  
+async def _build_clockify_name(task: dict) -> str:
+    """
+    Construye el nombre a usar en Clockify para una tarea recorriendo
+    la cadena de ancestros en la BD.
+    Resultado: 'abuelo/padre/hijo' (sin límite de niveles).
+    El nombre de cada nodo es siempre su 'title' propio de la BD.
+    """
+    parts = [task["title"]]
+    current = task
+    while current.get("parent_task_id"):
+        parent = await db_service.get_task_by_id(current["parent_task_id"])
+        if not parent:
+            break
+        parts.insert(0, parent["title"])
+        current = parent
+    return "/".join(parts)
+
+
+async def _update_clockify_names_recursive(
+    task: dict, cs: "ClockifyService", project_id: str
+) -> None:
+    """
+    Actualiza en Clockify el nombre de 'task' y, recursivamente, el de todos
+    sus descendientes, recalculando la ruta completa desde la BD para cada uno.
+    Los errores individuales se registran pero no interrumpen la propagación.
+    """
+    if task.get("clockify_task_id"):
+        try:
+            new_name = await _build_clockify_name(task)
+            cs.update_task(
+                project_id=project_id,
+                task_id=task["clockify_task_id"],
+                new_name=new_name
+            )
+        except Exception as e:
+            print(
+                f"[CLOCKIFY NAME SYNC] Error al renombrar '{task.get('title')}' "
+                f"(clockify_task_id={task.get('clockify_task_id')}): {e}",
+                file=sys.stderr, flush=True
+            )
+    # Propagar a hijos directos
+    children = await db_service.get_subtasks(task["_id"])
+    for child in children:
+        await _update_clockify_names_recursive(child, cs, project_id)
 
 
  
@@ -725,11 +769,18 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
                 f"Usa un nombre diferente para evitar confusiones."
             )
 
+        # Construir el nombre Clockify: si tiene padre, incluir la ruta completa
+        clockify_name = title
+        if parent_task_id:
+            # Construimos un doc temporal para calcular la ruta completa de ancestros
+            temp_task = {"title": title, "parent_task_id": parent_task_id, "_id": None}
+            clockify_name = await _build_clockify_name(temp_task)
+
         cs = await _get_user_clockify_service(user_id)
         if cs.api_key:
             clockify_task = cs.add_new_task(
                 project_id=subject["clockify_project_id"],
-                task_name=title,
+                task_name=clockify_name,
                 workspace_id=workspace_id
             )
             clockify_task_id = clockify_task.get("id")
@@ -920,18 +971,24 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
         # 1. Actualizar en MongoDB
         await db_service.update_task(task["_id"], **updates)
 
-        # 2. Si cambia el nombre, sincronizar con Clockify (no crítico)
+        # 2. Si cambia el nombre, sincronizar con Clockify:
+        #    - La propia tarea recibe su nueva ruta (padre/nuevo_nombre)
+        #    - Todos sus descendientes también deben actualizarse (su ruta incluye el nombre de esta tarea)
         if new_title:
             try:
                 cs = await _get_user_clockify_service(user_id)
-                if cs.api_key and task.get("clockify_task_id") and subject.get("clockify_project_id"):
-                    cs.update_task(
-                        project_id=subject["clockify_project_id"],
-                        task_id=task["clockify_task_id"],
-                        new_name=new_title
-                    )
-            except Exception:
-                pass  # no crítico
+                if cs.api_key and subject.get("clockify_project_id"):
+                    # Obtener el doc actualizado de la tarea para calcular la ruta correcta
+                    updated_task = await db_service.get_task_by_id(task["_id"])
+                    if updated_task:
+                        await _update_clockify_names_recursive(
+                            updated_task,
+                            cs,
+                            subject["clockify_project_id"]
+                        )
+            except Exception as e:
+                print(f"[CLOCKIFY SYNC] Error al sincronizar nombres tras renombrar: {e}",
+                      file=sys.stderr, flush=True)  # no crítico
 
         print(f"[UPDATE TASK] {updates}", file=sys.stderr, flush=True)
 
@@ -977,6 +1034,8 @@ async def set_task_hierarchy(user_id: str, subject_name: str,
                 return f"No encontré la tarea padre '{parent_task_title}' en '{subject_name}'."
             parent_id = parent_task["_id"]
 
+        cs = await _get_user_clockify_service(user_id)
+
         resultados = []
         for child_title in child_task_titles:
             child_task = await _find_task_by_title(subject["_id"], child_title)
@@ -989,7 +1048,26 @@ async def set_task_hierarchy(user_id: str, subject_name: str,
                 resultados.append(f"⚠️ '{child_title}' no puede ser su propio padre")
                 continue
 
+            # 1. Actualizar la jerarquía en MongoDB
             await db_service.update_task(child_task["_id"], parent_task_id=parent_id)
+
+            # 2. Sincronizar nombres en Clockify: la tarea y todos sus descendientes
+            #    reciben nuevas rutas basadas en la jerarquía actualizada.
+            if cs.api_key and subject.get("clockify_project_id"):
+                try:
+                    # Obtener el doc actualizado (ya tiene el nuevo parent_task_id)
+                    updated_child = await db_service.get_task_by_id(child_task["_id"])
+                    if updated_child:
+                        await _update_clockify_names_recursive(
+                            updated_child,
+                            cs,
+                            subject["clockify_project_id"]
+                        )
+                except Exception as e:
+                    print(
+                        f"[CLOCKIFY SYNC] Error al sincronizar nombres tras mover '{child_title}': {e}",
+                        file=sys.stderr, flush=True
+                    )  # no crítico
 
             if parent_id:
                 resultados.append(f"✅ '{child_title}' → subtarea de '{parent_task_title}'")
