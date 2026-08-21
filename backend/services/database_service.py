@@ -337,11 +337,13 @@ class DatabaseService:
     async def create_task(self, user_id: str, title: str, subject_id: str = None,
                           description: str = "", due_date: str = None,
                           type: str = "task", parent_task_id: str = None, 
-                          clockify_task_id: str = None) -> dict:
+                          clockify_task_id: str = None,
+                          priority: int = None) -> dict:
         """
         Crea un elemento de trabajo o evento en el sistema (Tarea, Examen, Entrega, etc.).
         type puede ser: 'task', 'exam', 'assignment' u 'other'.
         subject_id es opcional para permitir eventos globales o administrativos.
+        priority es opcional: entero entre 1 (muy baja) y 5 (muy alta).
         """
         task = {
             "user_id": user_id,
@@ -352,7 +354,8 @@ class DatabaseService:
             "description": description,
             "due_date": due_date,
             "type": type,
-            "completed": False
+            "completed": False,
+            "priority": priority
         }
         result = await self.tasks.insert_one(task)
         task["_id"] = str(result.inserted_id)
