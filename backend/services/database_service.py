@@ -42,6 +42,7 @@ class DatabaseService:
         # )
         await self.time_entries.create_index([("subject_id", 1), ("start_time", -1)])
         await self.time_entries.create_index([("task_id", 1)])
+        await self.tasks.create_index("tags")
         # await self.deadlines.create_index([("user_id", 1), ("date", 1)])
         await self.periods.create_index([("user_id", 1)])
         await self.history.create_index([("user_id", 1), ("timestamp", -1)])
@@ -338,7 +339,7 @@ class DatabaseService:
                           description: str = "", due_date: str = None,
                           type: str = "task", parent_task_id: str = None, 
                           clockify_task_id: str = None,
-                          priority: int = None) -> dict:
+                          priority: int = None, tags: list = None) -> dict:
         """
         Crea un elemento de trabajo o evento en el sistema (Tarea, Examen, Entrega, etc.).
         type puede ser: 'task', 'exam', 'assignment' u 'other'.
@@ -355,7 +356,8 @@ class DatabaseService:
             "due_date": due_date,
             "type": type,
             "completed": False,
-            "priority": priority
+            "priority": priority,
+            "tags": tags if tags is not None else []
         }
         result = await self.tasks.insert_one(task)
         task["_id"] = str(result.inserted_id)
@@ -432,6 +434,25 @@ class DatabaseService:
         # 3. Eliminar la propia tarea
         await self.tasks.delete_one({"_id": task_oid})
 
+
+    async def get_tasks_by_tag(self, user_id: str, tag: str) -> list:
+        """Devuelve todas las tareas del usuario que contengan el tag indicado."""
+        cursor = self.tasks.find({"user_id": user_id, "tags": tag})
+        tasks = await cursor.to_list(200)
+        for t in tasks:
+            t["_id"] = str(t["_id"])
+        return tasks
+
+    async def get_all_tags(self, user_id: str) -> list:
+        """Devuelve la lista de tags únicos usados por el usuario en sus tareas."""
+        pipeline = [
+            {"$match": {"user_id": user_id, "tags": {"$exists": True, "$ne": []}}},
+            {"$unwind": "$tags"},
+            {"$group": {"_id": "$tags"}},
+            {"$sort": {"_id": 1}}
+        ]
+        result = await self.tasks.aggregate(pipeline).to_list(200)
+        return [doc["_id"] for doc in result]
 
 
     async def get_chronological_events(self, user_id: str, subject_id: str = None) -> list:

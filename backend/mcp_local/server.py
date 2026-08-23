@@ -713,7 +713,8 @@ async def assign_subject_to_period(user_id: str, subject_name: str, period_name:
 @mcp.tool()
 async def add_task(user_id: str, subject_name: str, title: str, description: str = "",
                     due_date: str = None, parent_task_title: str = None,
-                    workspace_id: str = None, priority: int = None):
+                    workspace_id: str = None, priority: int = None,
+                    tags: list[str] = None):
     '''
     Crea un nuevo elemento en la agenda del usuario. 
     Úsala tanto para tareas normales como para exámenes, entregas de proyectos o fechas importantes.
@@ -733,6 +734,9 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
         Puedes preguntarle al usuario con escala verbal y convertirla:
         1 = muy baja, 2 = baja, 3 = media, 4 = alta, 5 = muy alta.
         Si el usuario no menciona prioridad, no la preguntes; déjala como None.
+    - tags: Lista opcional de etiquetas (strings) para categorizar la tarea.
+        Ejemplos: ['teórico', 'difícil'], ['repaso', 'examen'].
+        Si el usuario no menciona tags, déjalo como None (lista vacía en BD).
     '''
     
     try:
@@ -792,7 +796,8 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
             due_date=due_date,
             parent_task_id=parent_task_id,
             clockify_task_id=clockify_task_id,
-            priority=priority
+            priority=priority,
+            tags=tags
         )
         return f"Tarea '{title}' añadida a '{subject_name}' correctamente."
     except Exception as e:
@@ -880,6 +885,7 @@ async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False)
                 "due_date": t.get("due_date"),
                 "description": t.get("description") or "",
                 "priority": t.get("priority"),  # int 1-5 o null
+                "tags": t.get("tags") or [],
             }
 
         # Ordenar tareas raíz por prioridad descendente (5=muy alta primero, None al final)
@@ -945,14 +951,19 @@ async def complete_task(user_id: str, subject_name: str, task_title: str, comple
 @mcp.tool()
 async def edit_task(user_id: str, subject_name: str, task_title: str,
                     new_title: str = None, description: str = None,
-                    due_date: str = None, priority: int = None):
+                    due_date: str = None, priority: int = None,
+                    tags: list[str] = None):
     """
-    Edita una tarea existente: título, descripción, fecha de vencimiento o prioridad.
+    Edita una tarea existente: título, descripción, fecha de vencimiento, prioridad o tags.
     Para marcar una tarea como completada o revertirla, usa complete_task.
     Para cambiar la jerarquía (padre/subtarea), usa set_task_hierarchy.
     due_date debe tener formato ISO 8601 (ej: '2026-07-20').
     priority: entero del 1 al 5 (1=muy baja, 2=baja, 3=media, 4=alta, 5=muy alta).
         Pasa 0 o un valor centinela si el usuario quiere eliminar la prioridad (la dejarás como None en BD).
+    tags: lista completa de tags que debe tener la tarea tras la edición.
+        Para AÑADIR un tag: lee los tags actuales con get_tasks y pasa la lista con el nuevo tag añadido.
+        Para QUITAR un tag: lee los tags actuales con get_tasks y pasa la lista sin ese tag.
+        Para BORRAR todos los tags: pasa una lista vacía [].
     """
     try:
         subject = await _find_subject_by_name(user_id, subject_name)
@@ -973,6 +984,9 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
         if priority is not None:
             # Permitir borrar la prioridad pasando 0
             updates["priority"] = None if priority == 0 else priority
+        if tags is not None:
+            # Normalizar: sin duplicados, sin espacios en los extremos
+            updates["tags"] = list(dict.fromkeys(t.strip() for t in tags if t.strip()))
 
         if not updates:
             return "No me has indicado qué quieres cambiar de la tarea."
@@ -1011,6 +1025,8 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
         if priority is not None:
             p_label = {0: "eliminada", 1: "muy baja", 2: "baja", 3: "media", 4: "alta", 5: "muy alta"}.get(priority, str(priority))
             cambios.append(f"prioridad: {p_label}")
+        if tags is not None:
+            cambios.append(f"tags: {updates.get('tags', [])!r}")
 
         return f"Tarea '{task_title}' actualizada: {', '.join(cambios)}."
     except Exception as e:
@@ -1163,7 +1179,7 @@ async def delete_task(user_id: str, subject_name: str, task_title: str):
 
 
     FLUJO OBLIGATORIO antes de llamar a esta herramienta:
-    1. Pide SIEMPRE confirmación explícita al usuario:
+    Pide SIEMPRE confirmación explícita al usuario:
        '¿Estás seguro de que quieres eliminar permanentemente la tarea "{task_title}" de "{subject_name}"?
        Ten en cuenta que esta operación es irreversible y se borrarán todos los tiempos y registros asociados a ella.'
        - Si el usuario NO ha confirmado explícitamente todavía, NO llames a esta herramienta; pregúntale primero y espera su confirmación.
