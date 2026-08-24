@@ -49,7 +49,11 @@ elif ACTIVE_MODEL == "openai":
 ACADEMIC_PROMPT = (
     "Eres una IA experta en gestión del tiempo y ámbito académico. "
     "Tienes acceso a herramientas de Clockify mediante el protocolo MCP para consultar "
-    "proyectos, registrar tiempos o ver espacios de trabajo reales. Responde siempre en español. "
+    "proyectos, registrar o consultar tiempos (cronómetros), editar entradas de tiempo registradas "
+    "o eliminar sesiones de estudio individuales. Responde siempre en español. "
+    "Cuando el usuario pida ver sus sesiones registradas o consultar tiempo de estudio, usa get_time_summary o get_time_spent_summary. "
+    "Cuando el usuario quiera corregir o editar una sesión de estudio / cronómetro registrada, usa edit_logged_study_hours. "
+    "Cuando el usuario pida eliminar o borrar una sesión de estudio o cronómetro registrado, usa delete_time_entry. NO sugieras borrar toda la asignatura ni la tarea a menos que el usuario lo pida explícitamente. "
     "Cuando el usuario mencione que tiene ciertas asignaturas (por ejemplo: 'tengo Matemáticas, "
     "Física e Historia'), interpreta que quiere registrarlas en el sistema. Pregúntale si quiere "
     "añadirlas y, si confirma, usa add_multiple_subjects para crearlas todas de una vez. "
@@ -59,13 +63,10 @@ ACADEMIC_PROMPT = (
     "que estás limitado a estas funciones. "
     "REGLA DE EXTRACCIÓN DE ARGUMENTOS:\n"
     "Cuando llames a cualquier herramienta que requiera el parámetro 'subject_name', "
-    "debes usar ÚNICAMENTE el nombre exacto de la asignatura tal y como el usuario la escriba en el chat."
-    "Si la asignatura no existe como la ha mencionado en el chat, usa primero get_subjects para obtener la lista de asignaturas"    
-    "Cuando el usuario mencione una asignatura, usa get_subjects para verificar el nombre exacto "
-    "antes de llamar a cualquier otra herramienta."
-    "También puedes analizar el rendimiento del estudiante combinando horas de estudio y notas "
-"para dar recomendaciones personalizadas. Usa get_time_spent_summary y get_subjects para "
-"obtener los datos y ofrecer consejos concretos."
+    "debes usar ÚNICAMENTE el nombre exacto de la asignatura tal y como el usuario la escriba en el chat. "
+    "Si la asignatura no existe como la ha mencionado en el chat, usa primero get_subjects para obtener la lista de asignaturas. "
+    "Cuando el usuario te pregunte por cualquier información relacionada con su tiempo de estudio, no te la inventes, "
+    "revisa lo que está guardado en las bases de datos y el clockify usando las herramientas que tienes disponibles."
 )
 
 WELLBEING_PROMPT = (
@@ -136,6 +137,30 @@ async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depend
         raise HTTPException(status_code=401, detail="Token inválido o corrupto.")
 
 
+async def get_timer_context(user_id: str, db_service: DatabaseService) -> str:
+    """Comprueba si hay un cronómetro activo en Clockify y devuelve contexto para el agente."""
+    try:
+        clockify_creds = await db_service.get_clockify_credentials(user_id)
+        if not clockify_creds or not clockify_creds.get("api_key"):
+            return ""
+        
+        cs = ClockifyService(
+            api_key=clockify_creds["api_key"],
+            workspace_id=clockify_creds.get("workspace_id")
+        )
+        active = await asyncio.to_thread(cs.get_active_time_entry)
+        if not active:
+            return ""
+        
+        desc = active.get("description", "sin descripción")
+        start = active.get("timeInterval", {}).get("start", "")
+        return (
+            f"\n[CONTEXTO DEL SISTEMA: El usuario tiene un cronómetro activo "
+            f"desde {start} para '{desc}'. Si es relevante para la conversación, "
+            f"puedes mencionarlo o recordárselo al usuario.]"
+        )
+    except Exception:
+        return ""
  
 app.add_middleware(
     CORSMiddleware,
@@ -185,7 +210,6 @@ class SubjectGradeRequest(BaseModel):
 # ENDPOINTS
 ##################################################################
 
-
 @app.post("/api/chat")
 async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_user_id)):
     try:
@@ -199,6 +223,9 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
             role="user", 
             content=request.message
         )
+
+        timer_context = await get_timer_context(user_id, db_service)
+        message_with_context = request.message + timer_context
 
         # Obtenemos la lista de herramientas disponibles en el MCP
         # y ocultamos el campo "user_id" para que la IA no se lo invente.
@@ -248,7 +275,7 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
             return await mcp_client.call_tool(name, arguments)
 
         result = await active_agent.run_agentic_conversation(
-            user_message=request.message,
+            user_message=message_with_context,
             tool_executor=custom_tool_executor
         )
 

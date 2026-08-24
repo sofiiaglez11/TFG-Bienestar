@@ -13,7 +13,7 @@ from services.clockify_service import ClockifyService
 from services.database_service import DatabaseService
 import asyncio
 from typing import Optional
-import sys
+
 
 from collections import defaultdict
 from datetime import timedelta
@@ -192,7 +192,7 @@ async def get_user_progress(user_id: str):
         return "Progreso de tus asignaturas:\n" + "\n".join(progress_summary)
     except Exception as e:
         return f"Error al obtener el progreso: {str(e)}"
-    
+
 
 @mcp.tool()
 async def get_time_spent_summary(user_id: str):
@@ -201,46 +201,48 @@ async def get_time_spent_summary(user_id: str):
     Úsala cuando el usuario pregunte 'cuánto tiempo he dedicado a X' o 'resumen de tiempo'.
     """
     try:
+        print(f"[MCP TOOL: GET_TIME_SPENT_SUMMARY] Iniciando consulta para user_id={user_id}", file=sys.stderr, flush=True)
         subjects = await db_service.get_subjects_by_user(user_id)
+        print(f"[MCP TOOL: GET_TIME_SPENT_SUMMARY] Asignaturas encontradas: {len(subjects)} -> {[s.get('name') for s in subjects]}", file=sys.stderr, flush=True)
         
-        # Obtener periodo activo si lo hay
-        active_period = await db_service.get_active_period(user_id)
-        start_date = None
-        end_date = None
-        if active_period:
-            start_date = active_period.get("start_date")
-            end_date = active_period.get("end_date")
-
-        # Obtener credenciales y service
         cs = await _get_user_clockify_service(user_id)
         if not cs.api_key:
+            print("[MCP TOOL: GET_TIME_SPENT_SUMMARY] Error: No se encontró API Key de Clockify.", file=sys.stderr, flush=True)
             return "No tienes configurada tu API Key de Clockify para poder consultar las horas dedicadas."
 
-        if start_date or end_date:
-            clockify_entries = await asyncio.to_thread(
-                cs.get_time_entries, start_date=start_date, end_date=end_date
-            )
-        else:
-            clockify_entries = await asyncio.to_thread(
-                cs.get_time_entries, days_back=365
-            )
+        clockify_entries = await asyncio.to_thread(cs.get_time_entries, days_back=365)
+        print(f"[MCP TOOL: GET_TIME_SPENT_SUMMARY] Entradas obtenidas de Clockify: {len(clockify_entries)}", file=sys.stderr, flush=True)
 
-        # Agrupar segundos de Clockify por projectId
         project_seconds = {}
         for entry in clockify_entries:
             pid = entry.get("projectId")
+            print(f"[MCP TOOL: GET_TIME_SPENT_SUMMARY] Entry ID: {entry.get('id')} | ProjectID: {pid} | Desc: {entry.get('description')} | Start: {entry.get('start')} | End: {entry.get('end')} | Dur: {entry.get('duration')}", file=sys.stderr, flush=True)
+
             if not pid:
                 continue
+
+            seconds = 0.0
             start_iso = entry.get("start")
             end_iso = entry.get("end")
+
             if start_iso and end_iso:
                 try:
                     dt1 = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))
                     dt2 = datetime.fromisoformat(end_iso.replace('Z', '+00:00'))
                     seconds = (dt2 - dt1).total_seconds()
-                    project_seconds[pid] = project_seconds.get(pid, 0.0) + seconds
-                except Exception:
-                    pass
+                except Exception as ex:
+                    print(f"[MCP TOOL: GET_TIME_SPENT_SUMMARY] Error al parsear fechas: {ex}", file=sys.stderr, flush=True)
+
+            if seconds <= 0 and entry.get("duration"):
+                dur_str = entry.get("duration")
+                import re
+                h = int(re.search(r"(\d+)H", dur_str).group(1)) if re.search(r"(\d+)H", dur_str) else 0
+                m = int(re.search(r"(\d+)M", dur_str).group(1)) if re.search(r"(\d+)M", dur_str) else 0
+                s = int(re.search(r"(\d+)S", dur_str).group(1)) if re.search(r"(\d+)S", dur_str) else 0
+                seconds = h * 3600 + m * 60 + s
+
+            if seconds > 0:
+                project_seconds[pid] = project_seconds.get(pid, 0.0) + seconds
 
         time_summary = []
         for s in subjects:
@@ -250,9 +252,13 @@ async def get_time_spent_summary(user_id: str):
             hours, remainder = divmod(total_seconds, 3600)
             minutes, _ = divmod(remainder, 60)
             time_summary.append(f"- {s['name']}: {int(hours)}h {int(minutes)}m")
- 
-        return "Resumen de tiempo dedicado a tus asignaturas:\n" + "\n".join(time_summary)
+            print(f"[MCP TOOL: GET_TIME_SPENT_SUMMARY] Asignatura '{s['name']}' (PID: {pid}) -> {int(hours)}h {int(minutes)}m (segundos: {total_seconds})", file=sys.stderr, flush=True)
+
+        res_str = "Resumen de tiempo dedicado a tus asignaturas:\n" + "\n".join(time_summary)
+        print(f"[MCP TOOL: GET_TIME_SPENT_SUMMARY] Resultado:\n{res_str}", file=sys.stderr, flush=True)
+        return res_str
     except Exception as e:
+        print(f"[MCP TOOL ERROR: GET_TIME_SPENT_SUMMARY] {e}", file=sys.stderr, flush=True)
         return f"Error al obtener el resumen de tiempo: {str(e)}"
     
 
@@ -1411,39 +1417,21 @@ async def log_time_entry(user_id: str, subject_name: str, start_time: str, end_t
 
 
 @mcp.tool()
-async def get_time_summary(user_id: str, subject_name: Optional[str] = None):
+async def get_time_summary(user_id: str, subject_name: Optional[str] = None, days_back: Optional[int] = 60):
     """
     Consulta de solo lectura: devuelve el resumen de tiempo directamente desde Clockify,
     agrupado por tarea y con el total acumulado.
 
     - Si se pasa `subject_name`, filtra por esa asignatura usando su projectId real de Clockify.
     - Si `subject_name` es None o "todas", devuelve el resumen general de todas las asignaturas.
-
-    La respuesta es un JSON estructurado así:
-    {
-      "subject": "Nombre asignatura" | "Todas",
-      "total_minutes": 154,
-      "by_task": [
-        {
-          "task": "Nombre tarea" | "Sin tarea asignada",
-          "total_minutes": 60,
-          "sessions": [
-            { "start": "2026-08-20 10:56", "end": "2026-08-20 11:56", "description": "...", "minutes": 60 }
-          ]
-        }
-      ]
-    }
-
-    Usa este JSON para presentar al usuario:
-    - El tiempo total de la asignatura.
-    - El desglose por tarea (cuánto tiempo le ha dedicado a cada una).
-    - El listado de sesiones de cada tarea con fecha, hora y duración.
-    NO usar esta herramienta para detener timers.
+    - `days_back` permite especificar cuántos días atrás consultar (por defecto 60 días).
     """
     try:
+        print(f"[MCP TOOL: GET_TIME_SUMMARY] user_id={user_id}, subject_name='{subject_name}', days_back={days_back}", file=sys.stderr, flush=True)
         # 1. Credenciales y servicio Clockify
         user_creds = await db_service.get_clockify_credentials(user_id)
         if not user_creds or not user_creds.get("api_key"):
+            print("[MCP TOOL: GET_TIME_SUMMARY] Error: Sin API Key", file=sys.stderr, flush=True)
             return "No tienes configurada tu API Key de Clockify."
 
         clockify = ClockifyService(api_key=user_creds["api_key"])
@@ -1452,48 +1440,66 @@ async def get_time_summary(user_id: str, subject_name: Optional[str] = None):
         target_project_id = None
         is_all = not subject_name or subject_name.strip().lower() in ["todas", "all"]
 
+        subject = None
         if not is_all:
             subject = await _find_subject_by_name(user_id, subject_name)
+            print(f"[MCP TOOL: GET_TIME_SUMMARY] Subject encontrado en BD: {subject}", file=sys.stderr, flush=True)
             if not subject:
                 return f"No encontré ninguna asignatura llamada '{subject_name}'."
             target_project_id = subject.get("clockify_project_id")
             if not target_project_id:
                 return f"La asignatura '{subject_name}' no tiene proyecto vinculado en Clockify."
 
-            # Construir mapa taskId → nombre de tarea desde la BD
             all_tasks = await db_service.get_tasks_by_subject(subject["_id"])
             task_id_to_name = {
                 t["clockify_task_id"]: t["title"]
                 for t in all_tasks
                 if t.get("clockify_task_id")
             }
+            print(f"[MCP TOOL: GET_TIME_SUMMARY] Task map en BD: {task_id_to_name}", file=sys.stderr, flush=True)
         else:
             task_id_to_name = {}
 
-        # 3. Obtener entradas de Clockify (últimos 30 días)
-        entries = await asyncio.to_thread(clockify.get_time_entries, days_back=30)
+        # 3. Obtener entradas de Clockify
+        days = days_back if (days_back and days_back > 0) else 60
+        entries = await asyncio.to_thread(clockify.get_time_entries, days_back=days)
+        print(f"[MCP TOOL: GET_TIME_SUMMARY] Entradas brutas devueltas por Clockify ({days}d): {len(entries)}", file=sys.stderr, flush=True)
 
         if not entries:
-            return "No tienes ninguna sesión registrada en Clockify en los últimos 30 días."
+            return f"No tienes ninguna sesión registrada en Clockify en los últimos {days} días."
 
         # 4. Filtrar por projectId si se pidió asignatura concreta
         if not is_all:
             entries = [e for e in entries if e.get("projectId") == target_project_id]
+            print(f"[MCP TOOL: GET_TIME_SUMMARY] Entradas tras filtrar por projectId ({target_project_id}): {len(entries)}", file=sys.stderr, flush=True)
 
         if not entries:
             label = subject_name if not is_all else "ninguna asignatura"
-            return f"No encontré registros en Clockify para '{label}' en los últimos 30 días."
+            return f"No encontré registros en Clockify para '{label}' en los últimos {days} días."
 
         # 5. Calcular duración en minutos para cada entrada
-        def _parse_duration(iso_dur: str) -> int:
-            """Convierte 'PT1H30M15S' -> minutos totales (redondeado)."""
-            if not iso_dur:
-                return 0
-            import re
-            h = int(re.search(r"(\d+)H", iso_dur).group(1)) if re.search(r"(\d+)H", iso_dur) else 0
-            m = int(re.search(r"(\d+)M", iso_dur).group(1)) if re.search(r"(\d+)M", iso_dur) else 0
-            s = int(re.search(r"(\d+)S", iso_dur).group(1)) if re.search(r"(\d+)S", iso_dur) else 0
-            return h * 60 + m + round(s / 60)
+        def _parse_duration(entry: dict) -> int:
+            iso_dur = entry.get("duration")
+            if iso_dur:
+                import re
+                h = int(re.search(r"(\d+)H", iso_dur).group(1)) if re.search(r"(\d+)H", iso_dur) else 0
+                m = int(re.search(r"(\d+)M", iso_dur).group(1)) if re.search(r"(\d+)M", iso_dur) else 0
+                s = int(re.search(r"(\d+)S", iso_dur).group(1)) if re.search(r"(\d+)S", iso_dur) else 0
+                total_m = h * 60 + m + round(s / 60)
+                if total_m > 0:
+                    return total_m
+
+            st_raw = entry.get("start")
+            end_raw = entry.get("end")
+            if st_raw and end_raw and end_raw != "⏱️ En curso":
+                try:
+                    dt1 = datetime.fromisoformat(st_raw.replace("Z", "+00:00"))
+                    dt2 = datetime.fromisoformat(end_raw.replace("Z", "+00:00"))
+                    diff_m = round((dt2 - dt1).total_seconds() / 60)
+                    return max(0, diff_m)
+                except Exception as ex:
+                    print(f"[MCP TOOL: GET_TIME_SUMMARY] Error calculando diff: {ex}", file=sys.stderr, flush=True)
+            return 0
 
         def _fmt_dt(raw: str) -> str:
             return raw[:16].replace("T", " ") if raw else "?"
@@ -1504,8 +1510,10 @@ async def get_time_summary(user_id: str, subject_name: Optional[str] = None):
         for entry in entries:
             task_cid = entry.get("taskId")
             task_name = task_id_to_name.get(task_cid, "Sin tarea asignada") if task_cid else "Sin tarea asignada"
-            minutes = _parse_duration(entry.get("duration"))
+            minutes = _parse_duration(entry)
+            print(f"[MCP TOOL: GET_TIME_SUMMARY] Entry: ID={entry.get('id')} task_cid={task_cid} -> task_name='{task_name}' minutes={minutes}", file=sys.stderr, flush=True)
             groups[task_name].append({
+                "id": entry.get("id"),
                 "start": _fmt_dt(entry.get("start")),
                 "end": _fmt_dt(entry.get("end")) if entry.get("end") else "⏱️ En curso",
                 "description": entry.get("description") or "",
@@ -1524,17 +1532,19 @@ async def get_time_summary(user_id: str, subject_name: Optional[str] = None):
                 "sessions": sessions
             })
 
-        # Ordenar: tareas con más tiempo primero
         by_task.sort(key=lambda x: x["total_minutes"], reverse=True)
 
-        return json.dumps({
+        res_json = json.dumps({
             "subject": subject_name if not is_all else "Todas",
             "total_minutes": total_minutes,
             "by_task": by_task
         }, ensure_ascii=False, indent=2)
 
+        print(f"[MCP TOOL: GET_TIME_SUMMARY] JSON de salida:\n{res_json}", file=sys.stderr, flush=True)
+        return res_json
+
     except Exception as e:
-        print(f"[ERROR] get_time_summary: {str(e)}", file=sys.stderr, flush=True)
+        print(f"[MCP TOOL ERROR: GET_TIME_SUMMARY] {str(e)}", file=sys.stderr, flush=True)
         return f"Error al consultar Clockify: {str(e)}"
 
 @mcp.tool()
@@ -1544,32 +1554,31 @@ async def log_study_hours(user_id: str, subject_name: str, hours: float,
     Registra una sesión de estudio indicando solo cuántas horas se han dedicado,
     sin necesidad de especificar hora de inicio ni fin. El sistema calcula automáticamente
     que la sesión terminó ahora y empezó hace X horas.
-    Úsala cuando el usuario diga 'he dedicado 2 horas a Matemáticas' o 'estudié 3h de Física'.
-    No confundir con start_timer/stop_timer, que son para tiempo en tiempo real.
     """
     try:
-        
+        print(f"[MCP TOOL: LOG_STUDY_HOURS] user_id={user_id}, subject_name='{subject_name}', hours={hours}, task_title='{task_title}', desc='{description}'", file=sys.stderr, flush=True)
         now = datetime.now(timezone.utc)
         start = now - timedelta(hours=hours)
         start_time = start.strftime("%Y-%m-%dT%H:%M:%SZ")
         end_time = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         subject = await _find_subject_by_name(user_id, subject_name)
+        print(f"[MCP TOOL: LOG_STUDY_HOURS] Subject encontrado: {subject}", file=sys.stderr, flush=True)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
 
         clockify_task_id = None
         if task_title:
             task = await _find_task_by_title(subject["_id"], task_title)
+            print(f"[MCP TOOL: LOG_STUDY_HOURS] Task encontrada: {task}", file=sys.stderr, flush=True)
             if task:
                 clockify_task_id = task.get("clockify_task_id")
 
-        # Registrar en Clockify
         cs = await _get_user_clockify_service(user_id)
         if not cs.api_key:
             return "No tienes configurada tu API Key de Clockify para poder registrar las horas."
 
-        await asyncio.to_thread(
+        res = await asyncio.to_thread(
             cs.create_time_entry,
             description=description or f"Estudiando {subject_name}",
             project_id=subject["clockify_project_id"],
@@ -1577,13 +1586,156 @@ async def log_study_hours(user_id: str, subject_name: str, hours: float,
             start_time=start_time,
             end_time=end_time
         )
+        print(f"[MCP TOOL: LOG_STUDY_HOURS] Respuesta de Clockify: {res}", file=sys.stderr, flush=True)
 
         h = int(hours)
         m = int((hours - h) * 60)
         return f"Registradas {h}h {m}m de estudio en '{subject_name}'{' (' + task_title + ')' if task_title else ''} en Clockify."
     except Exception as e:
+        print(f"[MCP TOOL ERROR: LOG_STUDY_HOURS] {e}", file=sys.stderr, flush=True)
         return f"Error al registrar las horas: {str(e)}"
         
+
+@mcp.tool()
+async def edit_logged_study_hours(user_id: str, time_entry_id: Optional[str] = None, subject_name: Optional[str] = None,
+                                  new_subject_name: Optional[str] = None, new_task_title: Optional[str] = None,
+                                  new_start_time: Optional[str] = None, new_end_time: Optional[str] = None,
+                                  new_description: Optional[str] = None):
+    """
+    Edita una entrada de tiempo (sesión de estudio / cronómetro) ya registrada en Clockify.
+    """
+    try:
+        print(f"[MCP TOOL: EDIT_LOGGED_STUDY_HOURS] time_entry_id={time_entry_id}, subject_name='{subject_name}', new_subject='{new_subject_name}', new_task='{new_task_title}', new_start='{new_start_time}', new_end='{new_end_time}', new_desc='{new_description}'", file=sys.stderr, flush=True)
+        cs = await _get_user_clockify_service(user_id)
+        if not cs.api_key:
+            return "No tienes configurada tu API Key de Clockify para poder editar las entradas."
+
+        target_id = time_entry_id
+        subject = None
+
+        if not target_id:
+            if not subject_name:
+                return "Debes indicar el ID de la entrada de tiempo o el nombre de la asignatura para localizar la sesión a editar."
+
+            subject = await _find_subject_by_name(user_id, subject_name)
+            if not subject:
+                return f"No encontré ninguna asignatura llamada '{subject_name}'."
+
+            entries = await asyncio.to_thread(cs.get_time_entries, days_back=60)
+            filtered = [e for e in entries if e.get("projectId") == subject.get("clockify_project_id")]
+            if not filtered:
+                return f"No encontré sesiones de estudio registradas para la asignatura '{subject_name}'."
+            target_id = filtered[0].get("id")
+
+        print(f"[MCP TOOL: EDIT_LOGGED_STUDY_HOURS] Target entry ID a modificar: {target_id}", file=sys.stderr, flush=True)
+
+        if not target_id:
+            return "No se pudo identificar la entrada de tiempo a editar."
+
+        new_project_id = None
+        new_sub = None
+        if new_subject_name:
+            new_sub = await _find_subject_by_name(user_id, new_subject_name)
+            if not new_sub:
+                return f"No encontré la nueva asignatura llamada '{new_subject_name}'."
+            new_project_id = new_sub.get("clockify_project_id")
+
+        new_clockify_task_id = None
+        if new_task_title:
+            ref_sub_id = new_sub["_id"] if new_sub else (subject["_id"] if subject else None)
+            if ref_sub_id:
+                task = await _find_task_by_title(ref_sub_id, new_task_title)
+                if task:
+                    new_clockify_task_id = task.get("clockify_task_id")
+
+        if new_start_time and not new_start_time.endswith('Z') and '+' not in new_start_time:
+            new_start_time += 'Z'
+        if new_end_time and not new_end_time.endswith('Z') and '+' not in new_end_time:
+            new_end_time += 'Z'
+
+        res = await asyncio.to_thread(
+            cs.update_time_entry,
+            time_entry_id=target_id,
+            description=new_description,
+            project_id=new_project_id,
+            task_id=new_clockify_task_id,
+            start_time=new_start_time,
+            end_time=new_end_time
+        )
+        print(f"[MCP TOOL: EDIT_LOGGED_STUDY_HOURS] Resultado de update_time_entry: {res}", file=sys.stderr, flush=True)
+
+        if isinstance(res, dict) and res.get("error"):
+            return f"Error al actualizar la entrada de tiempo: {res['error']}"
+
+        return f"Entrada de tiempo '{target_id}' actualizada correctamente en Clockify."
+    except Exception as e:
+        print(f"[MCP TOOL ERROR: EDIT_LOGGED_STUDY_HOURS] {e}", file=sys.stderr, flush=True)
+        return f"Error al editar la entrada de tiempo: {str(e)}"
+
+@mcp.tool()
+async def delete_time_entry(user_id: str, time_entry_id: Optional[str] = None, subject_name: Optional[str] = None,
+                            task_title: Optional[str] = None, date: Optional[str] = None):
+    """
+    Elimina una sesión de estudio / entrada de tiempo (cronómetro) registrada en Clockify.
+    """
+    try:
+        print(f"[MCP TOOL: DELETE_TIME_ENTRY] time_entry_id={time_entry_id}, subject_name='{subject_name}', task_title='{task_title}', date='{date}'", file=sys.stderr, flush=True)
+        cs = await _get_user_clockify_service(user_id)
+        if not cs.api_key:
+            return "No tienes configurada tu API Key de Clockify para poder eliminar la entrada de tiempo."
+
+        target_id = time_entry_id
+
+        if not target_id:
+            entries = await asyncio.to_thread(cs.get_time_entries, days_back=60)
+            if not entries:
+                return "No se encontraron entradas de tiempo registradas para eliminar."
+
+            target_project_id = None
+            subject = None
+            if subject_name:
+                subject = await _find_subject_by_name(user_id, subject_name)
+                if subject:
+                    target_project_id = subject.get("clockify_project_id")
+
+            target_task_id = None
+            if task_title and subject:
+                task = await _find_task_by_title(subject["_id"], task_title)
+                if task:
+                    target_task_id = task.get("clockify_task_id")
+
+            filtered = []
+            for e in entries:
+                if target_project_id and e.get("projectId") != target_project_id:
+                    continue
+                if target_task_id and e.get("taskId") != target_task_id:
+                    continue
+                if date and not (e.get("start") and date in e.get("start")):
+                    continue
+                filtered.append(e)
+
+            print(f"[MCP TOOL: DELETE_TIME_ENTRY] Entradas coincidentes: {len(filtered)}", file=sys.stderr, flush=True)
+
+            if not filtered:
+                return "No se encontró ninguna sesión de estudio que coincida con los criterios especificados."
+            
+            target_id = filtered[0].get("id")
+
+        print(f"[MCP TOOL: DELETE_TIME_ENTRY] Target entry ID a eliminar: {target_id}", file=sys.stderr, flush=True)
+
+        if not target_id:
+            return "No se pudo identificar el ID de la entrada de tiempo a eliminar."
+
+        res = await asyncio.to_thread(cs.delete_time_entry, time_entry_id=target_id)
+        print(f"[MCP TOOL: DELETE_TIME_ENTRY] Resultado del borrado: {res}", file=sys.stderr, flush=True)
+
+        if isinstance(res, dict) and res.get("error"):
+            return f"Error al eliminar la entrada de tiempo: {res['error']}"
+
+        return f"Entrada de tiempo '{target_id}' eliminada correctamente de Clockify."
+    except Exception as e:
+        print(f"[MCP TOOL ERROR: DELETE_TIME_ENTRY] {e}", file=sys.stderr, flush=True)
+        return f"Error al eliminar la entrada de tiempo: {str(e)}"
          
  
 # ############################################################################

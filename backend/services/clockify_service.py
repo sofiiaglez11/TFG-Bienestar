@@ -344,7 +344,7 @@ class ClockifyService:
 
         if start_date or end_date:
             if not start_date:
-                start_dt = datetime.now(timezone.utc) - timedelta(days=30)
+                start_dt = datetime.now(timezone.utc) - timedelta(days=365)
             elif isinstance(start_date, str):
                 if 'T' not in start_date:
                     start_dt = datetime.fromisoformat(f"{start_date}T00:00:00+00:00")
@@ -354,7 +354,7 @@ class ClockifyService:
                 start_dt = start_date
 
             if not end_date:
-                end_dt = datetime.now(timezone.utc)
+                end_dt = datetime.now(timezone.utc) + timedelta(days=7)
             elif isinstance(end_date, str):
                 if 'T' not in end_date:
                     end_dt = datetime.fromisoformat(f"{end_date}T23:59:59+00:00")
@@ -363,46 +363,71 @@ class ClockifyService:
             else:
                 end_dt = end_date
         else:
-            days = days_back if days_back is not None else 7
-            end_dt = datetime.now(timezone.utc)
-            start_dt = end_dt - timedelta(days=days)
+            days = days_back if days_back is not None else 365
+            end_dt = datetime.now(timezone.utc) + timedelta(days=7)
+            start_dt = datetime.now(timezone.utc) - timedelta(days=days)
 
-        url = f"{self.base_url}/workspaces/{workspace_id}/user/{self.get_user_id()}/time-entries"
+        user_id = self.get_user_id()
+        url = f"{self.base_url}/workspaces/{workspace_id}/user/{user_id}/time-entries"
+        
+        start_str = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_str = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         base_params = {
-            "start": start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "end": end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "start": start_str,
+            "end": end_str,
             "page-size": 200,
         }
 
-        # Paginación: recorre todas las páginas hasta que devuelva menos de page-size
+        print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] User ID: {user_id} | Workspace ID: {workspace_id}", file=sys.stderr, flush=True)
+        print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Rango fechas enviado a Clockify -> start: {start_str} | end: {end_str} (days_back={days_back})", file=sys.stderr, flush=True)
+
         all_entries = []
         page = 1
         while True:
             params = {**base_params, "page": page}
+            print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Peticion GET {url} params={params}", file=sys.stderr, flush=True)
             response = requests.get(url, headers=self.headers, params=params)
+            print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Response status={response.status_code}", file=sys.stderr, flush=True)
             response.raise_for_status()
             page_entries = response.json()
+            print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Entradas en pagina {page}: {len(page_entries)}", file=sys.stderr, flush=True)
+
             if not page_entries:
                 break
             for entry in page_entries:
-                all_entries.append({
+                item = {
+                    "id": entry.get("id"),
                     "description": entry.get("description", "Sin descripción"),
                     "start": entry.get("timeInterval", {}).get("start"),
                     "end": entry.get("timeInterval", {}).get("end"),
                     "duration": entry.get("timeInterval", {}).get("duration"),
                     "projectId": entry.get("projectId"),
                     "taskId": entry.get("taskId"),
-                })
+                }
+                print(f"   -> [ENTRY] ID={item['id']} | Start={item['start']} | End={item['end']} | ProjectID={item['projectId']} | TaskID={item['taskId']} | Desc='{item['description']}'", file=sys.stderr, flush=True)
+                all_entries.append(item)
             if len(page_entries) < 200:
                 break  # última página
             page += 1
 
+        print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Total entradas finales devueltas: {len(all_entries)}", file=sys.stderr, flush=True)
         return all_entries
+
+    def get_time_entry(self, time_entry_id: str, workspace_id: str = None) -> dict:
+        """Devuelve los detalles de una entrada de tiempo específica por su ID."""
+        if not time_entry_id:
+            return {}
+        workspace_id = self._set_workspace_if_null(workspace_id)
+        url = f"{self.base_url}/workspaces/{workspace_id}/time-entries/{time_entry_id}"
+        response = requests.get(url, headers=self.headers)
+        if response.status_code == 404:
+            return {}
+        response.raise_for_status()
+        return response.json() if response.content else {}
 
     def create_time_entry(self, description: str, project_id: str = None, task_id: str = None,
                           start_time: str = None, end_time: str = None, workspace_id: str = None) -> dict:
 
-        # print(f"CREATE TIME ENTRY -> DESCRIPTION: {description}, PROJECT ID: {project_id}, TASK ID: {task_id}, START TIME: {start_time}, END TIME: {end_time}", file=sys.stderr, flush=True)
         workspace_id = self._set_workspace_if_null(workspace_id)
         url = f"{self.base_url}/workspaces/{workspace_id}/time-entries"
 
@@ -420,7 +445,9 @@ class ClockifyService:
         if end_time:
             payload["end"] = end_time
 
+        print(f"[CLOCKIFY SERVICE: CREATE_TIME_ENTRY] POST {url} | Payload: {payload}", file=sys.stderr, flush=True)
         response = requests.post(url, headers=self.headers, json=payload)
+        print(f"[CLOCKIFY SERVICE: CREATE_TIME_ENTRY] Status: {response.status_code} | Response: {response.content[:300]}", file=sys.stderr, flush=True)
         response.raise_for_status()
         return response.json()
 
@@ -452,7 +479,7 @@ class ClockifyService:
 
 
     def delete_time_entry(self, time_entry_id: str, workspace_id: str = None) -> dict:
-        """""Elimina una entrada de tiempo de Clockify por su ID"""
+        """Elimina una entrada de tiempo de Clockify por su ID."""
 
         if not time_entry_id:
             raise ValueError("Se requiere un ID de entrada de tiempo para eliminarla.")
@@ -466,7 +493,7 @@ class ClockifyService:
         if response.status_code == 404:
             return {}
         response.raise_for_status()
-        return response.json() if response.content else {}
+        return response.json() if response.content else {"deleted_id": time_entry_id, "success": True}
 
     def delete_time_entries_for_task(self, project_id: str, task_id: str, workspace_id: str = None) -> dict:
         """"Busca y elimina todas las entradas de tiempo asociadas a una tarea en Clockify"""
@@ -489,9 +516,53 @@ class ClockifyService:
                         if entry_id:
                             self.delete_time_entry(entry_id, workspace_id)
                             deleted_count += 1
+            return {"deleted_count": deleted_count}
         except Exception as e:
             print(f"[ERROR] Al eliminar entradas de tiempo para la tarea {task_id}: {e}", file=sys.stderr, flush=True)
             return {"deleted_count": deleted_count, "error": str(e)}
+
+    def update_time_entry(self, time_entry_id: str, description: str = None, project_id: str = None,
+                          task_id: str = None, start_time: str = None, end_time: str = None, workspace_id: str = None) -> dict:
+        """Actualiza una entrada de tiempo de Clockify por su ID, preservando los datos requeridos."""
+        if not time_entry_id:
+            raise ValueError("Se requiere un ID de entrada de tiempo para actualizarla.")
+        workspace_id = self._set_workspace_if_null(workspace_id)
+
+        try:
+            # Obtener datos existentes para rellenar campos obligatorios que Clockify exige en PUT
+            existing = self.get_time_entry(time_entry_id, workspace_id=workspace_id)
+            existing_interval = existing.get("timeInterval", {}) if existing else {}
+
+            start = start_time or existing_interval.get("start")
+            if not start:
+                raise ValueError(f"No se pudo determinar el parámetro 'start' para la entrada {time_entry_id}.")
+
+            payload = {
+                "start": start,
+                "description": description if description is not None else existing.get("description", ""),
+                "billable": existing.get("billable", False) if existing else False
+            }
+
+            p_id = project_id if project_id is not None else existing.get("projectId")
+            if p_id:
+                payload["projectId"] = p_id
+
+            t_id = task_id if task_id is not None else existing.get("taskId")
+            if t_id:
+                payload["taskId"] = t_id
+
+            e_time = end_time if end_time is not None else existing_interval.get("end")
+            if e_time:
+                payload["end"] = e_time
+
+            url = f"{self.base_url}/workspaces/{workspace_id}/time-entries/{time_entry_id}"
+            response = requests.put(url, headers=self.headers, json=payload)
+            print(f"[UPDATE TIME ENTRY RESPONSE]: status={response.status_code} payload={payload}", file=sys.stderr, flush=True)
+            response.raise_for_status()
+            return response.json() if response.content else {}
+        except Exception as e:
+            print(f"[ERROR] Al actualizar la entrada de tiempo {time_entry_id}: {e}", file=sys.stderr, flush=True)
+            return {"error": str(e)}
 
     ############################################################################
     # METHODS FOR USERS

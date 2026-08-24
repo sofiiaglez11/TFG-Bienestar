@@ -32,7 +32,7 @@ class AgentOrchestrator:
            IMPORTANTE: preguntas sobre el cronómetro o el tiempo de estudio NO son BIENESTAR, son ACADEMICO.
         3. GENERAL: Si es un saludo ('hola', 'qué tal'), una pregunta sobre qué puedes hacer, o una despedida.
 
-        {history_str}Último mensaje del usuario (a clasificar, utilizando el historial superior como contexto de ser necesario): "{user_message}"
+        {history_str} Último mensaje del usuario (a clasificar, utilizando el historial superior como contexto de ser necesario): "{user_message}"
 
         Responde ÚNICAMENTE con un JSON con el siguiente formato, sin bloques de código ni texto adicional:
         {{"domain": "ACADEMICO" | "BIENESTAR" | "GENERAL"}}
