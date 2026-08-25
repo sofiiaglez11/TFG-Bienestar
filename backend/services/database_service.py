@@ -52,12 +52,13 @@ class DatabaseService:
     ############################################################################
     # METHODS FOR HISTORY
 
-    async def get_history(self, user_id: str, limit: int = 50) -> list[dict]:
+    async def get_history(self, user_id: str, limit: int = 50, skip: int = 0) -> list[dict]:
         """
-        Recupera los últimos N mensajes de un usuario ordenados cronológicamente.
+        Recupera N mensajes de un usuario ordenados cronológicamente con paginación.
+        - skip: número de mensajes a saltar (para paginación al hacer scroll hacia arriba)
         """
         # Buscamos por user_id y ordenamos por timestamp descendente (más recientes primero)
-        cursor = self.history.find({"user_id": user_id}).sort("timestamp", -1).limit(limit)
+        cursor = self.history.find({"user_id": user_id}).sort("timestamp", -1).skip(skip).limit(limit)
         messages = await cursor.to_list(length=limit)
 
         # Invertimos la lista para devolverlos en orden cronológico (del más antiguo al más reciente)

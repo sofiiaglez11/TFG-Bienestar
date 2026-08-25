@@ -12,6 +12,8 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:800
 export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState(null);
   const [showClockifyModal, setShowClockifyModal] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
@@ -56,26 +58,6 @@ export default function ChatPage() {
 
     fetchUserInfo();
 
-    // Comprobar si el usuario tiene Clockify conectado
-    // const checkClockifyStatus = async () => {
-    //   try {
-    //     const res = await fetch(`${BACKEND_URL}/api/user/clockify-status`, {
-    //       headers: { Authorization: `Bearer ${token}` },
-    //     });
-    //     if (res.ok) {
-    //       const data = await res.json();
-    //       setClockifyConnected(data.connected);
-    //       // Si ya está conectado, cargamos el historial normalmente
-    //       if (data.connected) {
-    //         loadChatHistory(token);
-    //       }
-    //       // Si no está conectado, no cargamos historial ni saludo proactivo;
-    //       // el banner de bienvenida se encargará de guiar al usuario.
-    //     }
-    //   } catch (err) {
-    //     console.error("Error al comprobar estado de Clockify:", err);
-    //   }
-    // };
 
     const checkClockifyStatus = async () => {
       try {
@@ -101,7 +83,7 @@ export default function ChatPage() {
     const loadChatHistory = async (tok) => {
       setIsLoading(true);
       try {
-        const res = await fetch(`${BACKEND_URL}/api/chat/history`, {
+        const res = await fetch(`${BACKEND_URL}/api/chat/history?limit=30&skip=0`, {
           headers: {
             Authorization: `Bearer ${tok}`,
           },
@@ -119,6 +101,7 @@ export default function ChatPage() {
 
         if (data.history && data.history.length > 0) {
           setMessages(data.history);
+          setHasMore(data.has_more ?? false);
         } else {
           triggerProactiveGreeting(tok);
         }
@@ -132,6 +115,36 @@ export default function ChatPage() {
 
     checkClockifyStatus();
   }, [router]);
+
+  // Cargar más mensajes antiguos al hacer scroll hacia arriba
+  const loadMoreMessages = async () => {
+    if (isLoadingMore || !hasMore) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    setIsLoadingMore(true);
+    try {
+      const skip = messages.length;
+      const res = await fetch(
+        `${BACKEND_URL}/api/chat/history?limit=30&skip=${skip}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.history && data.history.length > 0) {
+          setMessages((prev) => [...data.history, ...prev]);
+        }
+        setHasMore(data.has_more ?? false);
+      }
+    } catch (err) {
+      console.error("Error al cargar más mensajes:", err);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
 
 
   // 2. Función para disparar el saludo proactivo inicial
@@ -151,6 +164,7 @@ export default function ChatPage() {
             role: "assistant",
             content: data.response,
             agent_used: data.agent_used,
+            timestamp: data.timestamp || new Date().toISOString(),
           },
         ]);
       }
@@ -168,7 +182,11 @@ export default function ChatPage() {
     }
 
     // Añadimos inmediatamente el mensaje del usuario a la pantalla
-    const userMessage = { role: "user", content: text };
+    const userMessage = {
+      role: "user",
+      content: text,
+      timestamp: new Date().toISOString(),
+    };
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
     setError(null);
@@ -194,6 +212,7 @@ export default function ChatPage() {
         role: "assistant",
         content: data.response,
         agent_used: data.agent_used, // ACADEMICO, BIENESTAR o GENERAL
+        timestamp: data.timestamp || new Date().toISOString(),
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -661,7 +680,13 @@ export default function ChatPage() {
             ) : (
               <>
                 {/* Message Area */}
-                <ChatWindow messages={messages} isLoading={isLoading} />
+                <ChatWindow
+                  messages={messages}
+                  isLoading={isLoading}
+                  hasMore={hasMore}
+                  isLoadingMore={isLoadingMore}
+                  onLoadMore={loadMoreMessages}
+                />
 
                 {/* Error Banner */}
                 {error && (

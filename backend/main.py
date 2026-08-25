@@ -218,7 +218,7 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
         # Recuperamos los últimos 5 mensajes de historial del usuario para tener contexto de la conversación
         history_msgs = await db_service.get_history(user_id=user_id, limit=5)
 
-        await db_service.insert_message(
+        user_msg = await db_service.insert_message(
             user_id=user_id, 
             role="user", 
             content=request.message
@@ -279,13 +279,17 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
             tool_executor=custom_tool_executor
         )
 
-        await db_service.insert_message(
+        assistant_msg = await db_service.insert_message(
             user_id=user_id,
             role="assistant",
             content=result.text,
             agent_used=domain
         )
-        return {"response": result.text}
+        return {
+            "response": result.text,
+            "agent_used": domain,
+            "timestamp": assistant_msg.get("timestamp")
+        }
 
     except Exception as e:
         print(f"Error crítico en handle_chat: {str(e)}")
@@ -317,14 +321,18 @@ async def get_proactive_greeting(user_id: str = Depends(get_current_user_id)):
     )
 
     # Guardar la pregunta del bot en el historial
-    await db_service.insert_message(
+    greeting_msg = await db_service.insert_message(
         user_id=user_id,
         role="assistant",
         content=result.text,
         agent_used="BIENESTAR"
     )
 
-    return {"response": result.text, "agent_used": "BIENESTAR"}
+    return {
+        "response": result.text,
+        "agent_used": "BIENESTAR",
+        "timestamp": greeting_msg.get("timestamp")
+    }
 
 @app.post("/api/login")
 async def login(request: LoginRequest):
@@ -350,13 +358,17 @@ async def register(request: RegisterRequest):
 
 
 @app.get("/api/chat/history")
-async def get_chat_history(user_id: str = Depends(get_current_user_id)):
+async def get_chat_history(
+    user_id: str = Depends(get_current_user_id),
+    limit: int = 30,
+    skip: int = 0
+):
     """
-     Devuelve los últimos mensajes del usuario desde MongoDB 
-    para pintarlos en la interfaz de React al abrir la app.
+    Devuelve los mensajes del historial del usuario desde MongoDB con paginación.
     """
-    messages = await db_service.get_history(user_id=user_id, limit=50)
-    return {"history": messages}
+    messages = await db_service.get_history(user_id=user_id, limit=limit, skip=skip)
+    has_more = len(messages) == limit
+    return {"history": messages, "has_more": has_more}
 
 
 @app.post("/api/chat/reset")

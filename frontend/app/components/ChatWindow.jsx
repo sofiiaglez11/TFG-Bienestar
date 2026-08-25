@@ -1,16 +1,55 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useLayoutEffect } from "react";
 import MessageBubble from "./MessageBubble";
 
-export default function ChatWindow({ messages, isLoading }) {
+export default function ChatWindow({
+  messages,
+  isLoading,
+  hasMore,
+  isLoadingMore,
+  onLoadMore,
+}) {
+  const containerRef = useRef(null);
   const bottomRef = useRef(null);
+  const prevMessagesLengthRef = useRef(messages.length);
+  const prevScrollHeightRef = useRef(0);
+  const isPrependingRef = useRef(false);
 
-  // Auto-scroll to the last message
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  // Para detectar el scroll cerca del top (y cargar mensajes más antiguos)
+  const handleScroll = () => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    if (container.scrollTop < 50 && hasMore && !isLoadingMore && onLoadMore) {
+      prevScrollHeightRef.current = container.scrollHeight;
+      isPrependingRef.current = true;
+      onLoadMore();
+    }
+  };
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const prevLen = prevMessagesLengthRef.current;
+    const currLen = messages.length;
+
+    if (isPrependingRef.current && currLen > prevLen) {
+      // Para mantener la posición del scroll tras cargar los mensajes antiguos
+      const heightDifference = container.scrollHeight - prevScrollHeightRef.current;
+      container.scrollTop = heightDifference;
+      isPrependingRef.current = false;
+    } else if (prevLen === 0 || (!isPrependingRef.current && currLen > prevLen)) {
+      // Auto-scroll al final al cargar por primera vez o al añadir un nuevo mensaje
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+
+    prevMessagesLengthRef.current = currLen;
   }, [messages, isLoading]);
 
   return (
     <div
+      ref={containerRef}
+      onScroll={handleScroll}
       style={{
         flex: 1,
         overflowY: "auto",
@@ -19,7 +58,21 @@ export default function ChatWindow({ messages, isLoading }) {
         flexDirection: "column",
       }}
     >
-      {messages.length === 0 && (
+      {/* Indicador de carga de mensajes antiguos */}
+      {isLoadingMore && (
+        <div
+          style={{
+            textAlign: "center",
+            padding: "8px",
+            fontSize: "12px",
+            color: "var(--text-secondary)",
+          }}
+        >
+          Cargando mensajes anteriores...
+        </div>
+      )}
+
+      {messages.length === 0 && !isLoading && (
         <div
           style={{
             margin: "auto",
@@ -35,16 +88,18 @@ export default function ChatWindow({ messages, isLoading }) {
       )}
 
       {messages.map((msg, index) => (
-        <MessageBubble key={index} message={msg} />
+        <MessageBubble key={msg._id || index} message={msg} />
       ))}
 
       {isLoading && (
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "6px",
-          padding: "4px 0"
-        }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "4px 0",
+          }}
+        >
           <div
             style={{
               width: "28px",
