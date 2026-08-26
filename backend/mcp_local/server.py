@@ -737,8 +737,8 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
         'assignment' (para entregas de trabajos) u 
         'other'.
     - priority: Prioridad opcional de la tarea, entero del 1 al 5.
-        Puedes preguntarle al usuario con escala verbal y convertirla:
-        1 = muy baja, 2 = baja, 3 = media, 4 = alta, 5 = muy alta.
+        REGLA CRÍTICA DE PRIORIDAD: 5 = prioridad MÁS ALTA (máxima urgencia), 1 = prioridad MÁS BAJA (mínima urgencia).
+        Escala: 1 = muy baja, 2 = baja, 3 = media, 4 = alta, 5 = muy alta. NUNCA interpretes 1 como prioridad máxima.
         Si el usuario no menciona prioridad, no la preguntes; déjala como None.
     - tags: Lista opcional de etiquetas (strings) para categorizar la tarea.
         Ejemplos: ['teórico', 'difícil'], ['repaso', 'examen'].
@@ -964,7 +964,7 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
     Para marcar una tarea como completada o revertirla, usa complete_task.
     Para cambiar la jerarquía (padre/subtarea), usa set_task_hierarchy.
     due_date debe tener formato ISO 8601 (ej: '2026-07-20').
-    priority: entero del 1 al 5 (1=muy baja, 2=baja, 3=media, 4=alta, 5=muy alta).
+    priority: entero del 1 al 5 (5=prioridad MÁS ALTA / máxima, 1=prioridad MÁS BAJA / mínima. 1=muy baja, 2=baja, 3=media, 4=alta, 5=muy alta).
         Pasa 0 o un valor centinela si el usuario quiere eliminar la prioridad (la dejarás como None en BD).
     tags: lista completa de tags que debe tener la tarea tras la edición.
         Para AÑADIR un tag: lee los tags actuales con get_tasks y pasa la lista con el nuevo tag añadido.

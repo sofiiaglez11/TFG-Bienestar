@@ -66,7 +66,15 @@ ACADEMIC_PROMPT = (
     "debes usar ÚNICAMENTE el nombre exacto de la asignatura tal y como el usuario la escriba en el chat. "
     "Si la asignatura no existe como la ha mencionado en el chat, usa primero get_subjects para obtener la lista de asignaturas. "
     "Cuando el usuario te pregunte por cualquier información relacionada con su tiempo de estudio, no te la inventes, "
-    "revisa lo que está guardado en las bases de datos y el clockify usando las herramientas que tienes disponibles."
+    "revisa lo que está guardado en las bases de datos y el clockify usando las herramientas que tienes disponibles.\n"
+    "REGLA DE PRIORIDADES DE TAREAS:\n"
+    "Las prioridades de las tareas van del 1 al 5 (o sin prioridad/None):\n"
+    "- 5 = Prioridad MÁS ALTA (Muy alta / Máxima urgencia).\n"
+    "- 4 = Prioridad alta.\n"
+    "- 3 = Prioridad media.\n"
+    "- 2 = Prioridad baja.\n"
+    "- 1 = Prioridad MÁS BAJA (Muy baja / Mínima urgencia).\n"
+    "NUNCA interpretes el 1 como la prioridad más alta. El valor 5 es SIEMPRE la máxima prioridad y 1 la mínima."
 )
 
 WELLBEING_PROMPT = (
@@ -207,8 +215,17 @@ class SubjectGradeRequest(BaseModel):
 
 
 ##################################################################
-# ENDPOINTS
-##################################################################
+def get_datetime_context() -> str:
+    """Devuelve la fecha y hora actual formateada en español como contexto para el agente."""
+    now = datetime.now()
+    dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+    meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+    dia_semana = dias[now.weekday()]
+    mes = meses[now.month - 1]
+    fecha_str = f"{dia_semana}, {now.day} de {mes} de {now.year}"
+    hora_str = now.strftime("%H:%M")
+    return f"\n[CONTEXTO DEL SISTEMA: La fecha y hora actual es {fecha_str} a las {hora_str}. Usa este dato si el usuario te pregunta qué día es hoy o para calcular fechas límite de tareas.]"
+
 
 @app.post("/api/chat")
 async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_user_id)):
@@ -224,8 +241,9 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
             content=request.message
         )
 
+        date_context = get_datetime_context()
         timer_context = await get_timer_context(user_id, db_service)
-        message_with_context = request.message + timer_context
+        message_with_context = request.message + date_context + timer_context
 
         # Obtenemos la lista de herramientas disponibles en el MCP
         # y ocultamos el campo "user_id" para que la IA no se lo invente.
