@@ -877,14 +877,21 @@ async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False)
             return f"No tienes tareas registradas para '{subject_name}'."
 
         # Separar tareas raíz de subtareas y agruparlas por padre
-        root_tasks = [t for t in all_tasks if not t.get("parent_task_id")]
+        all_task_ids = {t["_id"] for t in all_tasks}
+        root_tasks = [
+            t for t in all_tasks 
+            if not t.get("parent_task_id") or t.get("parent_task_id") not in all_task_ids
+        ]
+        
         subtasks_by_parent = {}
         for t in all_tasks:
             pid = t.get("parent_task_id")
-            if pid:
+            if pid and pid in all_task_ids:
                 subtasks_by_parent.setdefault(pid, []).append(t)
 
         def serialize(t):
+            children = subtasks_by_parent.get(t["_id"], [])
+            children.sort(key=lambda st: st.get("priority") or 0, reverse=True)
             return {
                 "title": t.get("title"),
                 "completed": t.get("completed", False),
@@ -892,16 +899,13 @@ async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False)
                 "description": t.get("description") or "",
                 "priority": t.get("priority"),  # int 1-5 o null
                 "tags": t.get("tags") or [],
+                "subtasks": [serialize(child) for child in children]
             }
 
         # Ordenar tareas raíz por prioridad descendente (5=muy alta primero, None al final)
         root_tasks.sort(key=lambda t: t.get("priority") or 0, reverse=True)
 
-        tasks_data = []
-        for root in root_tasks:
-            entry = serialize(root)
-            entry["subtasks"] = [serialize(s) for s in subtasks_by_parent.get(root["_id"], [])]
-            tasks_data.append(entry)
+        tasks_data = [serialize(root) for root in root_tasks]
 
         return json.dumps({
             "subject": subject_name,

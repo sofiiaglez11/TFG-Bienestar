@@ -74,7 +74,10 @@ ACADEMIC_PROMPT = (
     "- 3 = Prioridad media.\n"
     "- 2 = Prioridad baja.\n"
     "- 1 = Prioridad MÁS BAJA (Muy baja / Mínima urgencia).\n"
-    "NUNCA interpretes el 1 como la prioridad más alta. El valor 5 es SIEMPRE la máxima prioridad y 1 la mínima."
+    "NUNCA interpretes el 1 como la prioridad más alta. El valor 5 es SIEMPRE la máxima prioridad y 1 la mínima.\n"
+    "REGLA DE JERARQUÍA Y SUBTAREAS:\n"
+    "Las tareas devueltas por get_tasks pueden incluir subtareas anidadas a múltiples niveles de profundidad (tarea -> subtarea -> sub-subtarea...).\n"
+    "Revisa siempre las subtareas anidadas dentro del campo 'subtasks' a cualquier nivel para no perder de vista ninguna sub-subtarea."
 )
 
 WELLBEING_PROMPT = (
