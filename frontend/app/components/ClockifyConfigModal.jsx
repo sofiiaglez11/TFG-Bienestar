@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
-export default function ClockifyConfigModal({ isOpen, onClose }) {
+export default function ClockifyConfigModal({ isOpen, onClose, onSuccess }) {
   const [token, setToken] = useState("");
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -62,6 +62,7 @@ export default function ClockifyConfigModal({ isOpen, onClose }) {
       setMessage({ type: "success", text: "¡Cuenta de Clockify vinculada correctamente!" });
       setToken("");
       fetchStatus();
+      if (onSuccess) onSuccess();
     } catch (err) {
       setMessage({ type: "error", text: err.message });
     } finally {

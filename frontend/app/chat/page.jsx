@@ -28,6 +28,142 @@ export default function ChatPage() {
 
   const router = useRouter();
 
+  const handleUnauthorized = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("userName");
+    localStorage.removeItem("userEmail");
+    setIsAuthenticated(false);
+    router.push("/login");
+  };
+
+  // 2. Función para disparar el saludo proactivo inicial
+  const triggerProactiveGreeting = async (tok) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/chat/proactive-greeting`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tok}`,
+        },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setMessages([
+          {
+            role: "assistant",
+            content: data.response,
+            agent_used: data.agent_used,
+            timestamp: data.timestamp || new Date().toISOString(),
+          },
+        ]);
+      }
+    } catch (err) {
+      console.error("Error al obtener saludo proactivo:", err);
+    }
+  };
+
+  const loadChatHistory = async (tok) => {
+    const tokenToUse = tok || localStorage.getItem("token");
+    if (!tokenToUse) return;
+
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/chat/history?limit=30&skip=0`, {
+        headers: {
+          Authorization: `Bearer ${tokenToUse}`,
+        },
+      });
+
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+
+      if (!res.ok) throw new Error("Error al cargar el historial");
+
+      const data = await res.json();
+
+      if (data.history && data.history.length > 0) {
+        setMessages(data.history);
+        setHasMore(data.has_more ?? false);
+      } else {
+        triggerProactiveGreeting(tokenToUse);
+      }
+    } catch (err) {
+      console.error(err);
+      setError("No se pudo cargar el historial de chat.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const checkClockifyStatus = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/user/clockify-status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      if (res.ok) {
+        const data = await res.json();
+        setClockifyConnected(data.connected);
+        localStorage.setItem("clockifyConnected", data.connected.toString());
+        // Si ya está conectado, cargamos el historial normalmente
+        if (data.connected) {
+          loadChatHistory(token);
+        }
+      }
+    } catch (err) {
+      console.error("Error al comprobar estado de Clockify:", err);
+      const cached = localStorage.getItem("clockifyConnected");
+      if (cached) {
+        const isConn = cached === "true";
+        setClockifyConnected(isConn);
+        if (isConn) loadChatHistory(token);
+      }
+    }
+  };
+
+  // Cargar más mensajes antiguos al hacer scroll hacia arriba
+  const loadMoreMessages = async () => {
+    if (isLoadingMore || !hasMore) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    setIsLoadingMore(true);
+    try {
+      const skip = messages.length;
+      const res = await fetch(
+        `${BACKEND_URL}/api/chat/history?limit=30&skip=${skip}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.history && data.history.length > 0) {
+          setMessages((prev) => [...data.history, ...prev]);
+        }
+        setHasMore(data.has_more ?? false);
+      }
+    } catch (err) {
+      console.error("Error al cargar más mensajes:", err);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
+
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -37,14 +173,6 @@ export default function ChatPage() {
 
     setIsAuthenticated(true);
     setIsCheckingAuth(false);
-
-    const handleUnauthorized = () => {
-      localStorage.removeItem("token");
-      localStorage.removeItem("userName");
-      localStorage.removeItem("userEmail");
-      setIsAuthenticated(false);
-      router.push("/login");
-    };
 
     // Obtener información del usuario
     const fetchUserInfo = async () => {
@@ -74,124 +202,8 @@ export default function ChatPage() {
     };
 
     fetchUserInfo();
-
-
-    const checkClockifyStatus = async () => {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/user/clockify-status`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.status === 401) {
-          handleUnauthorized();
-          return;
-        }
-        if (res.ok) {
-          const data = await res.json();
-          setClockifyConnected(data.connected);
-          localStorage.setItem("clockifyConnected", data.connected.toString());
-          // Si ya está conectado, cargamos el historial normalmente
-          if (data.connected) {
-            loadChatHistory(token);
-          }
-        }
-      } catch (err) {
-        console.error("Error al comprobar estado de Clockify:", err);
-        const cached = localStorage.getItem("clockifyConnected");
-        if (cached) setClockifyConnected(cached === "true");
-      }
-    };
-
-    const loadChatHistory = async (tok) => {
-      setIsLoading(true);
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/chat/history?limit=30&skip=0`, {
-          headers: {
-            Authorization: `Bearer ${tok}`,
-          },
-        });
-
-        if (res.status === 401) {
-          handleUnauthorized();
-          return;
-        }
-
-        if (!res.ok) throw new Error("Error al cargar el historial");
-
-        const data = await res.json();
-
-        if (data.history && data.history.length > 0) {
-          setMessages(data.history);
-          setHasMore(data.has_more ?? false);
-        } else {
-          triggerProactiveGreeting(tok);
-        }
-      } catch (err) {
-        console.error(err);
-        setError("No se pudo cargar el historial de chat.");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     checkClockifyStatus();
   }, [router]);
-
-  // Cargar más mensajes antiguos al hacer scroll hacia arriba
-  const loadMoreMessages = async () => {
-    if (isLoadingMore || !hasMore) return;
-    const token = localStorage.getItem("token");
-    if (!token) return;
-
-    setIsLoadingMore(true);
-    try {
-      const skip = messages.length;
-      const res = await fetch(
-        `${BACKEND_URL}/api/chat/history?limit=30&skip=${skip}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.history && data.history.length > 0) {
-          setMessages((prev) => [...data.history, ...prev]);
-        }
-        setHasMore(data.has_more ?? false);
-      }
-    } catch (err) {
-      console.error("Error al cargar más mensajes:", err);
-    } finally {
-      setIsLoadingMore(false);
-    }
-  };
-
-
-  // 2. Función para disparar el saludo proactivo inicial
-  const triggerProactiveGreeting = async (token) => {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/chat/proactive-greeting`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setMessages([
-          {
-            role: "assistant",
-            content: data.response,
-            agent_used: data.agent_used,
-            timestamp: data.timestamp || new Date().toISOString(),
-          },
-        ]);
-      }
-    } catch (err) {
-      console.error("Error al obtener saludo proactivo:", err);
-    }
-  };
 
   // 3. Enviar mensaje al chatbot multiagente
   const sendMessage = async (text) => {
@@ -759,18 +771,12 @@ export default function ChatPage() {
       {/* Modals */}
       <ClockifyConfigModal
         isOpen={showClockifyModal}
+        onSuccess={() => {
+          checkClockifyStatus();
+        }}
         onClose={() => {
           setShowClockifyModal(false);
-          // Refrescar estado de conexión al cerrar el modal
-          const token = localStorage.getItem("token");
-          if (token) {
-            fetch(`${BACKEND_URL}/api/user/clockify-status`, {
-              headers: { Authorization: `Bearer ${token}` },
-            })
-              .then((r) => r.json())
-              .then((d) => setClockifyConnected(d.connected))
-              .catch(() => { });
-          }
+          checkClockifyStatus();
         }}
       />
     </div>
