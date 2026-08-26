@@ -23,6 +23,8 @@ export default function ChatPage() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [userName, setUserName] = useState("Estudiante");
   const [userEmail, setUserEmail] = useState("Cargando...");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   const router = useRouter();
 
@@ -32,6 +34,17 @@ export default function ChatPage() {
       router.push("/login");
       return;
     }
+
+    setIsAuthenticated(true);
+    setIsCheckingAuth(false);
+
+    const handleUnauthorized = () => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("userName");
+      localStorage.removeItem("userEmail");
+      setIsAuthenticated(false);
+      router.push("/login");
+    };
 
     // Obtener información del usuario
     const fetchUserInfo = async () => {
@@ -44,6 +57,10 @@ export default function ChatPage() {
         const res = await fetch(`${BACKEND_URL}/api/user/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+        if (res.status === 401) {
+          handleUnauthorized();
+          return;
+        }
         if (res.ok) {
           const data = await res.json();
           setUserName(data.name || "Estudiante");
@@ -64,6 +81,10 @@ export default function ChatPage() {
         const res = await fetch(`${BACKEND_URL}/api/user/clockify-status`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+        if (res.status === 401) {
+          handleUnauthorized();
+          return;
+        }
         if (res.ok) {
           const data = await res.json();
           setClockifyConnected(data.connected);
@@ -90,8 +111,7 @@ export default function ChatPage() {
         });
 
         if (res.status === 401) {
-          localStorage.removeItem("token");
-          router.push("/login");
+          handleUnauthorized();
           return;
         }
 
@@ -251,8 +271,26 @@ export default function ChatPage() {
     localStorage.removeItem("token");
     localStorage.removeItem("userName");
     localStorage.removeItem("userEmail");
+    setIsAuthenticated(false);
     router.push("/login");
   };
+
+  if (isCheckingAuth || !isAuthenticated) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          height: "100vh",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "var(--bg-page)",
+          color: "var(--text-secondary)",
+        }}
+      >
+        <p>Cargando...</p>
+      </div>
+    );
+  }
 
   return (
     <div

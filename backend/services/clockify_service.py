@@ -45,6 +45,10 @@ class ClockifyService:
 
         return response.json()  # contiene id, name, defaultWorkspace, etc.
 
+    ############################################################################
+    # METHODS FOR WORKSPACES
+         
+
     def get_workspaces(self):
         """Devuelve la lista de espacios de trabajo del usuario autenticado."""
         url = f"{self.base_url}/workspaces"

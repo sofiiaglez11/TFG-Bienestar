@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import LoginForm from "../components/LoginForm";
 
@@ -11,6 +11,13 @@ export default function LoginPage() {
     const router = useRouter();
     const [message, setMessage] = useState(null);
     const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        const token = localStorage.getItem("token");
+        if (token) {
+            router.push("/chat");
+        }
+    }, [router]);
 
 
     const handleLogin = async (email, password) => {
