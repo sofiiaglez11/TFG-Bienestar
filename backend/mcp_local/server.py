@@ -730,7 +730,7 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
     
     Parámetros condicionales/opcionales:
     - subject_name: Nombre de la asignatura asociada. Puede ser omitido para eventos globales.
-    - due_date: Fecha límite en formato ISO 8601 ('2026-07-15'). Es OBLIGATORIA si es un examen o entrega.
+    - due_date: Fecha o fecha y hora límite en formato ISO 8601 (ej. '2026-07-15' o '2026-07-15T18:00:00'). Si el usuario indica una hora concreta (ej. 'entregar a las 18:00'), inclúyela en el string. Es OBLIGATORIA si es un examen o entrega.
     - type: Especifica la naturaleza del evento. Valores válidos: 
         'task' (por defecto), 
         'exam' (para exámenes/recuperaciones), 
@@ -967,7 +967,7 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
     Edita una tarea existente: título, descripción, fecha de vencimiento, prioridad o tags.
     Para marcar una tarea como completada o revertirla, usa complete_task.
     Para cambiar la jerarquía (padre/subtarea), usa set_task_hierarchy.
-    due_date debe tener formato ISO 8601 (ej: '2026-07-20').
+    due_date debe tener formato ISO 8601 (ej: '2026-07-20' o '2026-07-20T18:00:00'). Si el usuario indica una hora concreta, inclúyela.
     priority: entero del 1 al 5 (5=prioridad MÁS ALTA / máxima, 1=prioridad MÁS BAJA / mínima. 1=muy baja, 2=baja, 3=media, 4=alta, 5=muy alta).
         Pasa 0 o un valor centinela si el usuario quiere eliminar la prioridad (la dejarás como None en BD).
     tags: lista completa de tags que debe tener la tarea tras la edición.
