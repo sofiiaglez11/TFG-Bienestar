@@ -269,10 +269,12 @@ class DatabaseService:
         return subject
 
  
-    async def get_subjects_by_user(self, user_id: str, include_archived: bool = False) -> list:
-        """Devuelve todas las asignaturas de un usuario (por defecto, sin las archivadas)."""
+    async def get_subjects_by_user(self, user_id: str, include_archived: bool = False, only_archived: bool = False) -> list:
+        """Devuelve todas las asignaturas de un usuario (activas, archivadas o todas)."""
         query = {"user_id": user_id}
-        if not include_archived:
+        if only_archived:
+            query["is_archived"] = True
+        elif not include_archived:
             query["is_archived"] = {"$ne": True}
         cursor = self.subjects.find(query)
         subjects = await cursor.to_list(100)

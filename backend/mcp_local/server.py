@@ -22,8 +22,6 @@ from datetime import timedelta
 db_service = DatabaseService()
 
 
-
-
 async def _get_user_clockify_service(user_id: str) -> ClockifyService:
     """Devuelve una instancia de ClockifyService inicializada con la API Key del usuario."""
     user = await db_service.get_user_by_id(user_id)
@@ -344,30 +342,48 @@ async def add_multiple_subjects(user_id: str, names: list[str], workspace_id: st
     
  
 @mcp.tool()
-async def get_subjects(user_id: str, include_archived: bool = False):
+async def get_subjects(user_id: str, include_archived: bool = False, only_archived: bool = False):
     """
     Devuelve la lista de asignaturas del usuario.
-    Por defecto solo muestra las activas. Usa include_archived=True si el usuario
-    pregunta por asignaturas archivadas o quiere ver todas.
-    Úsala cuando el usuario pregunte 'Qué asignaturas tengo', 'Muéstrame mis asignaturas'
-    o cuando busques una asignatura que el usuario menciona y no aparece en la lista activa.
+    - Por defecto (include_archived=False, only_archived=False) solo muestra las asignaturas activas.
+    - Si include_archived=True muestra tanto las activas como las archivadas, diferenciando claramente el estado de cada una.
+    - Si only_archived=True muestra únicamente las asignaturas archivadas.
+    Úsala cuando el usuario pregunte 'Qué asignaturas tengo', 'Muéstrame mis asignaturas',
+    'Qué asignaturas tengo archivadas' o cuando busques una asignatura que el usuario menciona y no aparece en las activas.
     """
     try:
-        subjects = await db_service.get_subjects_by_user(user_id=user_id, include_archived=include_archived)
- 
+        subjects = await db_service.get_subjects_by_user(
+            user_id=user_id,
+            include_archived=include_archived,
+            only_archived=only_archived
+        )
+
         if not subjects:
+            if only_archived:
+                return "No tienes ninguna asignatura archivada."
             return "No tienes ninguna asignatura registrada todavía."
- 
-        result = "Tus asignaturas:\n"
+
+        active_list = []
+        archived_list = []
+
         for s in subjects:
             goal = f" (objetivo: {s['weekly_hours_goal']}h/semana)" if s.get('weekly_hours_goal') else ""
-            result += f"- {s['name']}{goal}\n"
- 
-        return result
- 
+            line = f"- {s['name']}{goal}"
+            if s.get("is_archived"):
+                archived_list.append(line)
+            else:
+                active_list.append(line)
+
+        result = ""
+        if active_list:
+            result += "**Asignaturas Activas:**\n" + "\n".join(active_list) + "\n\n"
+        if archived_list:
+            result += "**Asignaturas Archivadas:**\n" + "\n".join(archived_list) + "\n"
+
+        return result.strip()
+
     except Exception as e:
         return f"Error al obtener las asignaturas: {str(e)}"
-
 
 
 @mcp.tool()
@@ -472,7 +488,8 @@ async def delete_subject(user_id: str, subject_name: str):
         if not subject.get("is_archived"):
             return (
                 f"La asignatura '{subject_name}' no está archivada. "
-                f"Dile al usuario que tiene que archivarla primero, "
+                f"Antes de borrar una asignatura permanentemente debe ser archivada primero. "
+                f"Archiva la asignatura usando la herramienta archive_subject o pregúntale al usuario para archivarla primero."
             )
 
         # Intentar borrar de Clockify  

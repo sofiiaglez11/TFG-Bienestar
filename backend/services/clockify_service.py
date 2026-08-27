@@ -100,8 +100,7 @@ class ClockifyService:
         workspace_id = self._set_workspace_if_null(workspace_id)
         url = f"{self.base_url}/workspaces/{workspace_id}/projects"
         payload = {
-            "name": project_name,
-            "color": "#000000" 
+            "name": project_name
         }
         response = requests.post(url, json=payload, headers=self.headers)
         response.raise_for_status()
