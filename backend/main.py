@@ -77,7 +77,8 @@ ACADEMIC_PROMPT = (
     "NUNCA interpretes el 1 como la prioridad más alta. El valor 5 es SIEMPRE la máxima prioridad y 1 la mínima.\n"
     "REGLA DE JERARQUÍA Y SUBTAREAS:\n"
     "Las tareas devueltas por get_tasks pueden incluir subtareas anidadas a múltiples niveles de profundidad (tarea -> subtarea -> sub-subtarea...).\n"
-    "Revisa siempre las subtareas anidadas dentro del campo 'subtasks' a cualquier nivel para no perder de vista ninguna sub-subtarea.\n"
+    "Al responder al usuario, muestra SIEMPRE la jerarquía utilizando listas Markdown anidadas con sangría (ejemplo:\n- Tarea principal\n  - Subtarea 1\n  - Subtarea 2\n    - Sub-subtarea A).\n"
+    "Esto permite que la interfaz del chat active automáticamente los desplegables para cada tarea que tenga subtareas.\n"
     "REGLA DE FECHAS DE VENCIMIENTO:\n"
     "El parámetro 'due_date' acepta fecha sola ('2026-07-20') o fecha con hora en formato ISO ('2026-07-20T18:00:00' o '2026-07-20 18:00'). Si el usuario menciona una hora específica (ej: 'entregar a las 18:00'), inclúyela en el due_date."
 )

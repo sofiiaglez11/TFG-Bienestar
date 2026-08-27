@@ -1,5 +1,72 @@
+import React, { useState, Children } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+// Componente para hacer que los <li> con sublistas sean desplegables/colapsables
+function CollapsibleLi({ children }) {
+  const [open, setOpen] = useState(true);
+
+  const childrenArray = Children.toArray(children);
+
+  const sublists = [];
+  const content = [];
+
+  childrenArray.forEach((child) => {
+    if (
+      child &&
+      child.props &&
+      (child.props.node?.tagName === "ul" ||
+        child.props.node?.tagName === "ol" ||
+        child.type === "ul" ||
+        child.type === "ol")
+    ) {
+      sublists.push(child);
+    } else {
+      content.push(child);
+    }
+  });
+
+  if (sublists.length === 0) {
+    return <li style={{ marginBottom: "2px" }}>{children}</li>;
+  }
+
+  return (
+    <li style={{ listStyle: "none", marginBottom: "4px", marginLeft: "-14px" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "6px",
+          cursor: "pointer",
+          userSelect: "none",
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(!open);
+        }}
+      >
+        <span
+          style={{
+            fontSize: "10px",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "12px",
+            height: "12px",
+            transform: open ? "rotate(90deg)" : "rotate(0deg)",
+            transition: "transform 0.15s ease",
+            marginTop: "5px",
+            opacity: 0.7,
+          }}
+        >
+          ▶
+        </span>
+        <div style={{ flex: 1 }}>{content}</div>
+      </div>
+      {open && <div style={{ paddingLeft: "14px", marginTop: "2px" }}>{sublists}</div>}
+    </li>
+  );
+}
 
 export default function MessageBubble({ message }) {
   const isUser = message.role === "user";
@@ -87,7 +154,7 @@ export default function MessageBubble({ message }) {
             // Mensajes del usuario: texto plano con saltos de línea
             <span style={{ whiteSpace: "pre-wrap" }}>{message.content}</span>
           ) : (
-            // Mensajes del asistente: renderizado markdown completo
+            // Mensajes del asistente: renderizado markdown completo con sublistas colapsables
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
@@ -102,9 +169,7 @@ export default function MessageBubble({ message }) {
                 ol: ({ children }) => (
                   <ol style={{ margin: "4px 0 8px 0", paddingLeft: "20px" }}>{children}</ol>
                 ),
-                li: ({ children }) => (
-                  <li style={{ marginBottom: "2px" }}>{children}</li>
-                ),
+                li: CollapsibleLi,
                 // Código inline
                 code: ({ inline, children }) =>
                   inline ? (
@@ -148,7 +213,7 @@ export default function MessageBubble({ message }) {
                 h3: ({ children }) => (
                   <h3 style={{ fontSize: "15px", fontWeight: "600", margin: "6px 0 4px" }}>{children}</h3>
                 ),
-                // Negrita y cursiva (heredan del padre, solo aseguramos el peso)
+                // Negrita y cursiva
                 strong: ({ children }) => (
                   <strong style={{ fontWeight: "700" }}>{children}</strong>
                 ),
