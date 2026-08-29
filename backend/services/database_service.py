@@ -249,11 +249,16 @@ class DatabaseService:
     # METHODS FOR SUBJECTS
  
     async def create_subject(self, user_id: str, name: str, clockify_project_id: str,
-                              weekly_hours_goal: int = 0, period_id: str = None, grade: float = None) -> dict:
+                              weekly_hours_goal: int = 0, period_id: str = None, grade: float = None,
+                              description: str = None, evaluation_criteria: str = None,
+                              notes: str = None) -> dict:
         """
         Crea una nueva asignatura asociada a un usuario.
         period_id es opcional: una asignatura puede no pertenecer a ningún periodo
         si el usuario decide no organizarse por cuatrimestres/trimestres.
+        description: breve descripción de qué trata la asignatura.
+        evaluation_criteria: cómo se evalúa (ej: '60% examen, 40% prácticas').
+        notes: anotaciones libres del usuario (ej: 'me gusta mucho', 'el profe explica muy bien').
         """
         subject = {
             "user_id": user_id,
@@ -262,6 +267,9 @@ class DatabaseService:
             "clockify_project_id": clockify_project_id,
             "weekly_hours_goal": weekly_hours_goal,
             "grade": grade,
+            "description": description,
+            "evaluation_criteria": evaluation_criteria,
+            "notes": notes,
             "is_archived": False,
         }
         result = await self.subjects.insert_one(subject)

@@ -262,14 +262,20 @@ async def get_time_spent_summary(user_id: str):
 
 # TOOLS FOR SUBJECTS
 @mcp.tool()
-async def add_subject(user_id: str, name: str, weekly_hours_goal: int = 0, workspace_id: str = None):
+async def add_subject(user_id: str, name: str, weekly_hours_goal: int = 0, workspace_id: str = None,
+                      description: str = None, evaluation_criteria: str = None, notes: str = None):
     """
     Añade una nueva asignatura al sistema.
     IMPORTANTE: Antes de llamar a esta herramienta, asegúrate de tener el nombre
     de la asignatura. Si el usuario no lo ha especificado, pregúntaselo primero.
     No inventes ni supongas nombres.
     Úsala cuando el usuario diga 'Tengo la asignatura X' o 'Añade la asignatura X'.
-    Necesita el nombre de la asignatura y opcionalmente un objetivo de horas semanales y un workspace_id.
+    Parámetros obligatorios: name.
+    Parámetros opcionales:
+    - weekly_hours_goal: objetivo de horas semanales de estudio.
+    - description: descripción breve de qué trata la asignatura (ej: 'Álgebra lineal y cálculo').
+    - evaluation_criteria: cómo se evalúa la asignatura (ej: '60% examen final, 40% prácticas'). Úsalo cuando el usuario lo mencione.
+    - notes: anotaciones libres del usuario sobre la asignatura (ej: 'me gusta mucho', 'el profe explica muy bien'). Úsalo para capturar opiniones o comentarios personales del usuario sobre la asignatura.
     """
     try:
         cs = await _get_user_clockify_service(user_id)
@@ -284,7 +290,10 @@ async def add_subject(user_id: str, name: str, weekly_hours_goal: int = 0, works
             user_id=user_id,
             name=name,
             clockify_project_id=clockify_project_id,
-            weekly_hours_goal=weekly_hours_goal
+            weekly_hours_goal=weekly_hours_goal,
+            description=description,
+            evaluation_criteria=evaluation_criteria,
+            notes=notes
         )
  
         return f"Asignatura '{name}' añadida correctamente."
@@ -367,12 +376,22 @@ async def get_subjects(user_id: str, include_archived: bool = False, only_archiv
         archived_list = []
 
         for s in subjects:
+            lines = []
             goal = f" (objetivo: {s['weekly_hours_goal']}h/semana)" if s.get('weekly_hours_goal') else ""
-            line = f"- {s['name']}{goal}"
+            header = f"- **{s['name']}**{goal}"
+            if s.get("description"):
+                lines.append(f"  Descripción: {s['description']}")
+            if s.get("evaluation_criteria"):
+                lines.append(f"  Evaluación: {s['evaluation_criteria']}")
+            if s.get("notes"):
+                lines.append(f"  Anotaciones: {s['notes']}")
+            if s.get("grade") is not None:
+                lines.append(f"  Nota: {s['grade']}")
+            entry = header + ("\n" + "\n".join(lines) if lines else "")
             if s.get("is_archived"):
-                archived_list.append(line)
+                archived_list.append(entry)
             else:
-                active_list.append(line)
+                active_list.append(entry)
 
         result = ""
         if active_list:
@@ -388,13 +407,19 @@ async def get_subjects(user_id: str, include_archived: bool = False, only_archiv
 
 @mcp.tool()
 async def edit_subject(user_id: str, subject_name: str, new_name: str = None, note: str = None,
-                       weekly_hours_goal: int = None, period_name: str = None, is_archived: bool = None):
+                       weekly_hours_goal: int = None, period_name: str = None, is_archived: bool = None,
+                       description: str = None, evaluation_criteria: str = None, notes: str = None):
     """
     Edita una asignatura existente. Permite cambiar su nombre, su objetivo de horas
-    semanales y/o el periodo académico al que pertenece.
+    semanales y/o el periodo académico al que pertenece, su descripción, criterios de evaluación
+    y anotaciones personales.
     Úsala cuando el usuario diga 'cambia el nombre de X a Y', 'quiero dedicar N horas
-    semanales a X' o 'mueve X al periodo Y'.
+    semanales a X', 'mueve X al periodo Y', 'la evaluación de X es...', 'sobre X tengo que decir que...'.
     Solo se actualizan los campos que el usuario especifique — los demás se quedan igual.
+    Parámetros opcionales nuevos:
+    - description: actualiza la descripción de la asignatura.
+    - evaluation_criteria: actualiza cómo se evalúa (ej: '60% examen, 40% prácticas'). Úsalo cuando el usuario mencione cómo le evalúan en la asignatura.
+    - notes: añade o actualiza una anotación libre o comentario personal del usuario sobre la asignatura (ej: 'me gusta mucho', 'el profesor explica genial'). Úsalo cuando el usuario haga un comentario personal sobre la asignatura.
     """
     try:
         subject = await _find_subject_by_name(user_id, subject_name)
@@ -404,7 +429,7 @@ async def edit_subject(user_id: str, subject_name: str, new_name: str = None, no
         updates = {}
 
         cs = await _get_user_clockify_service(user_id)
-        cs.update_project(subject["clockify_project_id"], new_name, note, is_archived)
+        # cs.update_project(subject["clockify_project_id"], new_name, note, is_archived)
 
         if new_name:
             updates["name"] = new_name
@@ -415,13 +440,17 @@ async def edit_subject(user_id: str, subject_name: str, new_name: str = None, no
             if not period:
                 return f"No encontré ningún periodo llamado '{period_name}'."
             updates["period_id"] = period["_id"]
+        if description is not None:
+            updates["description"] = description
+        if evaluation_criteria is not None:
+            updates["evaluation_criteria"] = evaluation_criteria
+        if notes is not None:
+            updates["notes"] = notes
 
         if not updates:
             return "No me has indicado qué quieres cambiar de la asignatura."
 
         await db_service.update_subject(subject["_id"], **updates)
-        
-
 
         cambios = []
         if new_name:
@@ -430,11 +459,16 @@ async def edit_subject(user_id: str, subject_name: str, new_name: str = None, no
             cambios.append(f"objetivo semanal → {weekly_hours_goal}h")
         if period_name:
             cambios.append(f"periodo → '{period_name}'")
+        if description is not None:
+            cambios.append("descripción actualizada")
+        if evaluation_criteria is not None:
+            cambios.append("criterios de evaluación actualizados")
+        if notes is not None:
+            cambios.append("anotaciones actualizadas")
 
         return f"Asignatura '{subject_name}' actualizada: {', '.join(cambios)}."
     except Exception as e:
         return f"Error al editar la asignatura: {str(e)}"
-
 
 # @mcp.tool()
 # async def delete_subject(user_id: str, subject_name: str):
