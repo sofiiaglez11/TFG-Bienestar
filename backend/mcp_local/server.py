@@ -883,6 +883,8 @@ async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False)
     - Muestra cada tarea principal y debajo sus subtareas con jerarquía visible
     - Indica siempre si están completadas o pendientes
     - Menciona la fecha de vencimiento si existe
+
+    
     """
     try:
         subject = await _find_subject_by_name(user_id, subject_name)

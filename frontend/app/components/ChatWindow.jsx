@@ -38,8 +38,11 @@ export default function ChatWindow({
       const heightDifference = container.scrollHeight - prevScrollHeightRef.current;
       container.scrollTop = heightDifference;
       isPrependingRef.current = false;
-    } else if (prevLen === 0 || (!isPrependingRef.current && currLen > prevLen)) {
-      // Auto-scroll al final al cargar por primera vez o al añadir un nuevo mensaje
+    } else if (prevLen === 0 && currLen > 0) {
+      // Carga inicial del historial: scroll inmediato al final sin animación
+      bottomRef.current?.scrollIntoView({ behavior: "instant" });
+    } else if (!isPrependingRef.current && currLen > prevLen) {
+      // Mensaje nuevo añadido: scroll suave
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
 

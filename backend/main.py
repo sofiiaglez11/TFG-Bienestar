@@ -1,3 +1,4 @@
+from asyncio import queues
 import asyncio
 import os
 from datetime import datetime, timezone
@@ -96,6 +97,9 @@ ACADEMIC_PROMPT = (
     "- Ejemplo para tareas: 'He creado la tarea X. Si quieres, avísame si deseas añadirle fecha límite, prioridad, descripción o etiquetas.' o bien 'Ya he creado X. Si quieres te puedo recordar qué más información le puedes añadir.'\n"
     "- Ejemplo para asignaturas/proyectos: 'He añadido la asignatura X. Si quieres, avísame si deseas configurarle horas semanales, asociarla a un periodo o si te recuerdo qué más datos puedes añadirle.'\n"
     "- CRÍTICO: Habla SIEMPRE en lenguaje cotidiano y amigable. NUNCA uses nombres técnicos de variables ni código (evita estrictamente términos como 'due_date', 'tags', 'weekly_hours_goal', 'priority', etc.)."
+    "Cuando le muestres la lista de tareas al usuario, si hay muchas tareas, e incluyes tareas completadas y pendientes, "
+    "añade emojis que permitan visualizar fácilmente el estado de cada una."
+    
 )
 
 WELLBEING_PROMPT = (
