@@ -19,9 +19,10 @@ class DatabaseService:
         self.periods = self.db["periods"]
         self.subjects = self.db["subjects"]
         self.tasks = self.db["tasks"]
-        self.time_entries = self.db["time_entries"]
+        # self.time_entries = self.db["time_entries"]
         self.history = self.db["history"]
         self.wellbeing_entries = self.db["wellbeing_entries"]
+        self.study_reports = self.db["study_reports"]
         # self.deadlines = self.db["deadlines"]
  
     async def ensure_indexes(self):
@@ -40,13 +41,15 @@ class DatabaseService:
         #     unique=True,
         #     name="unique_task_per_subject_and_parent"
         # )
-        await self.time_entries.create_index([("subject_id", 1), ("start_time", -1)])
-        await self.time_entries.create_index([("task_id", 1)])
+        # await self.time_entries.create_index([("subject_id", 1), ("start_time", -1)])
+        # await self.time_entries.create_index([("task_id", 1)])
         await self.tasks.create_index("tags")
         # await self.deadlines.create_index([("user_id", 1), ("date", 1)])
         await self.periods.create_index([("user_id", 1)])
         await self.history.create_index([("user_id", 1), ("timestamp", -1)])
         await self.wellbeing_entries.create_index([("user_id", 1), ("date", -1)])
+        await self.study_reports.create_index([("user_id", 1), ("timestamp", -1)])
+        await self.study_reports.create_index("clockify_time_entry_id")
  
 
     ############################################################################
@@ -482,39 +485,39 @@ class DatabaseService:
     # ############################################################################
     # # METHODS FOR TIME ENTRIES
  
-    async def create_time_entry(self, user_id: str, subject_id: str,
-                                task_id: str = None, description: str = "") -> dict:
-        """
-        Crea una nueva entrada de tiempo.
-        - subject_id es siempre obligatorio.
-        - task_id es opcional: puede dedicarse tiempo a la asignatura en general,
-          sin tarea concreta asociada.
-        """
-        time_entry = {
-            "user_id": user_id,
-            "subject_id": subject_id,
-            "task_id": task_id,
-            "description": description
-        }
-        result = await self.time_entries.insert_one(time_entry)
-        time_entry["_id"] = str(result.inserted_id)
-        return time_entry
+    # async def create_time_entry(self, user_id: str, subject_id: str,
+    #                             task_id: str = None, description: str = "") -> dict:
+    #     """
+    #     Crea una nueva entrada de tiempo.
+    #     - subject_id es siempre obligatorio.
+    #     - task_id es opcional: puede dedicarse tiempo a la asignatura en general,
+    #       sin tarea concreta asociada.
+    #     """
+    #     time_entry = {
+    #         "user_id": user_id,
+    #         "subject_id": subject_id,
+    #         "task_id": task_id,
+    #         "description": description
+    #     }
+    #     result = await self.time_entries.insert_one(time_entry)
+    #     time_entry["_id"] = str(result.inserted_id)
+    #     return time_entry
  
-    async def get_time_entries_by_subject(self, subject_id: str) -> list:
-        """Devuelve todas las entradas de tiempo de una asignatura, más recientes primero."""
-        cursor = self.time_entries.find({"subject_id": subject_id})
-        time_entries = await cursor.to_list(100)
-        for te in time_entries:
-            te["_id"] = str(te["_id"])
-        return time_entries
+    # async def get_time_entries_by_subject(self, subject_id: str) -> list:
+    #     """Devuelve todas las entradas de tiempo de una asignatura, más recientes primero."""
+    #     cursor = self.time_entries.find({"subject_id": subject_id})
+    #     time_entries = await cursor.to_list(100)
+    #     for te in time_entries:
+    #         te["_id"] = str(te["_id"])
+    #     return time_entries
  
-    async def get_time_entries_by_task(self, task_id: str) -> list:
-        """Devuelve todas las entradas de tiempo de una tarea concreta."""
-        cursor = self.time_entries.find({"task_id": task_id})
-        time_entries = await cursor.to_list(100)
-        for te in time_entries:
-            te["_id"] = str(te["_id"])
-        return time_entries
+    # async def get_time_entries_by_task(self, task_id: str) -> list:
+    #     """Devuelve todas las entradas de tiempo de una tarea concreta."""
+    #     cursor = self.time_entries.find({"task_id": task_id})
+    #     time_entries = await cursor.to_list(100)
+    #     for te in time_entries:
+    #         te["_id"] = str(te["_id"])
+    #     return time_entries
  
     # async def get_active_time_entry(self, user_id: str) -> dict | None:
     #     """
@@ -592,3 +595,72 @@ class DatabaseService:
         for e in entries:
             e["_id"] = str(e["_id"])
         return entries
+
+
+    ############################################################################
+    # METHODS FOR STUDY REPORTS
+
+    async def create_study_report(
+        self,
+        user_id: str,
+        clockify_time_entry_id: str,
+        subject_name: str = None,
+        study_quality: int = None,
+        goals_achieved: bool = None,
+        goals_description: str = None,
+        distractions: str = None,
+        breaks_taken: int = None,
+        mood_before: int = None,
+        mood_after: int = None,
+        notes: str = None
+    ) -> dict:
+        """
+        Crea un informe de sesión de estudio vinculado OBLIGATORIAMENTE a una entrada de tiempo de Clockify.
+        Todos los campos son opcionales excepto user_id y clockify_time_entry_id.
+        """
+        if not clockify_time_entry_id:
+            raise ValueError("Se requiere obligatoriamente un 'clockify_time_entry_id' para registrar un informe de sesión.")
+
+        report = {
+            "user_id": user_id,
+            "clockify_time_entry_id": clockify_time_entry_id,
+            "subject_name": subject_name,
+            "timestamp": datetime.now(timezone.utc),
+            "study_quality": study_quality,
+            "goals_achieved": goals_achieved,
+            "goals_description": goals_description,
+            "distractions": distractions,
+            "breaks_taken": breaks_taken,
+            "mood_before": mood_before,
+            "mood_after": mood_after,
+            "notes": notes,
+        }
+        result = await self.study_reports.insert_one(report)
+        report["_id"] = str(result.inserted_id)
+        report["timestamp"] = report["timestamp"].isoformat()
+        return report
+
+    async def get_study_reports_by_user(self, user_id: str, limit: int = 10, subject_name: str = None) -> list[dict]:
+        """
+        Devuelve los informes de sesión del usuario ordenados del más reciente al más antiguo.
+        Filtra opcionalmente por nombre de asignatura.
+        """
+        query = {"user_id": user_id}
+        if subject_name:
+            query["subject_name"] = {"$regex": subject_name, "$options": "i"}
+        cursor = self.study_reports.find(query).sort("timestamp", -1).limit(limit)
+        reports = await cursor.to_list(limit)
+        for r in reports:
+            r["_id"] = str(r["_id"])
+            if isinstance(r.get("timestamp"), datetime):
+                r["timestamp"] = r["timestamp"].isoformat()
+        return reports
+
+    async def get_study_report_by_time_entry(self, user_id: str, clockify_time_entry_id: str) -> dict | None:
+        """Devuelve el informe de sesión asociado a un clockify_time_entry_id concreto, si existe."""
+        report = await self.study_reports.find_one({"user_id": user_id, "clockify_time_entry_id": clockify_time_entry_id})
+        if report:
+            report["_id"] = str(report["_id"])
+            if isinstance(report.get("timestamp"), datetime):
+                report["timestamp"] = report["timestamp"].isoformat()
+        return report

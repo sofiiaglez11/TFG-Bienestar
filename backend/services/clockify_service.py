@@ -480,6 +480,24 @@ class ClockifyService:
         entries = response.json()
         return entries[0] if entries else None
 
+    def get_latest_time_entry(self, workspace_id: str = None) -> dict | None:
+        """Devuelve la última entrada de tiempo finalizada del usuario en Clockify."""
+        user_id = self.get_user_id()
+        workspace_id = self._set_workspace_if_null(workspace_id)
+        url = f"{self.base_url}/workspaces/{workspace_id}/user/{user_id}/time-entries"
+        params = {"in-progress": "false", "page-size": 10}
+        response = requests.get(url, headers=self.headers, params=params)
+        response.raise_for_status()
+        entries = response.json()
+        if entries:
+            entries_sorted = sorted(
+                entries,
+                key=lambda x: x.get("timeInterval", {}).get("end", ""),
+                reverse=True
+            )
+            return entries_sorted[0]
+        return None
+
 
     def delete_time_entry(self, time_entry_id: str, workspace_id: str = None) -> dict:
         """Elimina una entrada de tiempo de Clockify por su ID."""

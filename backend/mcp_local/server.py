@@ -1356,24 +1356,34 @@ async def stop_timer(user_id: str):
     Úsala cuando el usuario diga 'para el cronómetro', 'ya he terminado de estudiar' o 'ya paré'.
     NO necesita ningún parámetro de asignatura — para el cronómetro que esté activo, sea cual sea.
     NO llames a start_timer después de esta herramienta salvo que el usuario lo pida explícitamente.
+    Tras parar el cronómetro, informa al usuario de que el asistente de bienestar le va a preguntar
+    cómo le fue la sesión para guardar un pequeño informe.
     """
     try:
         cs = await _get_user_clockify_service(user_id)
         
-        # Obtener el timer activo directamente de Clockify
+        # Obtener el timer activo directamente de Clockify (antes de pararlo)
         active_entry = cs.get_active_time_entry()
-        # print(f"TOOL STOP TIMER: active_entry={active_entry}", file=sys.stderr, flush=True)
         
         if not active_entry:
             return "No tienes ningún cronómetro en marcha ahora mismo."
         
-        # cs.stop_time_entry(active_entry["id"])
+        clockify_time_entry_id = active_entry.get("id", "")
+        description = active_entry.get("description", "")
+        project_name = active_entry.get("project", {}).get("name", "") if active_entry.get("project") else ""
+        start_time = active_entry.get("timeInterval", {}).get("start", "")
+
         cs.stop_time_entry()
 
-        return "Cronómetro detenido y guardado correctamente."
+        return (
+            f"Cronómetro detenido y guardado correctamente. "
+            f"[DATOS_SESION: clockify_time_entry_id={clockify_time_entry_id}, asignatura='{project_name}', "
+            f"descripcion='{description}', inicio='{start_time}'] "
+            f"Ahora el asistente te preguntará cómo te fue la sesión de estudio."
+        )
     except Exception as e:
-        # print(f"Error al detener el cronómetro: {str(e)}", file=sys.stderr, flush=True)
         return f"Error al detener el cronómetro: {str(e)}"
+
 
 @mcp.tool()
 async def get_active_time_entry(user_id: str):
@@ -1865,6 +1875,130 @@ async def set_subject_grade(user_id: str, subject_name: str, grade: float):
         return f"Nota de {grade} guardada para la asignatura '{subject_name}'."
     except Exception as e:
         return f"Error al guardar la nota: {str(e)}"
+
+
+@mcp.tool()
+async def wb_get_latest_time_entry(user_id: str):
+    """
+    Devuelve la información de la última sesión de tiempo finalizada en Clockify.
+    Úsala cuando necesites saber qué asignatura o sesión se acaba de terminar de estudiar.
+    """
+    try:
+        cs = await _get_user_clockify_service(user_id)
+        latest = await asyncio.to_thread(cs.get_latest_time_entry)
+        if not latest:
+            return "No hay ninguna sesión de tiempo registrada recientemente en Clockify."
+        
+        entry_id = latest.get("id")
+        proj_name = latest.get("project", {}).get("name", "") if latest.get("project") else ""
+        desc = latest.get("description", "")
+        start = latest.get("timeInterval", {}).get("start", "")
+        end = latest.get("timeInterval", {}).get("end", "")
+        
+        return f"Última sesión en Clockify: ID={entry_id}, Asignatura='{proj_name}', Descripción='{desc}', Inicio={start}, Fin={end}"
+    except Exception as e:
+        return f"Error al consultar la última sesión de tiempo: {str(e)}"
+
+
+@mcp.tool()
+async def wb_add_study_report(
+    user_id: str,
+    clockify_time_entry_id: str = None,
+    subject_name: str = None,
+    study_quality: int = None,
+    goals_achieved: bool = None,
+    goals_description: str = None,
+    distractions: str = None,
+    breaks_taken: int = None,
+    mood_before: int = None,
+    mood_after: int = None,
+    notes: str = None
+):
+    """
+    Guarda un informe de sesión de estudio asociado a una entrada de tiempo (cronómetro) concreta de Clockify.
+    Úsala DESPUÉS de que el usuario haya parado un cronómetro y hayas recogido información sobre cómo le fue.
+    Si el usuario no quiere dar detalles o dice que no le apetece, llama igualmente a esta herramienta
+    para guardar un informe mínimo.
+
+    Parámetros:
+    - clockify_time_entry_id: ID de la entrada de tiempo de Clockify. Se extrae del campo [DATOS_SESION: clockify_time_entry_id=...] del historial. Si no se indica, la herramienta obtendrá automáticamente la última sesión finalizada en Clockify.
+    - subject_name: nombre de la asignatura de la sesión.
+    - study_quality: calidad percibida del estudio del 1 al 5 (1=muy mala, 5=excelente).
+    - goals_achieved: true/false si se consiguieron los objetivos previstos.
+    - goals_description: qué objetivos tenía el usuario y qué consiguió.
+    - distractions: si hubo distracciones y cuáles (ej: 'móvil, ruido ambiente').
+    - breaks_taken: número de descansos que hizo.
+    - mood_before: estado de ánimo antes de estudiar (1-5).
+    - mood_after: estado de ánimo después de estudiar (1-5).
+    - notes: cualquier anotación libre que el usuario quiera añadir.
+    """
+    try:
+        cs = await _get_user_clockify_service(user_id)
+        if not clockify_time_entry_id:
+            latest = await asyncio.to_thread(cs.get_latest_time_entry)
+            if latest:
+                clockify_time_entry_id = latest.get("id")
+                if not subject_name and latest.get("project"):
+                    subject_name = latest.get("project", {}).get("name")
+
+        if not clockify_time_entry_id:
+            return "Error: Se requiere obligatoriamente el ID de la entrada de tiempo de Clockify (clockify_time_entry_id) para registrar un informe de sesión, y no se encontró ninguna sesión reciente."
+
+        report = await db_service.create_study_report(
+            user_id=user_id,
+            clockify_time_entry_id=clockify_time_entry_id,
+            subject_name=subject_name,
+            study_quality=study_quality,
+            goals_achieved=goals_achieved,
+            goals_description=goals_description,
+            distractions=distractions,
+            breaks_taken=breaks_taken,
+            mood_before=mood_before,
+            mood_after=mood_after,
+            notes=notes,
+        )
+        return f"Informe de sesión guardado correctamente (ID: {report['_id']})."
+    except Exception as e:
+        return f"Error al guardar el informe de sesión: {str(e)}"
+
+
+@mcp.tool()
+async def wb_get_study_reports(user_id: str, subject_name: str = None, limit: int = 5):
+    """
+    Devuelve los informes de sesión de estudio del usuario, del más reciente al más antiguo.
+    Úsala cuando el usuario quiera consultar cómo le han ido sus sesiones de estudio,
+    ver patrones de concentración, o recordar cómo estudió en una asignatura concreta.
+    - subject_name: filtra por asignatura (opcional).
+    - limit: número máximo de informes a devolver (por defecto 5, máximo recomendado 10).
+    """
+    try:
+        reports = await db_service.get_study_reports_by_user(
+            user_id=user_id,
+            limit=limit,
+            subject_name=subject_name
+        )
+        if not reports:
+            msg = f"No tienes informes de sesión registrados"
+            if subject_name:
+                msg += f" para '{subject_name}'"
+            return msg + "."
+
+        lines = []
+        for r in reports:
+            ts = r.get("timestamp", "")[:16].replace("T", " ")
+            subj = r.get("subject_name") or "Sin asignatura"
+            quality = f"Calidad: {r['study_quality']}/5" if r.get("study_quality") else ""
+            goals = f"Objetivos: {'Conseguidos' if r.get('goals_achieved') else 'No conseguidos'}" if r.get("goals_achieved") is not None else ""
+            distr = f"Distracciones: {r['distractions']}" if r.get("distractions") else ""
+            breaks = f"Descansos: {r['breaks_taken']}" if r.get("breaks_taken") is not None else ""
+            notes = f"Notas: {r['notes']}" if r.get("notes") else ""
+            details = " | ".join(filter(None, [quality, goals, distr, breaks, notes]))
+            lines.append(f"- **{ts}** ({subj}){': ' + details if details else ''}")
+
+        header = f"**Últimos informes de sesión{' de ' + subject_name if subject_name else ''}:**\n"
+        return header + "\n".join(lines)
+    except Exception as e:
+        return f"Error al obtener los informes de sesión: {str(e)}"
 
 
 ############################################################################

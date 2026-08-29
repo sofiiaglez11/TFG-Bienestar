@@ -30,7 +30,8 @@ class AgentOrchestrator:
            TAMBIÉN incluye respuestas afirmativas o de confirmación ("sí", "no", "vale", "hazlo", "confirmo", "adelante", "cancela") cuando el mensaje anterior del asistente trataba de tareas, asignaturas o tiempos (por ejemplo, al pedir confirmación para borrar o archivar algo).
            Ejemplos ACADEMICO: "para el cronómetro", "detén el timer", "cuánto tiempo llevo estudiando", "inicia el cronómetro de X", "sí" (tras pedir confirmación de borrado/archivado).
         2. BIENESTAR: Si habla de su estado físico o mental (sueño, cansancio, estrés, fatiga, hábitos de descanso, cómo se siente emocionalmente) o responde a preguntas sobre su estado de ánimo/descanso.
-           IMPORTANTE: preguntas sobre el cronómetro o el tiempo de estudio NO son BIENESTAR, son ACADEMICO.
+           TAMBIÉN es BIENESTAR si la conversación reciente trata sobre evaluar o recoger el informe de una sesión de estudio que se acaba de parar (preguntas sobre calidad de la sesión, objetivos conseguidos, distracciones, descansos o cómo le fue), INCLUSO si la respuesta del usuario menciona asignaturas, tareas, exámenes o el TFG. Toda la recopilación del informe de sesión pertenece a BIENESTAR.
+           IMPORTANTE: preguntas para iniciar o parar el cronómetro son ACADEMICO, pero la entrevista conversacional sobre CÓMO FUE la sesión de estudio (objetivos, distracciones, concentración) es SIEMPRE BIENESTAR.
         3. GENERAL: Si es un saludo aislado ('hola', 'qué tal'), una pregunta sobre qué puedes hacer, o una despedida sin contexto previo de tareas u operaciones académicas.
 
         {history_str} Último mensaje del usuario (a clasificar, utilizando el historial superior como contexto de ser necesario): "{user_message}"
