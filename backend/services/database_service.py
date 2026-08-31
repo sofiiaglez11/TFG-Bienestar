@@ -142,15 +142,31 @@ class DatabaseService:
         except Exception:
             return False
 
-    async def set_study_flow_state(self, user_id: str, state: bool) -> None:
-        """Activa o desactiva el flujo de recogida de informe de sesión para un usuario."""
+    async def set_study_flow_state(self, user_id: str, state: bool, session_entry_id: str = None) -> None:
+        """Activa o desactiva el flujo de recogida de informe de sesión para un usuario.
+        Si state=True, guarda también el clockify_time_entry_id de la sesión recién registrada.
+        Si state=False, limpia el ID pendiente.
+        """
         try:
+            fields = {"in_study_report_flow": state}
+            if state and session_entry_id:
+                fields["pending_session_entry_id"] = session_entry_id
+            elif not state:
+                fields["pending_session_entry_id"] = None
             await self.users.update_one(
                 {"_id": ObjectId(user_id)},
-                {"$set": {"in_study_report_flow": state}}
+                {"$set": fields}
             )
         except Exception:
             pass
+
+    async def get_pending_session_entry_id(self, user_id: str) -> str | None:
+        """Devuelve el clockify_time_entry_id de la sesión pendiente de informe, si existe."""
+        try:
+            user = await self.users.find_one({"_id": ObjectId(user_id)}, {"pending_session_entry_id": 1})
+            return user.get("pending_session_entry_id") if user else None
+        except Exception:
+            return None
 
     
     async def update_clockify_credentials(self, user_id: str, api_key: str, workspace_id: str = None, clockify_user_id: str = None):

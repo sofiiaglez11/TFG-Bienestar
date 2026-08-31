@@ -167,8 +167,8 @@ WELLBEING_PROMPT = (
     "8. NUNCA uses los nombres técnicos de los parámetros al hablar con el usuario "
     "   (no digas 'study_quality', 'goals_achieved', 'breaks_taken', 'mood_before', etc.). "
     "   Habla siempre en lenguaje cotidiano y empático.\n"
-    "9. El clockify_time_entry_id es OBLIGATORIO. Extráelo del campo [DATOS_SESION: clockify_time_entry_id=...] "
-    "   del historial reciente, o usa wb_get_latest_time_entry si no lo encuentras. NUNCA lo inventes.\n"
+    "9. El clockify_time_entry_id es OBLIGATORIO. Siempre estará disponible en el campo "
+    "   [DATOS_SESION: clockify_time_entry_id=XXX] del mensaje actual. Extráelo de ahí. NUNCA lo inventes ni uses wb_get_latest_time_entry.\n"
     "IMPORTANTE: Si el usuario empieza a hablar de otra cosa (bienestar general, estrés, sueño), atiende también eso, "
     "pero intenta cerrar el informe primero si es posible."
 )

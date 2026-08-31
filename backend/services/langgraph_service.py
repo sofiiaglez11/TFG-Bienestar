@@ -1,4 +1,5 @@
 import sys
+import re
 from typing import TypedDict, Optional, List, Dict, Any
 from langgraph.graph import StateGraph, START, END
 
@@ -64,10 +65,10 @@ class LangGraphService:
             self._study_flow_cache[user_id] = await self.db_service.get_study_flow_state(user_id)
         return self._study_flow_cache[user_id]
 
-    async def _set_study_flow_state(self, user_id: str, state: bool) -> None:
+    async def _set_study_flow_state(self, user_id: str, state: bool, session_entry_id: str = None) -> None:
         """Actualiza cache en RAM y persiste en MongoDB."""
         self._study_flow_cache[user_id] = state          # inmediato, sin I/O
-        await self.db_service.set_study_flow_state(user_id, state)  # persistencia
+        await self.db_service.set_study_flow_state(user_id, state, session_entry_id=session_entry_id)  # persistencia
 
     async def _router_node(self, state: GraphState) -> Dict[str, Any]:
         user_id = state.get("user_id", "")
@@ -109,8 +110,13 @@ class LangGraphService:
             # activar el flujo del informe de sesión para que lo recoja el agente de bienestar.
             SESSION_TOOLS = {"stop_timer", "log_time_entry", "log_study_hours"}
             if name in SESSION_TOOLS:
-                print(f"[LANGGRAPH ACADEMIC NODE] {name} detectado. Activando in_study_report_flow = True", file=sys.stderr)
-                await self._set_study_flow_state(user_id, True)
+                # Extraer el clockify_time_entry_id del resultado del tool
+                session_entry_id = None
+                match = re.search(r"clockify_time_entry_id=([\w-]+)", str(res))
+                if match:
+                    session_entry_id = match.group(1)
+                print(f"[LANGGRAPH ACADEMIC NODE] {name} detectado. ID sesión: {session_entry_id}. Activando in_study_report_flow = True", file=sys.stderr)
+                await self._set_study_flow_state(user_id, True, session_entry_id=session_entry_id)
 
             return res
 
@@ -144,6 +150,11 @@ class LangGraphService:
                 await self._set_study_flow_state(user_id, False)
 
             return res
+
+        # Inyectar el ID de la sesión directamente en el contexto (sin depender del LLM para encontrarlo)
+        session_entry_id = await self.db_service.get_pending_session_entry_id(user_id)
+        if session_entry_id:
+            message_with_context = message_with_context + f"\n[DATOS_SESION: clockify_time_entry_id={session_entry_id}]"
 
         result = await self.wellbeing_agent.run_agentic_conversation(
             user_message=message_with_context,

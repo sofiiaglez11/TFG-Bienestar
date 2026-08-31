@@ -1436,7 +1436,7 @@ async def log_time_entry(user_id: str, subject_name: str, start_time: str, end_t
         if not cs.api_key:
             return "No tienes configurada tu API Key de Clockify para poder registrar la entrada de tiempo."
 
-        await asyncio.to_thread(
+        result = await asyncio.to_thread(
             cs.create_time_entry,
             description=description or f"Estudiando {subject_name}",
             project_id=subject.get("clockify_project_id"),
@@ -1444,7 +1444,11 @@ async def log_time_entry(user_id: str, subject_name: str, start_time: str, end_t
             start_time=start_time,
             end_time=end_time
         )
-        return f"Entrada registrada en Clockify: '{subject_name}' de {start_time} a {end_time}."
+        clockify_time_entry_id = result.get("id", "") if isinstance(result, dict) else ""
+        return (
+            f"Entrada registrada en Clockify: '{subject_name}' de {start_time} a {end_time}. "
+            f"[DATOS_SESION: clockify_time_entry_id={clockify_time_entry_id}, asignatura='{subject_name}']"
+        )
     except Exception as e:
         return f"Error al registrar la entrada de tiempo: {str(e)}"
  
@@ -1653,10 +1657,14 @@ async def log_study_hours(user_id: str, subject_name: str, hours: float,
             end_time=end_time
         )
         print(f"[MCP TOOL: LOG_STUDY_HOURS] Respuesta de Clockify: {res}", file=sys.stderr, flush=True)
+        clockify_time_entry_id = res.get("id", "") if isinstance(res, dict) else ""
 
         h = int(hours)
         m = int((hours - h) * 60)
-        return f"Registradas {h}h {m}m de estudio en '{subject_name}'{' (' + task_title + ')' if task_title else ''} en Clockify."
+        return (
+            f"Registradas {h}h {m}m de estudio en '{subject_name}'{' (' + task_title + ')' if task_title else ''} en Clockify. "
+            f"[DATOS_SESION: clockify_time_entry_id={clockify_time_entry_id}, asignatura='{subject_name}']"
+        )
     except Exception as e:
         print(f"[MCP TOOL ERROR: LOG_STUDY_HOURS] {e}", file=sys.stderr, flush=True)
         return f"Error al registrar las horas: {str(e)}"
