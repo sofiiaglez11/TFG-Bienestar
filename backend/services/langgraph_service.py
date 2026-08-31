@@ -1,7 +1,6 @@
 import sys
 from typing import TypedDict, Optional, List, Dict, Any
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
 
 class GraphState(TypedDict):
     user_id: str
@@ -14,18 +13,20 @@ class GraphState(TypedDict):
     response_text: str
 
 class LangGraphService:
-    def __init__(self, academic_agent, wellbeing_agent, general_agent, orchestrator, mcp_client):
+    def __init__(self, academic_agent, wellbeing_agent, general_agent, orchestrator, mcp_client, db_service):
         self.academic_agent = academic_agent
         self.wellbeing_agent = wellbeing_agent
         self.general_agent = general_agent
         self.orchestrator = orchestrator
         self.mcp_client = mcp_client
-        self.memory = MemorySaver()
-        self.study_flow_states: Dict[str, bool] = {}  # user_id -> in_study_report_flow
+        self.db_service = db_service
+        # Cache en RAM: evita consultar MongoDB en cada mensaje.
+        # Si el servidor se reinicia, se recarga desde MongoDB en el primer acceso.
+        self._study_flow_cache: Dict[str, bool] = {}
 
-        # Construir el grafo
+        # Construir el grafo (sin checkpointer: el historial lo gestiona MongoDB)
         self.workflow = self._build_graph()
-        self.app = self.workflow.compile(checkpointer=self.memory)
+        self.app = self.workflow.compile()
 
     def _build_graph(self) -> StateGraph:
         builder = StateGraph(GraphState)
@@ -57,13 +58,24 @@ class LangGraphService:
 
         return builder
 
+    async def _get_study_flow_state(self, user_id: str) -> bool:
+        """Lectura desde cache RAM; consulta MongoDB solo si no está cacheado (p.ej. tras reinicio)."""
+        if user_id not in self._study_flow_cache:
+            self._study_flow_cache[user_id] = await self.db_service.get_study_flow_state(user_id)
+        return self._study_flow_cache[user_id]
+
+    async def _set_study_flow_state(self, user_id: str, state: bool) -> None:
+        """Actualiza cache en RAM y persiste en MongoDB."""
+        self._study_flow_cache[user_id] = state          # inmediato, sin I/O
+        await self.db_service.set_study_flow_state(user_id, state)  # persistencia
+
     async def _router_node(self, state: GraphState) -> Dict[str, Any]:
         user_id = state.get("user_id", "")
         message = state.get("user_message", "")
         history_msgs = state.get("history_msgs", [])
 
         # Si estamos en flujo de informe de estudio para este usuario, bloquear en BIENESTAR
-        in_flow = self.study_flow_states.get(user_id, False)
+        in_flow = await self._get_study_flow_state(user_id)
         if in_flow:
             print(f"[LANGGRAPH ROUTER] Estado in_study_report_flow=True para user_id={user_id}. Forzando BIENESTAR.", file=sys.stderr)
             return {"active_domain": "BIENESTAR", "in_study_report_flow": True}
@@ -93,10 +105,12 @@ class LangGraphService:
             
             res = await self.mcp_client.call_tool(name, arguments)
             
-            # Si el agente académico paró el cronómetro, activar el flujo de informe de estudio
-            if name == "stop_timer":
-                print(f"[LANGGRAPH ACADEMIC NODE] stop_timer detectado. Activando in_study_report_flow = True", file=sys.stderr)
-                self.study_flow_states[user_id] = True
+            # Si el agente académico registró una sesión de estudio (de cualquier forma),
+            # activar el flujo del informe de sesión para que lo recoja el agente de bienestar.
+            SESSION_TOOLS = {"stop_timer", "log_time_entry", "log_study_hours"}
+            if name in SESSION_TOOLS:
+                print(f"[LANGGRAPH ACADEMIC NODE] {name} detectado. Activando in_study_report_flow = True", file=sys.stderr)
+                await self._set_study_flow_state(user_id, True)
 
             return res
 
@@ -127,7 +141,7 @@ class LangGraphService:
             # Si el agente de bienestar guardó el informe de estudio, desactivar el flujo
             if name == "wb_add_study_report":
                 print(f"[LANGGRAPH BIENESTAR NODE] wb_add_study_report ejecutado. Restableciendo in_study_report_flow = False", file=sys.stderr)
-                self.study_flow_states[user_id] = False
+                await self._set_study_flow_state(user_id, False)
 
             return res
 
@@ -168,11 +182,10 @@ class LangGraphService:
             "message_with_context": message_with_context,
             "history_msgs": history_msgs,
             "tools_raw": tools_raw,
-            "in_study_report_flow": self.study_flow_states.get(user_id, False)
+            "in_study_report_flow": await self._get_study_flow_state(user_id)
         }
 
-        config = {"configurable": {"thread_id": user_id}}
-        final_state = await self.app.ainvoke(inputs, config=config)
+        final_state = await self.app.ainvoke(inputs)
 
         return {
             "response": final_state.get("response_text", ""),

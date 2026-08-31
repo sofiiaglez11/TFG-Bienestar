@@ -787,9 +787,8 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
         'exam' (para exámenes/recuperaciones), 
         'assignment' (para entregas de trabajos) u 
         'other'.
-    - priority: Prioridad opcional de la tarea, entero del 1 al 5.
-        REGLA CRÍTICA DE PRIORIDAD: 5 = prioridad MÁS ALTA (máxima urgencia), 1 = prioridad MÁS BAJA (mínima urgencia).
-        Escala: 1 = muy baja, 2 = baja, 3 = media, 4 = alta, 5 = muy alta. NUNCA interpretes 1 como prioridad máxima.
+    - priority: Prioridad opcional de la tarea, entero del 1 al 5. 1=prioridad MÁS ALTA (máxima urgencia), 5=prioridad MÁS BAJA (mínima urgencia). None = sin prioridad.
+        Escala: 1 = muy alta, 2 = alta, 3 = media, 4 = baja, 5 = muy baja. NUNCA interpretes 5 como prioridad máxima.
         Si el usuario no menciona prioridad, no la preguntes; déjala como None.
     - tags: Lista opcional de etiquetas (strings) para categorizar la tarea.
         Ejemplos: ['teórico', 'difícil'], ['repaso', 'examen'].
@@ -944,7 +943,7 @@ async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False)
 
         def serialize(t):
             children = subtasks_by_parent.get(t["_id"], [])
-            children.sort(key=lambda st: st.get("priority") or 0, reverse=True)
+            children.sort(key=lambda st: st.get("priority") or 6)
             return {
                 "title": t.get("title"),
                 "completed": t.get("completed", False),
@@ -955,8 +954,8 @@ async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False)
                 "subtasks": [serialize(child) for child in children]
             }
 
-        # Ordenar tareas raíz por prioridad descendente (5=muy alta primero, None al final)
-        root_tasks.sort(key=lambda t: t.get("priority") or 0, reverse=True)
+        # Ordenar tareas raíz por prioridad ascendente (1=muy alta primero, None al final)
+        root_tasks.sort(key=lambda t: t.get("priority") or 6)
 
         tasks_data = [serialize(root) for root in root_tasks]
 
@@ -1021,7 +1020,7 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
     Para marcar una tarea como completada o revertirla, usa complete_task.
     Para cambiar la jerarquía (padre/subtarea), usa set_task_hierarchy.
     due_date debe tener formato ISO 8601 (ej: '2026-07-20' o '2026-07-20T18:00:00'). Si el usuario indica una hora concreta, inclúyela.
-    priority: entero del 1 al 5 (5=prioridad MÁS ALTA / máxima, 1=prioridad MÁS BAJA / mínima. 1=muy baja, 2=baja, 3=media, 4=alta, 5=muy alta).
+    priority: entero del 1 al 5 (1=prioridad MÁS ALTA / máxima urgencia, 5=prioridad MÁS BAJA / mínima urgencia. 1=muy alta, 2=alta, 3=media, 4=baja, 5=muy baja). 0 para eliminar la prioridad.
         Pasa 0 o un valor centinela si el usuario quiere eliminar la prioridad (la dejarás como None en BD).
     tags: lista completa de tags que debe tener la tarea tras la edición.
         Para AÑADIR un tag: lee los tags actuales con get_tasks y pasa la lista con el nuevo tag añadido.
@@ -1086,7 +1085,7 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
         if due_date is not None:
             cambios.append(f"fecha límite: '{due_date}'")
         if priority is not None:
-            p_label = {0: "eliminada", 1: "muy baja", 2: "baja", 3: "media", 4: "alta", 5: "muy alta"}.get(priority, str(priority))
+            p_label = {0: "eliminada", 1: "muy alta", 2: "alta", 3: "media", 4: "baja", 5: "muy baja"}.get(priority, str(priority))
             cambios.append(f"prioridad: {p_label}")
         if tags is not None:
             cambios.append(f"tags: {updates.get('tags', [])!r}")

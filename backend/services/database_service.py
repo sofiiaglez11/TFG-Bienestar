@@ -134,6 +134,24 @@ class DatabaseService:
         except Exception:
             return None
 
+    async def get_study_flow_state(self, user_id: str) -> bool:
+        """Devuelve True si el usuario está en el flujo de recogida de informe de sesión."""
+        try:
+            user = await self.users.find_one({"_id": ObjectId(user_id)}, {"in_study_report_flow": 1})
+            return bool(user.get("in_study_report_flow", False)) if user else False
+        except Exception:
+            return False
+
+    async def set_study_flow_state(self, user_id: str, state: bool) -> None:
+        """Activa o desactiva el flujo de recogida de informe de sesión para un usuario."""
+        try:
+            await self.users.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": {"in_study_report_flow": state}}
+            )
+        except Exception:
+            pass
+
     
     async def update_clockify_credentials(self, user_id: str, api_key: str, workspace_id: str = None, clockify_user_id: str = None):
         """Actualiza la API Key y Workspace de Clockify del usuario."""

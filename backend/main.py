@@ -27,6 +27,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 from services.auth import SECRET_KEY, ALGORITHM
 
+from typing import Optional
+from pydantic import BaseModel, model_validator
+from services.langgraph_service import LangGraphService
+
 
 
 # Servicios de MCP y de la Base de DAtos
@@ -79,12 +83,12 @@ ACADEMIC_PROMPT = (
     "revisa lo que está guardado en las bases de datos y el clockify usando las herramientas que tienes disponibles.\n"
     "REGLA DE PRIORIDADES DE TAREAS:\n"
     "Las prioridades de las tareas van del 1 al 5 (o sin prioridad/None):\n"
-    "- 5 = Prioridad MÁS ALTA (Muy alta / Máxima urgencia).\n"
-    "- 4 = Prioridad alta.\n"
+    "- 1 = Prioridad MÁS ALTA (Muy alta / Máxima urgencia).\n"
+    "- 2 = Prioridad alta.\n"
     "- 3 = Prioridad media.\n"
-    "- 2 = Prioridad baja.\n"
-    "- 1 = Prioridad MÁS BAJA (Muy baja / Mínima urgencia).\n"
-    "NUNCA interpretes el 1 como la prioridad más alta. El valor 5 es SIEMPRE la máxima prioridad y 1 la mínima.\n"
+    "- 4 = Prioridad baja.\n"
+    "- 5 = Prioridad MÁS BAJA (Muy baja / Mínima urgencia).\n"
+    "NUNCA interpretes el 5 como la prioridad más alta. El valor 1 es SIEMPRE la máxima prioridad y 5 la mínima.\n"
     "REGLA DE JERARQUÍA Y SUBTAREAS:\n"
     "Las tareas devueltas por get_tasks pueden incluir subtareas anidadas a múltiples niveles de profundidad (tarea -> subtarea -> sub-subtarea...).\n"
     "Al responder al usuario, muestra SIEMPRE la jerarquía utilizando listas Markdown anidadas con sangría (ejemplo:\n- Tarea principal\n  - Subtarea 1\n  - Subtarea 2\n    - Sub-subtarea A).\n"
@@ -106,10 +110,20 @@ ACADEMIC_PROMPT = (
     "Cuando le muestres la lista de tareas al usuario, si hay muchas tareas, e incluyes tareas completadas y pendientes, "
     "añade emojis que permitan visualizar fácilmente el estado de cada una.\n"
     "REGLA DE INFORME DE SESIÓN (STUDY REPORT):\n"
-    "Cuando pares un cronómetro con stop_timer, en tu respuesta final al usuario:\n"
-    "1. Confirma brevemente y de forma natural que el cronómetro se ha parado.\n"
+    "Cuando registres una sesión de estudio mediante cualquiera de estas acciones:\n"
+    "  a) Parar un cronómetro con stop_timer\n"
+    "  b) Registrar horas manualmente con log_study_hours\n"
+    "  c) Registrar una entrada manual con log_time_entry\n"
+    "...en tu respuesta final al usuario:\n"
+    "1. Confirma brevemente y de forma natural que la sesión ha quedado registrada.\n"
     "2. Pregunta si quiere registrar cómo le fue la sesión. Sé breve y natural, como si fuera parte del mismo chat.\n"
-    "Ejemplo: '¡Listo! He parado el cronómetro. ¿Qué tal ha ido la sesión? Si quieres, podemos apuntar brevemente cómo te ha ido.'\n"
+    "Ejemplo: '¡Listo! He apuntado la sesión. ¿Qué tal te ha ido? Si quieres, podemos apuntar brevemente cómo fue.'\n"
+    "REGLA DE SESIONES NO REGISTRADAS (el usuario menciona que estudió sin haber usado el timer):\n"
+    "Si el usuario menciona que ha estado estudiando (ej: 'hoy he estado toda la mañana con el TFG', "
+    "'estuve 3 horas estudiando Física'), NO des consejos de bienestar ni respondas como si fuera una charla. "
+    "Tu rol aquí es académico: pregúntale si quiere registrar esa sesión. "
+    "Si confirma, usa log_study_hours (si solo menciona duración) o log_time_entry (si menciona hora de inicio y fin). "
+    "Una vez registrada, confirma brevemente y pregunta si quiere apuntar cómo le fue (el seguimiento del informe lo hará otro asistente).\n"
     "IMPORTANTE: NO menciones a ningún 'compañero', 'asistente de bienestar' ni otros agentes. Para el usuario solo existe un único chat.\n"
     "NUNCA intentes tú mismo guardar el informe de sesión."
 )
@@ -123,29 +137,42 @@ WELLBEING_PROMPT = (
     "estado de ánimo del usuario. Recuerda usar estas herramientas para ofrecerle un servicio más "
     "personalizado y útil.\n"
     "REGLA DE INFORME DE SESIÓN DE ESTUDIO (STUDY REPORT):\n"
-    "Si el último mensaje del asistente académico menciona que se ha parado un cronómetro y que el asistente de "
-    "bienestar va a preguntar cómo le fue la sesión, es TU TURNO de recoger ese informe. Sigue estas instrucciones al pie de la letra:\n"
-    "1. Saluda brevemente y pregunta de forma conversacional y empática cómo le fue la sesión (NO hagas una lista de preguntas en bloque).\n"
-    "2. A medida que el usuario responde, extrae la información relevante para el informe:\n"
-    "   - Calidad de la sesión (del 1 al 5, siendo 5 excelente): pregúntalo si no lo ha dicho.\n"
-    "   - Si consiguió los objetivos que tenía o no, y cuáles eran esos objetivos.\n"
-    "   - Si hubo distracciones y cuáles.\n"
-    "   - Si hizo descansos y cuántos.\n"
-    "   - Cómo se siente ahora en comparación con antes de estudiar (estado de ánimo antes/después).\n"
-    "   - Cualquier observación libre que quiera añadir.\n"
-    "3. NO preguntes todo de golpe. Haz una o dos preguntas y ve avanzando con las respuestas del usuario.\n"
-    "4. Si el usuario dice que no quiere rellenar el informe, que está ocupado o que no le apetece, respeta su decisión. "
-    "   En ese caso llama a wb_add_study_report pasando únicamente el clockify_time_entry_id (extraído del campo [DATOS_SESION: clockify_time_entry_id=...] del historial) "
-    "   y el subject_name. Los demás campos quédalos vacíos.\n"
-    "5. Cuando hayas recogido suficiente información (o el usuario ya no quiera añadir más), "
-    "   llama a wb_add_study_report con todo lo que tengas. Confirma al usuario que lo has guardado de forma breve y amable.\n"
-    "6. NUNCA uses los nombres técnicos de los parámetros al hablar con el usuario "
+    "Si en el historial reciente hay un mensaje que menciona que se ha registrado una sesión de estudio "
+    "(parar un cronómetro, registrar horas manualmente, etc.), es TU TURNO de recoger ese informe.\n"
+    "Sigue estas instrucciones AL PIE DE LA LETRA y sin excepciones:\n"
+    "1. Empieza de forma conversacional y empática. Pregunta UNA o DOS cosas como mucho. "
+    "   Ejemplo: '¿Qué tal te ha ido la sesión? ¿Conseguiste lo que te habías propuesto?'\n"
+    "2. ESPERA a que el usuario responda antes de hacer más preguntas. NUNCA respondas tú solo por él.\n"
+    "3. A medida que el usuario responde, extrae los datos que mencione de forma natural:\n"
+    "   - Calidad de la sesión (del 1 al 5, siendo 5 excelente)\n"
+    "   - Si consiguió sus objetivos y cuáles eran\n"
+    "   - Si hubo distracciones y cuáles\n"
+    "   - Si hizo descansos y cuántos\n"
+    "   - Cómo se siente ahora (estado de ánimo antes/después)\n"
+    "   - Cualquier observación libre\n"
+    "4. Ve haciendo UNA o DOS preguntas por turno, avanzando según lo que el usuario haya respondido ya. "
+    "   NUNCA hagas todas las preguntas de golpe.\n"
+    "5. CUÁNDO llamar a wb_add_study_report — CRITERIO ESTRICTO:\n"
+    "   - SOLO llama a wb_add_study_report cuando se cumpla UNA de estas dos condiciones:\n"
+    "     a) El usuario ha indicado explícitamente que ya no quiere añadir más ('ya está', 'es todo', 'no quiero más', etc.)\n"
+    "     b) Ya has preguntado sobre calidad de sesión, objetivos y distracciones/descansos, y el usuario ha respondido a todas.\n"
+    "   - NUNCA llames a wb_add_study_report en el mismo turno en que haces una pregunta.\n"
+    "   - NUNCA llames a wb_add_study_report si el usuario aún no ha respondido a la pregunta anterior.\n"
+    "6. REGLA CRÍTICA — NUNCA INVENTES DATOS:\n"
+    "   - Solo incluye en wb_add_study_report los campos que el usuario haya mencionado EXPLÍCITAMENTE.\n"
+    "   - Si el usuario no ha dado un valor para un campo (p.ej. no dijo cuántos descansos hizo), ese campo va como None/vacío.\n"
+    "   - NUNCA asumas, deduzcas ni rellenes valores que el usuario no ha dicho. Si no lo dijo, va vacío.\n"
+    "7. Si el usuario dice que no quiere rellenar el informe, que está ocupado o que no le apetece, respeta su decisión. "
+    "   Llama a wb_add_study_report pasando solo el clockify_time_entry_id y el subject_name. El resto vacío.\n"
+    "8. NUNCA uses los nombres técnicos de los parámetros al hablar con el usuario "
     "   (no digas 'study_quality', 'goals_achieved', 'breaks_taken', 'mood_before', etc.). "
     "   Habla siempre en lenguaje cotidiano y empático.\n"
-    "7. El clockify_time_entry_id es OBLIGATORIO y SIEMPRE debe estar asociado a una entrada de tiempo de Clockify. Extraelo del campo [DATOS_SESION: clockify_time_entry_id=...] del historial reciente o consulta la última sesión registrada usando wb_get_latest_time_entry. NUNCA inventes este ID.\n"
+    "9. El clockify_time_entry_id es OBLIGATORIO. Extráelo del campo [DATOS_SESION: clockify_time_entry_id=...] "
+    "   del historial reciente, o usa wb_get_latest_time_entry si no lo encuentras. NUNCA lo inventes.\n"
     "IMPORTANTE: Si el usuario empieza a hablar de otra cosa (bienestar general, estrés, sueño), atiende también eso, "
     "pero intenta cerrar el informe primero si es posible."
 )
+
 
 # GENERAL_PROMPT = (
 #     "Eres un asistente amigable y conversacional. Responde cordialmente a los saludos y "
@@ -164,7 +191,6 @@ GENERAL_PROMPT = (
     "Si el usuario responde 'sí' o te pide una acción sobre sus estudios, NUNCA afirmes haber realizado la acción ni simules haber borrado nada."
 )
 
-from services.langgraph_service import LangGraphService
 
 academic_agent.set_system_instruction(ACADEMIC_PROMPT)
 wellbeing_agent.set_system_instruction(WELLBEING_PROMPT)
@@ -175,7 +201,8 @@ langgraph_service = LangGraphService(
     wellbeing_agent=wellbeing_agent,
     general_agent=general_agent,
     orchestrator=orchestrator,
-    mcp_client=mcp_client
+    mcp_client=mcp_client,
+    db_service=db_service
 )
 
 
@@ -264,8 +291,7 @@ class RegisterRequest(BaseModel):
     name: str
     password: str
 
-from typing import Optional
-from pydantic import BaseModel, model_validator
+
 
 class ClockifyCredentialsRequest(BaseModel):
     api_key: Optional[str] = None
