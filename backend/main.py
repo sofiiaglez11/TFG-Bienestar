@@ -164,9 +164,19 @@ GENERAL_PROMPT = (
     "Si el usuario responde 'sí' o te pide una acción sobre sus estudios, NUNCA afirmes haber realizado la acción ni simules haber borrado nada."
 )
 
+from services.langgraph_service import LangGraphService
+
 academic_agent.set_system_instruction(ACADEMIC_PROMPT)
 wellbeing_agent.set_system_instruction(WELLBEING_PROMPT)
 general_agent.set_system_instruction(GENERAL_PROMPT)
+
+langgraph_service = LangGraphService(
+    academic_agent=academic_agent,
+    wellbeing_agent=wellbeing_agent,
+    general_agent=general_agent,
+    orchestrator=orchestrator,
+    mcp_client=mcp_client
+)
 
 
 # FastAPI lifespan: Manages startup and shutdown of the app
@@ -295,7 +305,7 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
 
 
         # Recuperamos los últimos 5 mensajes de historial del usuario para tener contexto de la conversación
-        history_msgs = await db_service.get_history(user_id=user_id, limit=5)
+        history_msgs = await db_service.get_history(user_id=user_id, limit=20)
 
         user_msg = await db_service.insert_message(
             user_id=user_id, 
@@ -329,44 +339,26 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
             })
 
     
-        domain = await orchestrator.route_intent(request.message, history_msgs)
-        print(f"Dominio detectado por el orquestador: {domain}")
-
-        if domain == "BIENESTAR":
-            active_agent = wellbeing_agent
-            filtered_tools = [t for t in tools_raw if t["name"].startswith("wb_")]
-            
-        elif domain == "ACADEMICO":
-            active_agent = academic_agent
-            filtered_tools = [t for t in tools_raw if not t["name"].startswith("wb_") and t["name"] != "get_agent_capabilities"]
-            
-        else:  # GENERAL
-            active_agent = general_agent
-            filtered_tools = [t for t in tools_raw if t["name"] == "get_agent_capabilities"]
-
-        active_agent.set_config(filtered_tools)
-        # Cargamos los últimos 5 mensajes al agente para contextualizar la respuesta
-        active_agent.load_history(history_msgs)
-
-        async def custom_tool_executor(name: str, arguments: dict):
-            # Inyectamos el user_id del token en los argumentos de la herramienta
-            if name != "get_agent_capabilities":
-                arguments["user_id"] = user_id
-            return await mcp_client.call_tool(name, arguments)
-
-        result = await active_agent.run_agentic_conversation(
-            user_message=message_with_context,
-            tool_executor=custom_tool_executor
+        # Ejecución a través del flujo de LangGraph
+        result = await langgraph_service.run(
+            user_id=user_id,
+            user_message=request.message,
+            message_with_context=message_with_context,
+            history_msgs=history_msgs,
+            tools_raw=tools_raw
         )
+
+        response_text = result["response"]
+        domain = result["agent_used"]
 
         assistant_msg = await db_service.insert_message(
             user_id=user_id,
             role="assistant",
-            content=result.text,
+            content=response_text,
             agent_used=domain
         )
         return {
-            "response": result.text,
+            "response": response_text,
             "agent_used": domain,
             "timestamp": assistant_msg.get("timestamp")
         }
