@@ -361,6 +361,7 @@ async def get_subjects(user_id: str, include_archived: bool = False, only_archiv
     'Qué asignaturas tengo archivadas' o cuando busques una asignatura que el usuario menciona y no aparece en las activas.
     """
     try:
+        print(f"[MCP TOOL: GET_SUBJECTS] Iniciando consulta para user_id={user_id}", file=sys.stderr, flush=True)
         subjects = await db_service.get_subjects_by_user(
             user_id=user_id,
             include_archived=include_archived,
@@ -920,6 +921,7 @@ async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False)
     
     """
     try:
+        print(f"[MCP TOOL: GET_TASKS] Iniciando consulta para user_id={user_id}", file=sys.stderr, flush=True)
         subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
@@ -1844,6 +1846,7 @@ async def wb_get_wellbeing_report(user_id: str):
     Úsala cuando el usuario quiera consultar su estado de ánimo o bienestar.
     """
     try:
+        print(f"[MCP TOOL: GET_WELLBEING_REPORT] Iniciando consulta para user_id={user_id}", file=sys.stderr, flush=True)
         report = await db_service.get_wellbeing_report(user_id)
         if not report:
             return "No tienes ningún informe de bienestar registrado todavía."
@@ -1859,6 +1862,7 @@ async def wb_get_wellbeing_trends(user_id: str):
     Úsala cuando el usuario quiera consultar las tendencias de su estado de ánimo o bienestar.
     """
     try:
+        print(f"[MCP TOOL: GET_WELLBEING_TRENDS] Iniciando consulta para user_id={user_id}", file=sys.stderr, flush=True)
         trends = await db_service.get_wellbeing_trends(user_id)
         if not trends:
             return "No tienes ninguna tendencia de bienestar registrada todavía."
@@ -1979,6 +1983,7 @@ async def wb_get_study_reports(user_id: str, subject_name: str = None, limit: in
     - limit: número máximo de informes a devolver (por defecto 5, máximo recomendado 10).
     """
     try:
+        print(f"[MCP TOOL: GET_STUDY_REPORTS] Iniciando consulta para user_id={user_id}", file=sys.stderr, flush=True)
         reports = await db_service.get_study_reports_by_user(
             user_id=user_id,
             limit=limit,

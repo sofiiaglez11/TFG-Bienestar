@@ -13,9 +13,12 @@ class GraphState(TypedDict):
     in_study_report_flow: bool
     run_advisor: bool
     advisor_trigger: str
+    periodic_trigger: bool
     response_text: str
 
 class LangGraphService:
+    ADVISOR_EVERY_N_MESSAGES = 5
+
     def __init__(self, academic_agent, wellbeing_agent, general_agent, advisor_agent, orchestrator, mcp_client, db_service):
         self.academic_agent = academic_agent
         self.wellbeing_agent = wellbeing_agent
@@ -25,8 +28,9 @@ class LangGraphService:
         self.mcp_client = mcp_client
         self.db_service = db_service
         # Cache en RAM: evita consultar MongoDB en cada mensaje.
-        # Si el servidor se reinicia, se recarga desde MongoDB en el primer acceso.
         self._study_flow_cache: Dict[str, bool] = {}
+        # Contador de mensajes por usuario para evaluación periódica del asesor
+        self._user_message_counts: Dict[str, int] = {}
 
         # Construir el grafo (sin checkpointer: el historial lo gestiona MongoDB)
         self.workflow = self._build_graph()
@@ -116,6 +120,7 @@ class LangGraphService:
         user_id = state.get("user_id", "")
         message_with_context = state.get("message_with_context", "")
         history_msgs = state.get("history_msgs", [])
+        periodic_trigger = state.get("periodic_trigger", False)
 
         tools_raw = state.get("tools_raw", [])
         filtered_tools = [t for t in tools_raw if not t["name"].startswith("wb_") and t["name"] != "get_agent_capabilities"]
@@ -132,12 +137,9 @@ class LangGraphService:
             
             res = await self.mcp_client.call_tool(name, arguments)
             
-            # Si el agente académico registró una sesión de estudio (de cualquier forma),
-            # activar el flujo del informe de sesión para que lo recoja el agente de bienestar.
             SESSION_TOOLS = {"stop_timer", "log_time_entry", "log_study_hours"}
             if name in SESSION_TOOLS:
                 session_registered = True
-                # Extraer el clockify_time_entry_id del resultado del tool
                 session_entry_id = None
                 match = re.search(r"clockify_time_entry_id=([\w-]+)", str(res))
                 if match:
@@ -152,10 +154,13 @@ class LangGraphService:
             tool_executor=intercepted_tool_executor
         )
 
+        run_adv = session_registered or periodic_trigger
+        trigger_reason = "session_registered" if session_registered else ("periodic_counter" if periodic_trigger else "")
+
         return {
             "response_text": result.text,
-            "run_advisor": session_registered,
-            "advisor_trigger": "session_registered" if session_registered else ""
+            "run_advisor": run_adv,
+            "advisor_trigger": trigger_reason
         }
 
     async def _bienestar_node(self, state: GraphState) -> Dict[str, Any]:
@@ -163,6 +168,7 @@ class LangGraphService:
         message_with_context = state.get("message_with_context", "")
         history_msgs = state.get("history_msgs", [])
         in_study_report_flow = state.get("in_study_report_flow", False)
+        periodic_trigger = state.get("periodic_trigger", False)
 
         tools_raw = state.get("tools_raw", [])
         filtered_tools = [t for t in tools_raw if t["name"].startswith("wb_")]
@@ -170,20 +176,23 @@ class LangGraphService:
         self.wellbeing_agent.set_config(filtered_tools)
         self.wellbeing_agent.load_history(history_msgs)
 
+        report_added = False
+
         async def intercepted_tool_executor(name: str, arguments: dict):
+            nonlocal report_added
             if name != "get_agent_capabilities":
                 arguments["user_id"] = user_id
             
             res = await self.mcp_client.call_tool(name, arguments)
             
-            # Si el agente de bienestar guardó el informe de estudio, desactivar el flujo
-            if name == "wb_add_study_report":
-                print(f"[LANGGRAPH BIENESTAR NODE] wb_add_study_report ejecutado. Restableciendo in_study_report_flow = False", file=sys.stderr)
-                await self._set_study_flow_state(user_id, False)
+            if name in {"wb_add_study_report", "wb_add_wellbeing_report"}:
+                report_added = True
+                if name == "wb_add_study_report":
+                    print(f"[LANGGRAPH BIENESTAR NODE] wb_add_study_report ejecutado. Restableciendo in_study_report_flow = False", file=sys.stderr)
+                    await self._set_study_flow_state(user_id, False)
 
             return res
 
-        # Inyectar el ID de la sesión directamente en el contexto (sin depender del LLM para encontrarlo)
         session_entry_id = await self.db_service.get_pending_session_entry_id(user_id)
         if session_entry_id:
             message_with_context = message_with_context + f"\n[DATOS_SESION: clockify_time_entry_id={session_entry_id}]"
@@ -193,19 +202,27 @@ class LangGraphService:
             tool_executor=intercepted_tool_executor
         )
 
-        # Si NO estamos respondiendo al flujo de estudio (que es estructurado), sino a una conversación de bienestar general, activamos el asesor por señal de estrés/bienestar.
-        run_adv = not in_study_report_flow
+        if report_added:
+            run_adv = True
+            trigger_reason = "report_added"
+        elif periodic_trigger:
+            run_adv = True
+            trigger_reason = "periodic_counter"
+        else:
+            run_adv = not in_study_report_flow
+            trigger_reason = "wellbeing_signal" if run_adv else ""
 
         return {
             "response_text": result.text,
             "run_advisor": run_adv,
-            "advisor_trigger": "wellbeing_signal" if run_adv else ""
+            "advisor_trigger": trigger_reason
         }
 
     async def _general_node(self, state: GraphState) -> Dict[str, Any]:
         user_id = state.get("user_id", "")
         message_with_context = state.get("message_with_context", "")
         history_msgs = state.get("history_msgs", [])
+        periodic_trigger = state.get("periodic_trigger", False)
 
         tools_raw = state.get("tools_raw", [])
         filtered_tools = [t for t in tools_raw if t["name"] == "get_agent_capabilities"]
@@ -225,8 +242,8 @@ class LangGraphService:
 
         return {
             "response_text": result.text,
-            "run_advisor": False,
-            "advisor_trigger": ""
+            "run_advisor": periodic_trigger,
+            "advisor_trigger": "periodic_counter" if periodic_trigger else ""
         }
 
     async def _advisor_node(self, state: GraphState) -> Dict[str, Any]:
@@ -234,11 +251,11 @@ class LangGraphService:
         response_text = state.get("response_text", "")
         history_msgs = state.get("history_msgs", [])
         tools_raw = state.get("tools_raw", [])
+        advisor_trigger = state.get("advisor_trigger", "")
 
-        # Herramientas de solo lectura para el asesor
         read_only_tools = [
             t for t in tools_raw
-            if t["name"].startswith("get_") or t["name"].startswith("wb_get_")
+            if t["name"].startswith("get_") or t["name"].startswith("wb_get_") or t["name"].startswith("list_")
         ]
 
         self.advisor_agent.set_config(read_only_tools)
@@ -249,12 +266,39 @@ class LangGraphService:
                 arguments["user_id"] = user_id
             return await self.mcp_client.call_tool(name, arguments)
 
+        trigger_instruction = ""
+        if advisor_trigger == "report_added":
+            trigger_instruction = (
+                "El usuario acaba de registrar un nuevo informe de estudio o bienestar. "
+                "Usa tus herramientas (list_subjects, get_time_summary, get_time_entries, wb_get_study_reports, wb_get_wellbeing_report, wb_get_wellbeing_trends) "
+                "para analizar si hay un desequilibrio de estudio entre asignaturas, sesiones en la madrugada, o si el último informe muestra fatiga o mal descanso.\n"
+            )
+        elif advisor_trigger == "periodic_counter":
+            trigger_instruction = (
+                "Se ha alcanzado la revisión periódica del progreso del usuario. "
+                "Ejecuta tus herramientas de lectura (list_subjects, get_time_summary, get_time_entries, wb_get_study_reports, wb_get_wellbeing_trends) "
+                "para detectar si alguna asignatura activa está abandonada (0 horas), si estudia a altas horas de la madrugada, si las sesiones son muy dispersas o si arrastra fatiga acumulada.\n"
+            )
+        elif advisor_trigger == "session_registered":
+            trigger_instruction = (
+                "El usuario acaba de registrar/finalizar una sesión de estudio. "
+                "Consulta get_time_entries y list_subjects para verificar el horario de la sesión (ej. si fue de madrugada) y la distribución del tiempo por asignatura, evaluando si es conveniente ofrecer una recomendación.\n"
+            )
+        else:
+            trigger_instruction = (
+                "Consulta los datos de asignaturas y tiempos (list_subjects, get_time_summary, get_time_entries) e informes de bienestar (wb_get_wellbeing_trends) "
+                "para verificar si hay desequilibrios entre asignaturas, estudio nocturno o signos de estrés.\n"
+            )
+
         prompt_advisor = (
             f"El agente principal ha generado la siguiente respuesta al usuario:\n"
             f"\"\"\"\n{response_text}\n\"\"\"\n\n"
-            f"Analiza si con los datos del usuario y la respuesta dada es conveniente ofrecer una recomendación adicional. "
-            f"Si decides hacer una sugerencia, redacta únicamente el texto de la recomendación de forma fluida y natural, introduciéndola con una frase de transición adecuada (ej: 'Por cierto, te sugiero...', 'Como consejo rápido...'). NUNCA utilices separadores como '---' ni etiquetas div. "
-            f"Si no procede, responde exactamente 'NO_ADVICE'."
+            f"{trigger_instruction}"
+            f"Analiza si con los datos recopilados del usuario y la respuesta dada es conveniente ofrecer una recomendación adicional. "
+            f"Si decides hacer una sugerencia, redacta únicamente el texto de la recomendación de forma fluida y natural, "
+            f"introduciéndola con una frase de transición adecuada (ej: 'Por cierto, te sugiero...', 'Como consejo rápido...', 'Un pequeño consejo:...'). "
+            f"NUNCA utilices separadores como '---' ni etiquetas div. "
+            # f"Si no procede o no hay patrones preocupantes en sus datos, responde exactamente 'NO_ADVICE'."
         )
 
         result = await self.advisor_agent.run_agentic_conversation(
@@ -265,13 +309,21 @@ class LangGraphService:
         advice_text = (result.text or "").strip()
         if advice_text and "NO_ADVICE" not in advice_text:
             updated_response = f"{response_text}\n\n{advice_text}"
-            print(f"[LANGGRAPH ADVISOR NODE] Recomendación añadida.", file=sys.stderr)
+            print(f"[LANGGRAPH ADVISOR NODE] Recomendación añadida (Trigger: {advisor_trigger}).", file=sys.stderr)
             return {"response_text": updated_response}
 
-        print(f"[LANGGRAPH ADVISOR NODE] Sin recomendación (NO_ADVICE).", file=sys.stderr)
+        print(f"[LANGGRAPH ADVISOR NODE] Sin recomendación (NO_ADVICE). Trigger: {advisor_trigger}.", file=sys.stderr)
         return {"response_text": response_text}
 
     async def run(self, user_id: str, user_message: str, message_with_context: str, history_msgs: list, tools_raw: list) -> dict:
+        # Incrementar contador de mensajes del usuario
+        current_count = self._user_message_counts.get(user_id, 0) + 1
+        self._user_message_counts[user_id] = current_count
+        is_periodic_turn = (current_count % self.ADVISOR_EVERY_N_MESSAGES == 0)
+
+        if is_periodic_turn:
+            print(f"[LANGGRAPH SERVICE] Turno periódico alcanzado para {user_id} (mensaje #{current_count}). Activando periodic_trigger.", file=sys.stderr)
+
         inputs = {
             "user_id": user_id,
             "user_message": user_message,
@@ -280,7 +332,8 @@ class LangGraphService:
             "tools_raw": tools_raw,
             "in_study_report_flow": await self._get_study_flow_state(user_id),
             "run_advisor": False,
-            "advisor_trigger": ""
+            "advisor_trigger": "",
+            "periodic_trigger": is_periodic_turn
         }
 
         final_state = await self.app.ainvoke(inputs)
@@ -289,3 +342,4 @@ class LangGraphService:
             "response": final_state.get("response_text", ""),
             "agent_used": final_state.get("active_domain", "ACADEMICO")
         }
+
