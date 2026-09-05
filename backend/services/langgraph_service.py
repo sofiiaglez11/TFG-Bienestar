@@ -11,13 +11,16 @@ class GraphState(TypedDict):
     tools_raw: List[Dict[str, Any]]
     active_domain: str
     in_study_report_flow: bool
+    run_advisor: bool
+    advisor_trigger: str
     response_text: str
 
 class LangGraphService:
-    def __init__(self, academic_agent, wellbeing_agent, general_agent, orchestrator, mcp_client, db_service):
+    def __init__(self, academic_agent, wellbeing_agent, general_agent, advisor_agent, orchestrator, mcp_client, db_service):
         self.academic_agent = academic_agent
         self.wellbeing_agent = wellbeing_agent
         self.general_agent = general_agent
+        self.advisor_agent = advisor_agent
         self.orchestrator = orchestrator
         self.mcp_client = mcp_client
         self.db_service = db_service
@@ -37,6 +40,7 @@ class LangGraphService:
         builder.add_node("academic", self._academic_node)
         builder.add_node("bienestar", self._bienestar_node)
         builder.add_node("general", self._general_node)
+        builder.add_node("advisor", self._advisor_node)
 
         # Transición inicial
         builder.add_edge(START, "router")
@@ -52,10 +56,24 @@ class LangGraphService:
             }
         )
 
-        # Transiciones de salida a END
-        builder.add_edge("academic", END)
-        builder.add_edge("bienestar", END)
-        builder.add_edge("general", END)
+        # Transiciones hacia el asesor o END
+        builder.add_conditional_edges(
+            "academic",
+            self._check_advisor_path,
+            {"advisor": "advisor", END: END}
+        )
+        builder.add_conditional_edges(
+            "bienestar",
+            self._check_advisor_path,
+            {"advisor": "advisor", END: END}
+        )
+        builder.add_conditional_edges(
+            "general",
+            self._check_advisor_path,
+            {"advisor": "advisor", END: END}
+        )
+
+        builder.add_edge("advisor", END)
 
         return builder
 
@@ -89,6 +107,11 @@ class LangGraphService:
     def _select_agent_path(self, state: GraphState) -> str:
         return state.get("active_domain", "ACADEMICO")
 
+    def _check_advisor_path(self, state: GraphState) -> str:
+        if state.get("run_advisor", False):
+            return "advisor"
+        return END
+
     async def _academic_node(self, state: GraphState) -> Dict[str, Any]:
         user_id = state.get("user_id", "")
         message_with_context = state.get("message_with_context", "")
@@ -100,7 +123,10 @@ class LangGraphService:
         self.academic_agent.set_config(filtered_tools)
         self.academic_agent.load_history(history_msgs)
 
+        session_registered = False
+
         async def intercepted_tool_executor(name: str, arguments: dict):
+            nonlocal session_registered
             if name != "get_agent_capabilities":
                 arguments["user_id"] = user_id
             
@@ -110,6 +136,7 @@ class LangGraphService:
             # activar el flujo del informe de sesión para que lo recoja el agente de bienestar.
             SESSION_TOOLS = {"stop_timer", "log_time_entry", "log_study_hours"}
             if name in SESSION_TOOLS:
+                session_registered = True
                 # Extraer el clockify_time_entry_id del resultado del tool
                 session_entry_id = None
                 match = re.search(r"clockify_time_entry_id=([\w-]+)", str(res))
@@ -125,12 +152,17 @@ class LangGraphService:
             tool_executor=intercepted_tool_executor
         )
 
-        return {"response_text": result.text}
+        return {
+            "response_text": result.text,
+            "run_advisor": session_registered,
+            "advisor_trigger": "session_registered" if session_registered else ""
+        }
 
     async def _bienestar_node(self, state: GraphState) -> Dict[str, Any]:
         user_id = state.get("user_id", "")
         message_with_context = state.get("message_with_context", "")
         history_msgs = state.get("history_msgs", [])
+        in_study_report_flow = state.get("in_study_report_flow", False)
 
         tools_raw = state.get("tools_raw", [])
         filtered_tools = [t for t in tools_raw if t["name"].startswith("wb_")]
@@ -161,7 +193,14 @@ class LangGraphService:
             tool_executor=intercepted_tool_executor
         )
 
-        return {"response_text": result.text}
+        # Si NO estamos respondiendo al flujo de estudio (que es estructurado), sino a una conversación de bienestar general, activamos el asesor por señal de estrés/bienestar.
+        run_adv = not in_study_report_flow
+
+        return {
+            "response_text": result.text,
+            "run_advisor": run_adv,
+            "advisor_trigger": "wellbeing_signal" if run_adv else ""
+        }
 
     async def _general_node(self, state: GraphState) -> Dict[str, Any]:
         user_id = state.get("user_id", "")
@@ -184,7 +223,53 @@ class LangGraphService:
             tool_executor=intercepted_tool_executor
         )
 
-        return {"response_text": result.text}
+        return {
+            "response_text": result.text,
+            "run_advisor": False,
+            "advisor_trigger": ""
+        }
+
+    async def _advisor_node(self, state: GraphState) -> Dict[str, Any]:
+        user_id = state.get("user_id", "")
+        response_text = state.get("response_text", "")
+        history_msgs = state.get("history_msgs", [])
+        tools_raw = state.get("tools_raw", [])
+
+        # Herramientas de solo lectura para el asesor
+        read_only_tools = [
+            t for t in tools_raw
+            if t["name"].startswith("get_") or t["name"].startswith("wb_get_")
+        ]
+
+        self.advisor_agent.set_config(read_only_tools)
+        self.advisor_agent.load_history(history_msgs)
+
+        async def intercepted_tool_executor(name: str, arguments: dict):
+            if name != "get_agent_capabilities":
+                arguments["user_id"] = user_id
+            return await self.mcp_client.call_tool(name, arguments)
+
+        prompt_advisor = (
+            f"El agente principal ha generado la siguiente respuesta al usuario:\n"
+            f"\"\"\"\n{response_text}\n\"\"\"\n\n"
+            f"Analiza si con los datos del usuario y la respuesta dada es conveniente ofrecer una recomendación adicional. "
+            f"Si decides hacer una sugerencia, redacta únicamente el texto de la recomendación de forma fluida y natural, introduciéndola con una frase de transición adecuada (ej: 'Por cierto, te sugiero...', 'Como consejo rápido...'). NUNCA utilices separadores como '---' ni etiquetas div. "
+            f"Si no procede, responde exactamente 'NO_ADVICE'."
+        )
+
+        result = await self.advisor_agent.run_agentic_conversation(
+            user_message=prompt_advisor,
+            tool_executor=intercepted_tool_executor
+        )
+
+        advice_text = (result.text or "").strip()
+        if advice_text and "NO_ADVICE" not in advice_text:
+            updated_response = f"{response_text}\n\n{advice_text}"
+            print(f"[LANGGRAPH ADVISOR NODE] Recomendación añadida.", file=sys.stderr)
+            return {"response_text": updated_response}
+
+        print(f"[LANGGRAPH ADVISOR NODE] Sin recomendación (NO_ADVICE).", file=sys.stderr)
+        return {"response_text": response_text}
 
     async def run(self, user_id: str, user_message: str, message_with_context: str, history_msgs: list, tools_raw: list) -> dict:
         inputs = {
@@ -193,7 +278,9 @@ class LangGraphService:
             "message_with_context": message_with_context,
             "history_msgs": history_msgs,
             "tools_raw": tools_raw,
-            "in_study_report_flow": await self._get_study_flow_state(user_id)
+            "in_study_report_flow": await self._get_study_flow_state(user_id),
+            "run_advisor": False,
+            "advisor_trigger": ""
         }
 
         final_state = await self.app.ainvoke(inputs)

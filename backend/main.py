@@ -46,10 +46,12 @@ if ACTIVE_MODEL == "gemini":
     academic_agent = GeminiService()
     wellbeing_agent = GeminiService()
     general_agent = GeminiService()
+    advisor_agent = GeminiService()
 elif ACTIVE_MODEL == "openai":
     academic_agent = OpenAIService()
     wellbeing_agent = OpenAIService()
     general_agent = OpenAIService()
+    advisor_agent = OpenAIService()
 
 ACADEMIC_PROMPT = (
     "Eres una IA experta en gestión del tiempo y ámbito académico. "
@@ -192,14 +194,32 @@ GENERAL_PROMPT = (
 )
 
 
+ADVISOR_PROMPT = (
+    "Eres un asesor experto y empático en hábitos de estudio, rendimiento académico y bienestar estudiantil.\n"
+    "Tu tarea es analizar la respuesta propuesta por el agente principal y la información disponible en el sistema (tareas, asignaturas, tiempos de estudio, hábitos, historial reciente) para determinar si es oportuno añadir un consejo o recomendación proactiva al final de la respuesta.\n"
+    "REGLAS DE ACTUACIÓN:\n"
+    "1. SOLO LECTURA: Tienes acceso a herramientas de consulta para revisar datos del usuario (asignaturas, tareas, reportes de bienestar/estudio, entradas de tiempo). NUNCA intentes modificar, crear ni eliminar datos.\n"
+    "2. SELECCIÓN DE CONSEJOS: Sé breve, conciso, oportuno y muy valioso. Da recomendaciones sobre descanso, técnica Pomodoro, prevención del burnout, organización de entregas próximas o equilibrio estudio/bienestar.\n"
+    "3. CUÁNDO CALLAR: Si la respuesta del agente principal ya es completa y no aporta valor añadir nada extra, o si el usuario simplemente está saludando o haciendo una gestión rápida, responde únicamente 'NO_ADVICE'.\n"
+    "4. FORMATO Y FLUIDEZ DE LA RESPUESTA:\n"
+    "   - NUNCA incluyas separadores gráficos, guiones horizontales ('---') ni etiquetas HTML/div.\n"
+    "   - Introduce la recomendación de forma natural, fluida y cercana justo a continuación del mensaje anterior, usando una frase de transición amigable (ej: 'Por cierto, te sugiero...', 'Como consejo rápido...', '💡 Un pequeño consejo:...').\n"
+    "   - Ejemplo de respuesta:\n"
+    "     Por cierto, un pequeño consejo: he notado que tienes dos entregas cercanas esta semana. Intenta dividir las tareas grandes en bloques Pomodoro para no agobiarte.\n"
+    "   - Si consideras que no hace falta recomendación, responde exactamente: NO_ADVICE"
+)
+
 academic_agent.set_system_instruction(ACADEMIC_PROMPT)
 wellbeing_agent.set_system_instruction(WELLBEING_PROMPT)
 general_agent.set_system_instruction(GENERAL_PROMPT)
+if hasattr(advisor_agent, "set_system_instruction"):
+    advisor_agent.set_system_instruction(ADVISOR_PROMPT)
 
 langgraph_service = LangGraphService(
     academic_agent=academic_agent,
     wellbeing_agent=wellbeing_agent,
     general_agent=general_agent,
+    advisor_agent=advisor_agent,
     orchestrator=orchestrator,
     mcp_client=mcp_client,
     db_service=db_service
