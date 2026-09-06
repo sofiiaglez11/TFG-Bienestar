@@ -19,7 +19,7 @@ class GraphState(TypedDict):
 class LangGraphService:
     ADVISOR_EVERY_N_MESSAGES = 5
 
-    def __init__(self, academic_agent, wellbeing_agent, general_agent, advisor_agent, orchestrator, mcp_client, db_service):
+    def __init__(self, academic_agent, wellbeing_agent, general_agent, advisor_agent, orchestrator, mcp_client, db_service, analytics_service=None):
         self.academic_agent = academic_agent
         self.wellbeing_agent = wellbeing_agent
         self.general_agent = general_agent
@@ -27,6 +27,7 @@ class LangGraphService:
         self.orchestrator = orchestrator
         self.mcp_client = mcp_client
         self.db_service = db_service
+        self.analytics_service = analytics_service
         # Cache en RAM: evita consultar MongoDB en cada mensaje.
         self._study_flow_cache: Dict[str, bool] = {}
         # Contador de mensajes por usuario para evaluación periódica del asesor
@@ -246,19 +247,78 @@ class LangGraphService:
             "advisor_trigger": "periodic_counter" if periodic_trigger else ""
         }
 
+    # async def _advisor_node(self, state: GraphState) -> Dict[str, Any]:
+    #     user_id = state.get("user_id", "")
+    #     response_text = state.get("response_text", "")
+    #     history_msgs = state.get("history_msgs", [])
+    #     tools_raw = state.get("tools_raw", [])
+    #     advisor_trigger = state.get("advisor_trigger", "")
+
+    #     read_only_tools = [
+    #         t for t in tools_raw
+    #         if t["name"].startswith("get_") or t["name"].startswith("wb_get_") or t["name"].startswith("list_")
+    #     ]
+
+    #     self.advisor_agent.set_config(read_only_tools)
+    #     self.advisor_agent.load_history(history_msgs)
+
+    #     async def intercepted_tool_executor(name: str, arguments: dict):
+    #         if name != "get_agent_capabilities":
+    #             arguments["user_id"] = user_id
+    #         return await self.mcp_client.call_tool(name, arguments)
+
+    #     # Obtener el resumen estadístico del usuario en el backend si el servicio está disponible
+    #     analytics_text = ""
+    #     if self.analytics_service:
+    #         try:
+    #             analytics_data = await self.analytics_service.get_user_analytics(user_id, days=7)
+    #             analytics_text = analytics_data.get("formatted_text", "")
+    #         except Exception as e:
+    #             print(f"[LANGGRAPH ADVISOR NODE] Error al obtener analítica: {e}", file=sys.stderr)
+
+    #     prompt_advisor = (
+    #         f"El agente principal ha generado la siguiente respuesta al usuario:\n"
+    #         f"\"\"\"\n{response_text}\n\"\"\"\n\n"
+    #         f"DATOS Y ESTADÍSTICAS DEL USUARIO (ÚLTIMOS 7 DÍAS):\n"
+    #         f"{analytics_text}\n\n"
+    #         f"MOTIVO DEL DISPARADOR: {advisor_trigger}\n\n"
+    #         f"INSTRUCCIONES PARA EL CONSEJO:\n"
+    #         f"1. Analiza los datos estadísticos reales presentados arriba (especialmente asignaturas desatendidas, baja concentración, duración corta por sesión, estudio nocturno de madrugada o síntomas de fatiga/mal descanso).\n"
+    #         f"2. Si identificas algún punto crítico o patrón que mejorar, redacta una recomendación HIPER-PERSONALIZADA y ESPECIALIZADA. "
+    #         f"CITA DATOS CONCRETOS Y ESPECÍFICOS DE LAS ESTADÍSTICAS DEL USUARIO (por ejemplo: nombra la asignatura concreta, las horas semanales dedicadas, la duración media por sesión o la nota media de concentración de esa asignatura).\n"
+    #         f"3. Si los datos son equilibrados y no hay patrones preocupantes, puedes ofrecer un consejo breve de refuerzo positivo o responder 'NO_ADVICE'.\n"
+    #         f"4. Redacta únicamente el texto de la recomendación de forma fluida y empática, introduciéndola con una frase de transición natural (ej: 'Por cierto, he estado revisando tus métricas y...', 'Un pequeño consejo sobre tu progreso:...').\n"
+    #         f"5. NUNCA utilices separadores como '---' ni etiquetas div u HTML."
+    #     )
+
+    #     result = await self.advisor_agent.run_agentic_conversation(
+    #         user_message=prompt_advisor,
+    #         tool_executor=intercepted_tool_executor
+    #     )
+
+    #     advice_text = (result.text or "").strip()
+    #     if advice_text and "NO_ADVICE" not in advice_text:
+    #         updated_response = f"{response_text}\n\n{advice_text}"
+    #         print(f"[LANGGRAPH ADVISOR NODE] Recomendación añadida (Trigger: {advisor_trigger}).", file=sys.stderr)
+    #         return {"response_text": updated_response}
+
+    #     print(f"[LANGGRAPH ADVISOR NODE] Sin recomendación (NO_ADVICE). Trigger: {advisor_trigger}.", file=sys.stderr)
+    #     return {"response_text": response_text}
+
+
     async def _advisor_node(self, state: GraphState) -> Dict[str, Any]:
         user_id = state.get("user_id", "")
         response_text = state.get("response_text", "")
         history_msgs = state.get("history_msgs", [])
-        tools_raw = state.get("tools_raw", [])
+        # tools_raw = state.get("tools_raw", [])
         advisor_trigger = state.get("advisor_trigger", "")
 
-        read_only_tools = [
-            t for t in tools_raw
-            if t["name"].startswith("get_") or t["name"].startswith("wb_get_") or t["name"].startswith("list_")
-        ]
+        # read_only_tools = [
+        #     t for t in tools_raw
+        #     if t["name"].startswith("get_") or t["name"].startswith("wb_get_") or t["name"].startswith("list_")
+        # ]
 
-        self.advisor_agent.set_config(read_only_tools)
+        self.advisor_agent.set_config([])
         self.advisor_agent.load_history(history_msgs)
 
         async def intercepted_tool_executor(name: str, arguments: dict):
@@ -266,39 +326,50 @@ class LangGraphService:
                 arguments["user_id"] = user_id
             return await self.mcp_client.call_tool(name, arguments)
 
-        trigger_instruction = ""
-        if advisor_trigger == "report_added":
-            trigger_instruction = (
-                "El usuario acaba de registrar un nuevo informe de estudio o bienestar. "
-                "Usa tus herramientas (list_subjects, get_time_summary, get_time_entries, wb_get_study_reports, wb_get_wellbeing_report, wb_get_wellbeing_trends) "
-                "para analizar si hay un desequilibrio de estudio entre asignaturas, sesiones en la madrugada, o si el último informe muestra fatiga o mal descanso.\n"
-            )
-        elif advisor_trigger == "periodic_counter":
-            trigger_instruction = (
-                "Se ha alcanzado la revisión periódica del progreso del usuario. "
-                "Ejecuta tus herramientas de lectura (list_subjects, get_time_summary, get_time_entries, wb_get_study_reports, wb_get_wellbeing_trends) "
-                "para detectar si alguna asignatura activa está abandonada (0 horas), si estudia a altas horas de la madrugada, si las sesiones son muy dispersas o si arrastra fatiga acumulada.\n"
-            )
-        elif advisor_trigger == "session_registered":
-            trigger_instruction = (
-                "El usuario acaba de registrar/finalizar una sesión de estudio. "
-                "Consulta get_time_entries y list_subjects para verificar el horario de la sesión (ej. si fue de madrugada) y la distribución del tiempo por asignatura, evaluando si es conveniente ofrecer una recomendación.\n"
-            )
-        else:
-            trigger_instruction = (
-                "Consulta los datos de asignaturas y tiempos (list_subjects, get_time_summary, get_time_entries) e informes de bienestar (wb_get_wellbeing_trends) "
-                "para verificar si hay desequilibrios entre asignaturas, estudio nocturno o signos de estrés.\n"
-            )
+        # Obtener analytics detalladas usando los tres métodos separados
+        academic_text = ""
+        wellbeing_text = ""
+        patterns_text = ""
+
+        if self.analytics_service:
+            try:
+                academic_data = await self.analytics_service.get_academic_analytics(user_id, days=7)
+                wellbeing_data = await self.analytics_service.get_wellbeing_analytics(user_id, days=7)
+                patterns_data = await self.analytics_service.get_patterns(user_id, days=7)
+
+                # Formateamos cada sección por separado para que el LLM pueda razonar sobre cada una
+                academic_text = self._format_academic(academic_data)
+                wellbeing_text = self._format_wellbeing(wellbeing_data)
+                patterns_text = self._format_patterns(patterns_data)
+
+            except Exception as e:
+                print(f"[LANGGRAPH ADVISOR NODE] Error al obtener analítica: {e}", file=sys.stderr)
 
         prompt_advisor = (
             f"El agente principal ha generado la siguiente respuesta al usuario:\n"
             f"\"\"\"\n{response_text}\n\"\"\"\n\n"
-            f"{trigger_instruction}"
-            f"Analiza si con los datos recopilados del usuario y la respuesta dada es conveniente ofrecer una recomendación adicional. "
-            f"Si decides hacer una sugerencia, redacta únicamente el texto de la recomendación de forma fluida y natural, "
-            f"introduciéndola con una frase de transición adecuada (ej: 'Por cierto, te sugiero...', 'Como consejo rápido...', 'Un pequeño consejo:...'). "
-            f"NUNCA utilices separadores como '---' ni etiquetas div. "
-            # f"Si no procede o no hay patrones preocupantes en sus datos, responde exactamente 'NO_ADVICE'."
+            f"MOTIVO DEL DISPARADOR: {advisor_trigger}\n\n"
+            f"=== DATOS ACADÉMICOS (últimos 7 días) ===\n"
+            f"{academic_text}\n\n"
+            f"=== BIENESTAR (últimos 7 días) ===\n"
+            f"{wellbeing_text}\n\n"
+            f"=== PATRONES DETECTADOS ===\n"
+            f"{patterns_text}\n\n"
+            f"INSTRUCCIONES:\n"
+            f"1. Analiza los datos de arriba buscando patrones concretos:\n"
+            f"   - Asignaturas con pocas horas o baja concentración\n"
+            f"   - Días de la semana con peor rendimiento o peor descanso\n"
+            f"   - Sesiones nocturnas tardías\n"
+            f"   - Desequilibrio entre asignaturas (una muy desatendida vs otra con muchas horas)\n"
+            f"   - Relación entre mal descanso y baja concentración al día siguiente\n"
+            f"2. Si encuentras un patrón relevante, redacta UNA recomendación concreta y empática.\n"
+            f"   CITA DATOS ESPECÍFICOS: nombra la asignatura, el día, las horas concretas.\n"
+            f"   Ejemplo correcto: 'He visto que los martes dedicas solo 20 min a Física y tu estado de ánimo ese día es de 2/5...'\n"
+            f"   Ejemplo incorrecto: 'Deberías descansar más y estudiar mejor...'\n"
+            f"3. Introduce la recomendación con una frase natural como:\n"
+            f"   'Por cierto, revisando tus datos de esta semana...' o 'Un pequeño apunte sobre tu progreso:...'\n"
+            f"4. Si los datos son equilibrados y no hay nada destacable, responde exactamente: NO_ADVICE\n"
+            f"5. NUNCA uses separadores como '---', HTML ni markdown excesivo."
         )
 
         result = await self.advisor_agent.run_agentic_conversation(
@@ -312,8 +383,67 @@ class LangGraphService:
             print(f"[LANGGRAPH ADVISOR NODE] Recomendación añadida (Trigger: {advisor_trigger}).", file=sys.stderr)
             return {"response_text": updated_response}
 
-        print(f"[LANGGRAPH ADVISOR NODE] Sin recomendación (NO_ADVICE). Trigger: {advisor_trigger}.", file=sys.stderr)
+        print(f"[LANGGRAPH ADVISOR NODE] Sin recomendación. Trigger: {advisor_trigger}.", file=sys.stderr)
         return {"response_text": response_text}
+
+
+    # Helpers de formateo dentro de LangGraphService
+
+    def _format_academic(self, academic_data: list) -> str:
+        if not academic_data:
+            return "Sin datos académicos esta semana."
+        lines = []
+        for s in academic_data:
+            lines.append(f"📚 {s['name']}:")
+            lines.append(f"  - Horas totales: {s['total_hours_week']}h")
+            lines.append(f"  - Duración media por sesión: {s['avg_session_duration_minutes']} min")
+            if s.get("avg_concentration") is not None:
+                lines.append(f"  - Concentración media: {s['avg_concentration']}/5")
+            lines.append(f"  - Tareas completadas: {s['tasks_completed']} / pendientes: {s['tasks_pending']}")
+            if s.get("grade") is not None:
+                lines.append(f"  - Nota registrada: {s['grade']}/10")
+            if s.get("sessions"):
+                lines.append(f"  - Sesiones ({len(s['sessions'])}):")
+                for sess in s["sessions"]:
+                    conc = f", concentración {sess['concentration']}/5" if sess.get("concentration") else ""
+                    lines.append(f"    · {sess['weekday']} {sess['date']}: {sess['duration_minutes']} min{conc}")
+        return "\n".join(lines)
+
+
+    def _format_wellbeing(self, wellbeing_data: dict) -> str:
+        if not wellbeing_data:
+            return "Sin datos de bienestar esta semana."
+        lines = []
+        lines.append(f"Sueño medio: {wellbeing_data.get('avg_sleep_hours', 'N/D')}h")
+        if wellbeing_data.get("worst_day"):
+            lines.append(f"Día con peor estado de ánimo: {wellbeing_data['worst_day']}")
+        by_day = wellbeing_data.get("reports_by_weekday", {})
+        if by_day:
+            lines.append("Por día de la semana:")
+            for day, vals in by_day.items():
+                lines.append(f"  - {day}: sueño {vals['sleep']}h, ánimo {vals['mood']}/5, energía {vals['energy']}/5")
+        return "\n".join(lines)
+
+
+    def _format_patterns(self, patterns_data: dict) -> str:
+        if not patterns_data:
+            return "Sin patrones detectados."
+        lines = []
+        if patterns_data.get("most_productive_weekday"):
+            lines.append(f"Día más productivo: {patterns_data['most_productive_weekday']}")
+        if patterns_data.get("least_productive_weekday"):
+            lines.append(f"Día menos productivo: {patterns_data['least_productive_weekday']}")
+        hours = patterns_data.get("hours_by_weekday", {})
+        if hours:
+            lines.append("Horas por día:")
+            for day, h in hours.items():
+                lines.append(f"  - {day}: {h}h")
+        late = patterns_data.get("late_night_sessions", [])
+        if late:
+            lines.append(f"Sesiones nocturnas (después de las 23h): {len(late)}")
+            for s in late[:3]:
+                lines.append(f"  - {s}")
+        return "\n".join(lines)
 
     async def run(self, user_id: str, user_message: str, message_with_context: str, history_msgs: list, tools_raw: list) -> dict:
         # Incrementar contador de mensajes del usuario

@@ -381,19 +381,19 @@ class ClockifyService:
             "page-size": 200,
         }
 
-        print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] User ID: {user_id} | Workspace ID: {workspace_id}", file=sys.stderr, flush=True)
-        print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Rango fechas enviado a Clockify -> start: {start_str} | end: {end_str} (days_back={days_back})", file=sys.stderr, flush=True)
+        # print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] User ID: {user_id} | Workspace ID: {workspace_id}", file=sys.stderr, flush=True)
+        # print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Rango fechas enviado a Clockify -> start: {start_str} | end: {end_str} (days_back={days_back})", file=sys.stderr, flush=True)
 
         all_entries = []
         page = 1
         while True:
             params = {**base_params, "page": page}
-            print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Peticion GET {url} params={params}", file=sys.stderr, flush=True)
+            # print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Peticion GET {url} params={params}", file=sys.stderr, flush=True)
             response = requests.get(url, headers=self.headers, params=params)
-            print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Response status={response.status_code}", file=sys.stderr, flush=True)
+            # print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Response status={response.status_code}", file=sys.stderr, flush=True)
             response.raise_for_status()
             page_entries = response.json()
-            print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Entradas en pagina {page}: {len(page_entries)}", file=sys.stderr, flush=True)
+            # print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Entradas en pagina {page}: {len(page_entries)}", file=sys.stderr, flush=True)
 
             if not page_entries:
                 break
@@ -407,13 +407,13 @@ class ClockifyService:
                     "projectId": entry.get("projectId"),
                     "taskId": entry.get("taskId"),
                 }
-                print(f"   -> [ENTRY] ID={item['id']} | Start={item['start']} | End={item['end']} | ProjectID={item['projectId']} | TaskID={item['taskId']} | Desc='{item['description']}'", file=sys.stderr, flush=True)
+                # print(f"   -> [ENTRY] ID={item['id']} | Start={item['start']} | End={item['end']} | ProjectID={item['projectId']} | TaskID={item['taskId']} | Desc='{item['description']}'", file=sys.stderr, flush=True)
                 all_entries.append(item)
             if len(page_entries) < 200:
                 break  # última página
             page += 1
 
-        print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Total entradas finales devueltas: {len(all_entries)}", file=sys.stderr, flush=True)
+        # print(f"[CLOCKIFY SERVICE: GET_TIME_ENTRIES] Total entradas finales devueltas: {len(all_entries)}", file=sys.stderr, flush=True)
         return all_entries
 
     def get_time_entry(self, time_entry_id: str, workspace_id: str = None) -> dict:

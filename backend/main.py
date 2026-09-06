@@ -30,11 +30,13 @@ from services.auth import SECRET_KEY, ALGORITHM
 from typing import Optional
 from pydantic import BaseModel, model_validator
 from services.langgraph_service import LangGraphService
+from services.analytics_service import AnalyticsService
 
 
 
 # Servicios de MCP y de la Base de DAtos
 db_service = DatabaseService()
+analytics_service = AnalyticsService(db_service)
 mcp_client = MCPClientService()
 
 
@@ -195,7 +197,7 @@ GENERAL_PROMPT = (
 
 
 ADVISOR_PROMPT = (
-    "Eres un asesor experto y empático en hábitos de estudio, rendimiento académico y bienestar estudiantil.\n"
+    "Eres un asesor experto y empátiuco en hábitos de estudio, rendimiento académico y bienestar estudiantil.\n"
     "Tu tarea es analizar la respuesta propuesta por el agente principal y la información en la base de datos del usuario (asignaturas, tiempos de estudio, hábitos, informes de bienestar y estudio) para determinar si es oportuno añadir una recomendación proactiva y personalizada al final de la respuesta.\n"
     "PATRONES CLAVE A ANALIZAR CON TUS HERRAMIENTAS DE CONSULTA:\n"
     "1. DESEQUILIBRIO ENTRE ASIGNATURAS: Usa 'list_subjects' y 'get_time_summary' para comparar el tiempo dedicado a cada asignatura. Si notas que una asignatura acumula casi todo el tiempo mientras otra asignatura activa tiene 0 horas o está desatendida, aconseja redistribuir el tiempo.\n"
@@ -225,7 +227,8 @@ langgraph_service = LangGraphService(
     advisor_agent=advisor_agent,
     orchestrator=orchestrator,
     mcp_client=mcp_client,
-    db_service=db_service
+    db_service=db_service,
+    analytics_service=analytics_service
 )
 
 
@@ -661,5 +664,16 @@ async def get_student_analytics(user_id: str = Depends(get_current_user_id)):
             })
             
         return {"analytics": analytics}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al generar analíticas: {str(e)}")
+
+
+@app.get("/api/analytics/summary")
+async def get_analytics_summary(days: int = 7, user_id: str = Depends(get_current_user_id)):
+    """
+    Devuelve las métricas y resúmenes estadísticos agregados del usuario para los últimos `days` días.
+    """
+    try:
+        return await analytics_service.get_user_analytics(user_id, days=days)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al generar analíticas: {str(e)}")

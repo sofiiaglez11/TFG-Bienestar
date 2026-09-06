@@ -11,6 +11,7 @@ from mcp.server.session import ServerSession
  
 from services.clockify_service import ClockifyService
 from services.database_service import DatabaseService
+from services.analytics_service import AnalyticsService
 import asyncio
 from typing import Optional
 
@@ -20,6 +21,7 @@ from datetime import timedelta
 
 
 db_service = DatabaseService()
+analytics_service = AnalyticsService(db_service)
 
 
 async def _get_user_clockify_service(user_id: str) -> ClockifyService:
@@ -683,17 +685,18 @@ async def archive_subject(user_id: str, subject_name: str):
         if subject.get("is_archived"):
             return f"La asignatura '{subject_name}' ya está archivada."
 
-        # rchivar en Clockify 
-        cs = await _get_user_clockify_service(user_id)
-        if cs.api_key and subject.get("clockify_project_id"):
-            try:
-                cs.archive_project(subject["clockify_project_id"])
-            except Exception as ce:
-                print(f"[Clockify archive error] {ce}", file=sys.stderr, flush=True)
-                return (
-                    f"No se pudo archivar el proyecto '{subject_name}' en Clockify: {ce}. "
-                    f"La asignatura NO ha sido archivada para evitar inconsistencias."
-                )
+        # NOTE: NO SE ARCHIVAN EN CLOCKIFY PORQUE NO DEJA SI NO ERES PREMIUM
+        # Archivar en Clockify 
+        # cs = await _get_user_clockify_service(user_id)
+        # if cs.api_key and subject.get("clockify_project_id"):
+        #     try:
+        #         cs.archive_project(subject["clockify_project_id"])
+        #     except Exception as ce:
+        #         print(f"[Clockify archive error] {ce}", file=sys.stderr, flush=True)
+        #         return (
+        #             f"No se pudo archivar el proyecto '{subject_name}' en Clockify: {ce}. "
+        #             f"La asignatura NO ha sido archivada para evitar inconsistencias."
+        #         )
 
         # Archivar en MongoDB
         await db_service.update_subject(subject["_id"], is_archived=True)
@@ -2142,6 +2145,20 @@ async def wb_get_study_reports(user_id: str, subject_name: str = None, limit: in
 #         return response.text
 #     except Exception as e:
 #         return f"Error al generar el análisis de rendimiento: {str(e)}"
+
+
+@mcp.tool()
+async def wb_get_analytics_summary(user_id: str, days: int = 7):
+    """
+    Devuelve un resumen analítico agregado del usuario para los últimos `days` días.
+    Incluye horas trabajadas por asignatura, duración media por sesión, nivel de concentración medio,
+    hábitos de estudio nocturno y patrones críticos/anomalías detectadas.
+    """
+    try:
+        res = await analytics_service.get_user_analytics(user_id, days=days)
+        return res.get("formatted_text", "Sin datos analíticos disponibles.")
+    except Exception as e:
+        return f"Error al calcular el resumen analítico: {str(e)}"
 
 
 if __name__ == "__main__":
