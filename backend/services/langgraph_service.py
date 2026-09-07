@@ -291,6 +291,7 @@ class LangGraphService:
         prompt_advisor = (
             f"El agente principal ha generado la siguiente respuesta al usuario:\n"
             f"\"\"\"\n{response_text}\n\"\"\"\n\n"
+            f"Cuando generes la respuesta, no incluyas la respuesta del agente principal, solo da la recomendación.\n\n"
             f"MOTIVO DEL DISPARADOR: {advisor_trigger}\n\n"
             f"=== DATOS ACADÉMICOS (últimos 7 días) ===\n"
             f"{academic_text}\n\n"
