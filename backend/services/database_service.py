@@ -23,8 +23,9 @@ class DatabaseService:
         self.history = self.db["history"]
         self.wellbeing_entries = self.db["wellbeing_entries"]
         self.study_reports = self.db["study_reports"]
+        self.study_plans = self.db["study_plans"]
         # self.deadlines = self.db["deadlines"]
- 
+
     async def ensure_indexes(self):
         """
         Crea los índices necesarios. Llamar una vez al arrancar la app (p.ej. en el
@@ -50,6 +51,7 @@ class DatabaseService:
         await self.wellbeing_entries.create_index([("user_id", 1), ("date", -1)])
         await self.study_reports.create_index([("user_id", 1), ("timestamp", -1)])
         await self.study_reports.create_index("clockify_time_entry_id")
+        await self.study_plans.create_index([("user_id", 1), ("status", 1)])
  
 
     ############################################################################
@@ -698,3 +700,57 @@ class DatabaseService:
             if isinstance(report.get("timestamp"), datetime):
                 report["timestamp"] = report["timestamp"].isoformat()
         return report
+
+    ############################################################################
+    # METHODS FOR STUDY PLANS
+
+    async def create_study_plan(
+        self,
+        user_id: str,
+        title: str,
+        items: list,
+        start_date: str = None,
+        end_date: str = None
+    ) -> dict:
+        """
+        Crea un nuevo plan de estudio para el usuario.
+        Archiva cualquier otro plan de estudio activo previo.
+        """
+        # Archivar planes activos previos del usuario
+        await self.study_plans.update_many(
+            {"user_id": user_id, "status": "active"},
+            {"$set": {"status": "archived"}}
+        )
+
+        now = datetime.now(timezone.utc)
+        plan = {
+            "user_id": user_id,
+            "title": title,
+            "items": items,
+            "start_date": start_date or now.strftime("%Y-%m-%d"),
+            "end_date": end_date,
+            "status": "active",
+            "created_at": now.isoformat()
+        }
+
+        result = await self.study_plans.insert_one(plan)
+        plan["_id"] = str(result.inserted_id)
+        return plan
+
+    async def get_active_study_plan(self, user_id: str) -> dict | None:
+        """Devuelve el plan de estudio actualmente activo del usuario."""
+        plan = await self.study_plans.find_one({"user_id": user_id, "status": "active"})
+        if plan:
+            plan["_id"] = str(plan["_id"])
+        return plan
+
+    async def update_study_plan_status(self, user_id: str, plan_id: str, status: str) -> bool:
+        """Actualiza el estado de un plan de estudio ('active', 'completed', 'archived', 'cancelled')."""
+        try:
+            res = await self.study_plans.update_one(
+                {"_id": ObjectId(plan_id), "user_id": user_id},
+                {"$set": {"status": status}}
+            )
+            return res.modified_count > 0
+        except Exception:
+            return False

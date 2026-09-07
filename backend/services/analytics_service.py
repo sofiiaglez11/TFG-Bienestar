@@ -223,12 +223,60 @@ class AnalyticsService:
         most_prod = max(hours_by_weekday, key=hours_by_weekday.get) if hours_by_weekday else None
         least_prod = min(hours_by_weekday, key=hours_by_weekday.get) if hours_by_weekday else None
 
+        plan_progress = await self.get_study_plan_progress(user_id, days=days)
+
         return {
             "late_night_sessions": late_sessions,
             "hours_by_weekday": {d: round(h, 1) for d, h in hours_by_weekday.items()},
             "most_productive_weekday": most_prod,
-            "least_productive_weekday": least_prod
+            "least_productive_weekday": least_prod,
+            "study_plan_progress": plan_progress
         }
+
+    async def get_study_plan_progress(self, user_id: str, days: int = 7) -> dict:
+        """Calcula el progreso del plan de estudio activo frente a las horas reales estudiadas."""
+        try:
+            plan = await self.db_service.get_active_study_plan(user_id)
+            if not plan:
+                return {"has_active_plan": False}
+
+            items = plan.get("items", [])
+            planned_by_subject = {}
+            total_planned_hours = 0.0
+
+            for item in items:
+                subj = (item.get("subject_name") or "Otras / General").strip()
+                hrs = float(item.get("planned_hours", 0) or 0)
+                planned_by_subject[subj] = planned_by_subject.get(subj, 0.0) + hrs
+                total_planned_hours += hrs
+
+            academic = await self.get_academic_analytics(user_id, days=days)
+            actual_by_subject = {s["name"]: s["total_hours_week"] for s in academic}
+            total_actual_hours = sum(actual_by_subject.values())
+
+            progress_by_subject = {}
+            for subj, p_hrs in planned_by_subject.items():
+                a_hrs = actual_by_subject.get(subj, 0.0)
+                pct = round((a_hrs / p_hrs) * 100, 1) if p_hrs > 0 else 100.0
+                progress_by_subject[subj] = {
+                    "planned_hours": p_hrs,
+                    "actual_hours": a_hrs,
+                    "progress_pct": min(100.0, pct)
+                }
+
+            overall_pct = round((total_actual_hours / total_planned_hours) * 100, 1) if total_planned_hours > 0 else 0.0
+
+            return {
+                "has_active_plan": True,
+                "plan_title": plan.get("title", "Plan de Estudio"),
+                "total_planned_hours": round(total_planned_hours, 1),
+                "total_actual_hours": round(total_actual_hours, 1),
+                "overall_progress_pct": min(100.0, overall_pct),
+                "progress_by_subject": progress_by_subject
+            }
+        except Exception as e:
+            print(f"[ANALYTICS] Error al calcular el progreso del plan: {e}", file=sys.stderr)
+            return {"has_active_plan": False}
 
     async def get_user_analytics(self, user_id: str, days: int = 7) -> dict:
         """Método principal que agrega todo."""
@@ -262,6 +310,13 @@ class AnalyticsService:
             lines.append(f"  - Día menos productivo: {patterns['least_productive_weekday']}")
         if patterns.get("late_night_sessions"):
             lines.append(f"  - Sesiones nocturnas detectadas: {len(patterns['late_night_sessions'])}")
+
+        plan = patterns.get("study_plan_progress", {})
+        if plan.get("has_active_plan"):
+            lines.append(f"\n=== SEGUIMIENTO DEL PLAN DE ESTUDIO ACTIVO ('{plan.get('plan_title')}') ===")
+            lines.append(f"  - Progreso global: {plan.get('overall_progress_pct')}% ({plan.get('total_actual_hours')}h reales / {plan.get('total_planned_hours')}h planificadas)")
+            for subj, pdata in plan.get("progress_by_subject", {}).items():
+                lines.append(f"  - {subj}: {pdata['actual_hours']}h reales de {pdata['planned_hours']}h planificadas ({pdata['progress_pct']}%)")
 
         lines.append("\n=== BIENESTAR ===")
         lines.append(f"  - Sueño medio: {wellbeing.get('avg_sleep_hours', 'N/D')}h")

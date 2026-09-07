@@ -247,64 +247,7 @@ class LangGraphService:
             "advisor_trigger": "periodic_counter" if periodic_trigger else ""
         }
 
-    # async def _advisor_node(self, state: GraphState) -> Dict[str, Any]:
-    #     user_id = state.get("user_id", "")
-    #     response_text = state.get("response_text", "")
-    #     history_msgs = state.get("history_msgs", [])
-    #     tools_raw = state.get("tools_raw", [])
-    #     advisor_trigger = state.get("advisor_trigger", "")
-
-    #     read_only_tools = [
-    #         t for t in tools_raw
-    #         if t["name"].startswith("get_") or t["name"].startswith("wb_get_") or t["name"].startswith("list_")
-    #     ]
-
-    #     self.advisor_agent.set_config(read_only_tools)
-    #     self.advisor_agent.load_history(history_msgs)
-
-    #     async def intercepted_tool_executor(name: str, arguments: dict):
-    #         if name != "get_agent_capabilities":
-    #             arguments["user_id"] = user_id
-    #         return await self.mcp_client.call_tool(name, arguments)
-
-    #     # Obtener el resumen estadístico del usuario en el backend si el servicio está disponible
-    #     analytics_text = ""
-    #     if self.analytics_service:
-    #         try:
-    #             analytics_data = await self.analytics_service.get_user_analytics(user_id, days=7)
-    #             analytics_text = analytics_data.get("formatted_text", "")
-    #         except Exception as e:
-    #             print(f"[LANGGRAPH ADVISOR NODE] Error al obtener analítica: {e}", file=sys.stderr)
-
-    #     prompt_advisor = (
-    #         f"El agente principal ha generado la siguiente respuesta al usuario:\n"
-    #         f"\"\"\"\n{response_text}\n\"\"\"\n\n"
-    #         f"DATOS Y ESTADÍSTICAS DEL USUARIO (ÚLTIMOS 7 DÍAS):\n"
-    #         f"{analytics_text}\n\n"
-    #         f"MOTIVO DEL DISPARADOR: {advisor_trigger}\n\n"
-    #         f"INSTRUCCIONES PARA EL CONSEJO:\n"
-    #         f"1. Analiza los datos estadísticos reales presentados arriba (especialmente asignaturas desatendidas, baja concentración, duración corta por sesión, estudio nocturno de madrugada o síntomas de fatiga/mal descanso).\n"
-    #         f"2. Si identificas algún punto crítico o patrón que mejorar, redacta una recomendación HIPER-PERSONALIZADA y ESPECIALIZADA. "
-    #         f"CITA DATOS CONCRETOS Y ESPECÍFICOS DE LAS ESTADÍSTICAS DEL USUARIO (por ejemplo: nombra la asignatura concreta, las horas semanales dedicadas, la duración media por sesión o la nota media de concentración de esa asignatura).\n"
-    #         f"3. Si los datos son equilibrados y no hay patrones preocupantes, puedes ofrecer un consejo breve de refuerzo positivo o responder 'NO_ADVICE'.\n"
-    #         f"4. Redacta únicamente el texto de la recomendación de forma fluida y empática, introduciéndola con una frase de transición natural (ej: 'Por cierto, he estado revisando tus métricas y...', 'Un pequeño consejo sobre tu progreso:...').\n"
-    #         f"5. NUNCA utilices separadores como '---' ni etiquetas div u HTML."
-    #     )
-
-    #     result = await self.advisor_agent.run_agentic_conversation(
-    #         user_message=prompt_advisor,
-    #         tool_executor=intercepted_tool_executor
-    #     )
-
-    #     advice_text = (result.text or "").strip()
-    #     if advice_text and "NO_ADVICE" not in advice_text:
-    #         updated_response = f"{response_text}\n\n{advice_text}"
-    #         print(f"[LANGGRAPH ADVISOR NODE] Recomendación añadida (Trigger: {advisor_trigger}).", file=sys.stderr)
-    #         return {"response_text": updated_response}
-
-    #     print(f"[LANGGRAPH ADVISOR NODE] Sin recomendación (NO_ADVICE). Trigger: {advisor_trigger}.", file=sys.stderr)
-    #     return {"response_text": response_text}
-
+    
 
     async def _advisor_node(self, state: GraphState) -> Dict[str, Any]:
         user_id = state.get("user_id", "")
@@ -379,7 +322,9 @@ class LangGraphService:
 
         advice_text = (result.text or "").strip()
         if advice_text and "NO_ADVICE" not in advice_text:
-            updated_response = f"{response_text}\n\n{advice_text}"
+            # updated_response = f"{response_text}\n\n{advice_text}"
+            updated_response = advice_text
+
             print(f"[LANGGRAPH ADVISOR NODE] Recomendación añadida (Trigger: {advisor_trigger}).", file=sys.stderr)
             return {"response_text": updated_response}
 
@@ -443,6 +388,14 @@ class LangGraphService:
             lines.append(f"Sesiones nocturnas (después de las 23h): {len(late)}")
             for s in late[:3]:
                 lines.append(f"  - {s}")
+
+        plan = patterns_data.get("study_plan_progress", {})
+        if plan and plan.get("has_active_plan"):
+            lines.append(f"\n PLAN DE ESTUDIO ACTIVO ('{plan.get('plan_title')}'):")
+            lines.append(f"  - Progreso global: {plan.get('overall_progress_pct')}% ({plan.get('total_actual_hours')}h estudiadas / {plan.get('total_planned_hours')}h planificadas)")
+            for subj, pdata in plan.get("progress_by_subject", {}).items():
+                lines.append(f"  - {subj}: {pdata['actual_hours']}h reales / {pdata['planned_hours']}h planificadas ({pdata['progress_pct']}%)")
+
         return "\n".join(lines)
 
     async def run(self, user_id: str, user_message: str, message_with_context: str, history_msgs: list, tools_raw: list) -> dict:

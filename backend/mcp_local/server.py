@@ -726,17 +726,17 @@ async def unarchive_subject(user_id: str, subject_name: str):
         if not subject.get("is_archived"):
             return f"La asignatura '{subject_name}' ya está activa, no está archivada."
 
-        # Desarchivar en Clockify
-        cs = await _get_user_clockify_service(user_id)
-        if cs.api_key and subject.get("clockify_project_id"):
-            try:
-                cs.unarchive_project(subject["clockify_project_id"])
-            except Exception as ce:
-                print(f"[Clockify unarchive error] {ce}", file=sys.stderr, flush=True)
-                return (
-                    f"No se pudo desarchivar el proyecto '{subject_name}' en Clockify: {ce}. "
-                    f"La asignatura NO ha sido desarchivada para evitar inconsistencias."
-                )
+        # # Desarchivar en Clockify
+        # cs = await _get_user_clockify_service(user_id)
+        # if cs.api_key and subject.get("clockify_project_id"):
+        #     try:
+        #         cs.unarchive_project(subject["clockify_project_id"])
+        #     except Exception as ce:
+        #         print(f"[Clockify unarchive error] {ce}", file=sys.stderr, flush=True)
+        #         return (
+        #             f"No se pudo desarchivar el proyecto '{subject_name}' en Clockify: {ce}. "
+        #             f"La asignatura NO ha sido desarchivada para evitar inconsistencias."
+        #         )
 
         # Desarchivar en MongoDB
         await db_service.update_subject(subject["_id"], is_archived=False)
@@ -2145,6 +2145,70 @@ async def wb_get_study_reports(user_id: str, subject_name: str = None, limit: in
 #         return response.text
 #     except Exception as e:
 #         return f"Error al generar el análisis de rendimiento: {str(e)}"
+
+
+@mcp.tool()
+async def create_study_plan(
+    user_id: str,
+    title: str,
+    items: list,
+    start_date: str = None,
+    end_date: str = None
+):
+    """
+    Registra oficialmente un plan de estudio en el sistema una vez que el usuario confirma la propuesta.
+    Úsala ÚNICAMENTE cuando el usuario haya aceptado o confirmado el plan estructurado propuesto.
+
+    Parámetros:
+    - title: título descriptivo del plan (ej: 'Plan de repaso para exámenes finales', 'Plan semanal de estudio').
+    - items: lista de elementos con la estructura por día. Cada elemento es un objeto con:
+        * day: día de la semana (ej: 'Lunes', 'Martes').
+        * subject_name: nombre de la asignatura.
+        * planned_hours: horas planificadas (número flotante o entero, ej: 1.5, 2.0).
+        * description: qué tareas u objetivos se trabajarán ese día en esa asignatura.
+    - start_date: fecha de inicio del plan (YYYY-MM-DD), opcional.
+    - end_date: fecha de fin del plan (YYYY-MM-DD), opcional.
+    """
+    try:
+        if not items or not isinstance(items, list):
+            return "Error: Se requiere una lista 'items' con los elementos del plan estructurados por días y asignaturas."
+
+        plan = await db_service.create_study_plan(
+            user_id=user_id,
+            title=title,
+            items=items,
+            start_date=start_date,
+            end_date=end_date
+        )
+        return f"¡Plan de estudio '{title}' guardado correctamente! ID del plan: {plan['_id']}. El sistema realizará el seguimiento del progreso automáticamente."
+    except Exception as e:
+        return f"Error al guardar el plan de estudio: {str(e)}"
+
+
+@mcp.tool()
+async def get_active_study_plan(user_id: str):
+    """
+    Devuelve el plan de estudio actualmente activo del usuario con su desglose por días y asignaturas.
+    Úsala cuando el usuario pregunte qué plan tiene activo o qué le toca estudiar según su plan.
+    """
+    try:
+        plan = await db_service.get_active_study_plan(user_id)
+        if not plan:
+            return "No tienes ningún plan de estudio activo en este momento."
+
+        lines = [f"📋 Plan Activo: '{plan.get('title', 'Plan de Estudio')}' (Inicio: {plan.get('start_date', 'N/A')})"]
+        lines.append("\nDesglose del plan:")
+        for item in plan.get("items", []):
+            day = item.get("day", "Día")
+            subj = item.get("subject_name", "Asignatura")
+            hrs = item.get("planned_hours", 0)
+            desc = item.get("description", "")
+            desc_str = f" - {desc}" if desc else ""
+            lines.append(f"- {day} [{subj}]: {hrs}h{desc_str}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error al consultar el plan de estudio activo: {str(e)}"
 
 
 @mcp.tool()
