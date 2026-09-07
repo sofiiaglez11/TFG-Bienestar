@@ -322,8 +322,8 @@ class LangGraphService:
 
         advice_text = (result.text or "").strip()
         if advice_text and "NO_ADVICE" not in advice_text:
-            # updated_response = f"{response_text}\n\n{advice_text}"
-            updated_response = advice_text
+            updated_response = f"{response_text}\n\n{advice_text}"
+            # updated_response = advice_text
 
             print(f"[LANGGRAPH ADVISOR NODE] Recomendación añadida (Trigger: {advisor_trigger}).", file=sys.stderr)
             return {"response_text": updated_response}
@@ -339,7 +339,7 @@ class LangGraphService:
             return "Sin datos académicos esta semana."
         lines = []
         for s in academic_data:
-            lines.append(f"📚 {s['name']}:")
+            lines.append(f"ASIGNATURA: {s['name']}:")
             lines.append(f"  - Horas totales: {s['total_hours_week']}h")
             lines.append(f"  - Duración media por sesión: {s['avg_session_duration_minutes']} min")
             if s.get("avg_concentration") is not None:

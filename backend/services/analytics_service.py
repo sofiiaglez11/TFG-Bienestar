@@ -42,7 +42,7 @@ class AnalyticsService:
 
     async def get_academic_analytics(self, user_id: str, days: int = 7) -> list:
         """Horas, sesiones, concentración y tareas por asignatura."""
-        WEEKDAYS_ES = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
+        WEEKDAYS = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
         subjects = await self.db_service.get_subjects_by_user(user_id)
         
         # Obtener entradas de tiempo desde Clockify
@@ -98,7 +98,7 @@ class AnalyticsService:
 
                         sessions.append({
                             "date": start_dt.strftime("%Y-%m-%d"),
-                            "weekday": WEEKDAYS_ES.get(start_dt.weekday(), start_dt.strftime("%A")),
+                            "weekday": WEEKDAYS.get(start_dt.weekday(), start_dt.strftime("%A")),
                             "duration_minutes": round(duration),
                             "concentration": conc,
                             "start_hour": start_dt.hour
@@ -140,7 +140,7 @@ class AnalyticsService:
 
     async def get_wellbeing_analytics(self, user_id: str, days: int = 7) -> dict:
         """Sueño, estado de ánimo y energía por día de la semana."""
-        WEEKDAYS_ES = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
+        WEEKDAYS = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
         reports = await self.db_service.get_wellbeing_trends(user_id)
         by_weekday = {}
         for r in reports:
@@ -155,7 +155,7 @@ class AnalyticsService:
                 except Exception:
                     continue
 
-            day = WEEKDAYS_ES.get(dt.weekday(), dt.strftime("%A"))
+            day = WEEKDAYS.get(dt.weekday(), dt.strftime("%A"))
             if day not in by_weekday:
                 by_weekday[day] = {"sleep": [], "mood": [], "energy": []}
 
@@ -190,7 +190,7 @@ class AnalyticsService:
 
     async def get_patterns(self, user_id: str, days: int = 7) -> dict:
         """Detecta patrones: sesiones nocturnas, días más productivos, etc."""
-        WEEKDAYS_ES = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
+        WEEKDAYS = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
         cs = await self._get_user_clockify_service(user_id)
         clockify_entries = []
         if cs:
@@ -212,9 +212,9 @@ class AnalyticsService:
                     end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
                     
                     if start_dt.hour >= 23 or start_dt.hour < 6:
-                        late_sessions.append(f"{WEEKDAYS_ES.get(start_dt.weekday())} a las {start_dt.strftime('%H:%M')}")
+                        late_sessions.append(f"{WEEKDAYS.get(start_dt.weekday())} a las {start_dt.strftime('%H:%M')}")
                     
-                    day = WEEKDAYS_ES.get(start_dt.weekday(), start_dt.strftime("%A"))
+                    day = WEEKDAYS.get(start_dt.weekday(), start_dt.strftime("%A"))
                     duration_hrs = (end_dt - start_dt).total_seconds() / 3600.0
                     hours_by_weekday[day] = hours_by_weekday.get(day, 0.0) + duration_hrs
                 except Exception:

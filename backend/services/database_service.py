@@ -170,7 +170,32 @@ class DatabaseService:
         except Exception:
             return None
 
-    
+    async def get_user_by_clockify_id_or_key(
+        self, clockify_user_id: str = None, api_key: str = None, exclude_user_id: str = None
+    ) -> dict | None:
+        """
+        Busca si algún usuario en la BD ya tiene vinculada la misma cuenta de Clockify
+        (por ID de usuario en Clockify o por API Key), excluyendo opcionalmente a exclude_user_id.
+        """
+        or_conditions = []
+        if clockify_user_id:
+            or_conditions.append({"clockify.clockify_user_id": clockify_user_id})
+        if api_key:
+            or_conditions.append({"clockify.api_key": api_key})
+
+        if not or_conditions:
+            return None
+
+        query = {"$or": or_conditions}
+        if exclude_user_id:
+            try:
+                query["_id"] = {"$ne": ObjectId(exclude_user_id)}
+            except Exception:
+                pass
+
+        return await self.users.find_one(query)
+
+
     async def update_clockify_credentials(self, user_id: str, api_key: str, workspace_id: str = None, clockify_user_id: str = None):
         """Actualiza la API Key y Workspace de Clockify del usuario."""
         clockify_data = {
@@ -361,29 +386,7 @@ class DatabaseService:
  
     ############################################################################
     # METHODS FOR TASKS
- 
-    # async def create_task(self, user_id: str, subject_id: str, title: str,
-    #                       description: str = "", due_date: str = None,
-    #                       parent_task_id: str = None, clockify_task_id: str = None) -> dict:
-    #     """
-    #     Crea una nueva tarea asociada a una asignatura.
-    #     parent_task_id es opcional: si se indica, esta tarea es una subtarea de otra.
-    #     clockify_task_id es opcional: solo las tareas raíz (sin parent) se reflejan en
-    #     Clockify, ya que Clockify no soporta subtareas anidadas de verdad.
-    #     """
-    #     task = {
-    #         "user_id": user_id,
-    #         "subject_id": subject_id,
-    #         "parent_task_id": parent_task_id,
-    #         "clockify_task_id": clockify_task_id,
-    #         "title": title,
-    #         "description": description,
-    #         "due_date": due_date,
-    #         "completed": False
-    #     }
-    #     result = await self.tasks.insert_one(task)
-    #     task["_id"] = str(result.inserted_id)
-    #     return task
+
 
     async def create_task(self, user_id: str, title: str, subject_id: str = None,
                           description: str = "", due_date: str = None,
@@ -449,39 +452,17 @@ class DatabaseService:
         """Atajo para marcar una tarea como completada/pendiente."""
         await self.update_task(task_id, completed=completed)
  
-    # async def delete_task(self, task_id: str, cascade: bool = True):
-    #     """
-    #     Elimina una tarea por su ID.
-    #     Si cascade=True (por defecto), elimina también todas sus subtareas recursivamente.
-    #     """
-    #     ids_to_delete = [task_id]
 
-    #     if cascade:
-    #         # Recoger IDs de subtareas en anchura (BFS)
-    #         queue = [task_id]
-    #         while queue:
-    #             current_id = queue.pop(0)
-    #             children = await self.tasks.find(
-    #                 {"parent_task_id": current_id}, {"_id": 1}
-    #             ).to_list(200)
-    #             for child in children:
-    #                 child_id = str(child["_id"])
-    #                 ids_to_delete.append(child_id)
-    #                 queue.append(child_id)
-
-    #     object_ids = [ObjectId(tid) for tid in ids_to_delete]
-    #     await self.tasks.delete_many({"_id": {"$in": object_ids}})
-    #     return ids_to_delete  # devuelve los IDs borrados (útil para limpiar Clockify)
 
     async def delete_task(self, task_id: str):
         """Elimina una tarea por su ID, eliminando también sus subtareas y entradas de tiempo."""
         str_id = str(task_id)
         task_oid = ObjectId(str_id)
-        # 1. Eliminar entradas de tiempo vinculadas
+        # Eliminar entradas de tiempo vinculadas
         await self.time_entries.delete_many({"task_id": str_id})
-        # 2. Eliminar subtareas
+        # Eliminar subtareas
         await self.tasks.delete_many({"parent_task_id": str_id})
-        # 3. Eliminar la propia tarea
+        # Eliminar la propia tarea
         await self.tasks.delete_one({"_id": task_oid})
 
 
@@ -595,18 +576,6 @@ class DatabaseService:
         except Exception as e:
             return f"Error al registrar el informe de bienestar: {str(e)}"
     
-    # async def get_wellbeing_report(self, user_id: str) -> dict:
-    #     """
-    #     Obtiene el informe de bienestar del usuario.
-    #     Úsala cuando el usuario quiera consultar su estado de ánimo o bienestar.
-    #     """
-    #     try:
-    #         report = await self.wellbeing_entries.find_one({"user_id": user_id})
-    #         if report:
-    #             report["_id"] = str(report["_id"])
-    #         return report
-    #     except Exception as e:
-    #         return f"Error al obtener el informe de bienestar: {str(e)}"
 
     async def get_latest_wellbeing_report(self, user_id: str) -> dict | None:
         """Devuelve el últomo informe registrado ordenado por fecha."""

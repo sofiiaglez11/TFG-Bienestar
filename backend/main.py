@@ -535,7 +535,19 @@ async def set_clockify_credentials(request: ClockifyCredentialsRequest, user_id:
     clockify_user_id = clockify_user.get("id")
     default_workspace_id = request.workspace_id or clockify_user.get("defaultWorkspace")
 
-    # 3. Guardar en base de datos
+    # 3. Verificar que esta cuenta de Clockify no esté ya vinculada a otro usuario en la plataforma
+    existing_user = await db_service.get_user_by_clockify_id_or_key(
+        clockify_user_id=clockify_user_id,
+        api_key=request.api_key,
+        exclude_user_id=user_id
+    )
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Esta cuenta de Clockify ya está vinculada a otro usuario en la plataforma."
+        )
+
+    # 4. Guardar en base de datos
     await db_service.update_clockify_credentials(
         user_id=user_id,
         api_key=request.api_key,
