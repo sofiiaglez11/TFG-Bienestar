@@ -893,11 +893,10 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
  
 
 @mcp.tool()
-async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False):
+async def get_tasks(user_id: str, subject_name: str, include_completed: bool = True, include_active: bool = True, include_in_progress: bool = True, include_pending: bool = True):
     """
     Devuelve las tareas de una asignatura como datos estructurados (JSON).
     Úsala cuando el usuario pregunte 'qué tareas tengo de X' o 'muéstrame las tareas de X'.
-    only_pending=True para mostrar solo las pendientes.
 
     La respuesta es un JSON con esta estructura:
     {
@@ -906,11 +905,11 @@ async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False)
       "tasks": [
         {
           "title": "...",
-          "completed": bool,
+          "status": "COMPLETED" | "ACTIVE" | "PENDING",
           "due_date": "...",      // null si no tiene fecha
           "description": "...",
           "subtasks": [           // lista vacía si no tiene subtareas
-            { "title": "...", "completed": bool, "due_date": "...", "description": "..." }
+            { "title": "...", "status": "COMPLETED" | "ACTIVE" | "PENDING", "due_date": "...", "description": "..." }
           ]
         }
       ]
@@ -918,10 +917,8 @@ async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False)
 
     Interpreta estos datos para presentarlos de forma clara al usuario:
     - Muestra cada tarea principal y debajo sus subtareas con jerarquía visible
-    - Indica siempre si están completadas o pendientes
+    - Clasifica e indica su estado diferenciando claramente entre ACTIVAS ⚡, PENDIENTES ⏳ y COMPLETADAS ✅
     - Menciona la fecha de vencimiento si existe
-
-    
     """
     try:
         print(f"[MCP TOOL: GET_TASKS] Iniciando consulta para user_id={user_id}", file=sys.stderr, flush=True)
@@ -929,7 +926,13 @@ async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
 
-        all_tasks = await db_service.get_tasks_by_subject(subject["_id"], include_completed=not only_pending)
+        all_tasks = await db_service.get_tasks_by_subject(
+            subject["_id"],
+            include_completed=include_completed,
+            include_active=include_active,
+            include_in_progress=include_in_progress,
+            include_pending=include_pending
+        )
         if not all_tasks:
             return f"No tienes tareas registradas para '{subject_name}'."
 
@@ -951,7 +954,7 @@ async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False)
             children.sort(key=lambda st: st.get("priority") or 6)
             return {
                 "title": t.get("title"),
-                "completed": t.get("completed", False),
+                "status": t.get("status"),
                 "due_date": t.get("due_date"),
                 "description": t.get("description") or "",
                 "priority": t.get("priority"),  # int 1-5 o null
@@ -978,7 +981,7 @@ async def get_tasks(user_id: str, subject_name: str, only_pending: bool = False)
 @mcp.tool()
 async def complete_task(user_id: str, subject_name: str, task_title: str, completed: bool = True):
     """
-    Marca una tarea como completada o pendiente.
+    Marca una tarea como completada ("COMPLETED") o pendiente ("PENDING").
     Úsala cuando el usuario diga 'ya terminé X' o 'marca X como hecha'.
     Para revertirla: completed=False.
     """
@@ -991,10 +994,10 @@ async def complete_task(user_id: str, subject_name: str, task_title: str, comple
         if not task:
             return f"No encontré ninguna tarea llamada '{task_title}' en '{subject_name}'."
 
-        # 1. Actualizar en MongoDB
+        # 1. Actualizar en MongoDB (COMPLETED si completed=True, PENDING si False)
         await db_service.mark_task_completed(task["_id"], completed)
 
-        # 2. Sincronizar en Clockify (no crítico)
+        # 2. Sincronizar en Clockify (DONE si completed=True, ACTIVE si False)
         try:
             cs = await _get_user_clockify_service(user_id)
             if cs.api_key and task.get("clockify_task_id") and subject.get("clockify_project_id"):
@@ -1012,6 +1015,43 @@ async def complete_task(user_id: str, subject_name: str, task_title: str, comple
         return f"Tarea '{task_title}' marcada como {estado}."
     except Exception as e:
         return f"Error al completar la tarea: {str(e)}"
+
+@mcp.tool()
+async def mark_task_active(user_id: str, subject_name: str, task_title: str, active: bool = True):
+    """
+    Marca una tarea como activa ("ACTIVE") o pendiente ("PENDING").
+    Úsala cuando el usuario diga 'estoy trabajando en X', 'voy a hacer X ahora' o 'activa X'.
+    Para revertirla a pendiente: active=False.
+    """
+    try:
+        subject = await _find_subject_by_name(user_id, subject_name)
+        if not subject:
+            return f"No encontré ninguna asignatura llamada '{subject_name}'."
+
+        task = await _find_task_by_title(subject["_id"], task_title)
+        if not task:
+            return f"No encontré ninguna tarea llamada '{task_title}' en '{subject_name}'."
+
+        # 1. Actualizar en MongoDB (ACTIVE si active=True, PENDING si False)
+        await db_service.mark_task_active(task["_id"], active)
+
+        # 2. Sincronizar en Clockify (en Clockify sigue estando ACTIVE)
+        try:
+            cs = await _get_user_clockify_service(user_id)
+            if cs.api_key and task.get("clockify_task_id") and subject.get("clockify_project_id"):
+                cs.update_task(
+                    project_id=subject["clockify_project_id"],
+                    task_id=task["clockify_task_id"],
+                    status="ACTIVE",
+                    new_name=task['title']
+                )
+        except Exception:
+            pass  # no crítico
+
+        estado = "activa" if active else "pendiente"
+        return f"Tarea '{task_title}' marcada como {estado}."
+    except Exception as e:
+        return f"Error al marcar la tarea como activa: {str(e)}"
 
 
 
@@ -1325,6 +1365,8 @@ async def start_timer(user_id: str, subject_name: str, task_title: str = None, d
                 return f"No encontré ninguna tarea llamada '{task_title}' en '{subject_name}'."
             task_id = task["_id"]
             clockify_task_id = task.get("clockify_task_id")
+            # Marcar automáticamente la tarea como activa en MongoDB
+            await db_service.mark_task_active(task["_id"], True)
  
         # Construir descripción automática si no se proporcionó una
         if not description:

@@ -162,7 +162,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
         {/* Tarjetas KPI */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginBottom: "24px" }}>
           <div style={{ padding: "16px", borderRadius: "12px", backgroundColor: "#eff6ff", border: "1px solid #bfdbfe" }}>
-            <div style={{ fontSize: "13px", color: "#1e40af", fontWeight: "600" }}>Total Horas Estudadas</div>
+            <div style={{ fontSize: "13px", color: "#1e40af", fontWeight: "600" }}>Total Horas Estudiadas</div>
             <div style={{ fontSize: "1.8rem", fontWeight: "700", color: "#1d4ed8", marginTop: "4px" }}>{totalHours.toFixed(1)} h</div>
           </div>
           <div style={{ padding: "16px", borderRadius: "12px", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0" }}>

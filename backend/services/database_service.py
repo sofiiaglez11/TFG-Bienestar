@@ -24,7 +24,6 @@ class DatabaseService:
         self.wellbeing_entries = self.db["wellbeing_entries"]
         self.study_reports = self.db["study_reports"]
         self.study_plans = self.db["study_plans"]
-        # self.deadlines = self.db["deadlines"]
 
     async def ensure_indexes(self):
         """
@@ -34,16 +33,7 @@ class DatabaseService:
         await self.subjects.create_index([("user_id", 1), ("period_id", 1)])
         await self.tasks.create_index([("subject_id", 1)])
         await self.tasks.create_index([("parent_task_id", 1)])
-        # Indice unico: no puede haber dos tareas con el mismo titulo en la misma asignatura
-        # y con el mismo padre (o ambas sin padre). Garantiza unicidad a nivel de BD.
-        #NOTE: esto da problemas al arrancar el backend
-        # await self.tasks.create_index(
-        #     [("subject_id", 1), ("parent_task_id", 1), ("title", 1)],
-        #     unique=True,
-        #     name="unique_task_per_subject_and_parent"
-        # )
-        # await self.time_entries.create_index([("subject_id", 1), ("start_time", -1)])
-        # await self.time_entries.create_index([("task_id", 1)])
+        
         await self.tasks.create_index("tags")
         # await self.deadlines.create_index([("user_id", 1), ("date", 1)])
         await self.periods.create_index([("user_id", 1)])
@@ -398,6 +388,7 @@ class DatabaseService:
         type puede ser: 'task', 'exam', 'assignment' u 'other'.
         subject_id es opcional para permitir eventos globales o administrativos.
         priority es opcional: entero entre 1 (muy baja) y 5 (muy alta).
+        Al crearlas, el campo status por defecto es "PENDING".
         """
         task = {
             "user_id": user_id,
@@ -408,25 +399,40 @@ class DatabaseService:
             "description": description,
             "due_date": due_date,
             "type": type,
-            "completed": False,
+            "status":"PENDING", # "PENDING", "ACTIVE", "COMPLETED"
             "priority": priority,
             "tags": tags if tags is not None else []
         }
         result = await self.tasks.insert_one(task)
         task["_id"] = str(result.inserted_id)
         return task
- 
-    async def get_tasks_by_subject(self, subject_id: str, include_completed: bool = True) -> list:
-        """Devuelve todas las tareas de una asignatura (opcionalmente solo las pendientes)."""
+
+    async def get_tasks_by_subject(self, subject_id: str, include_completed: bool = True, include_active: bool = True, include_in_progress: bool = True, include_pending: bool = True) -> list:
+        """Devuelve todas las tareas de una asignatura según los filtros de estado."""
         query = {"subject_id": subject_id}
-        if not include_completed:
-            query["completed"] = False
+        
+        # Combinar la opción include_active e include_in_progress por compatibilidad
+        want_active = include_active or include_in_progress
+        
+        allowed_statuses = []
+        if include_pending:
+            allowed_statuses.append("PENDING")
+        if want_active:
+            allowed_statuses.extend(["ACTIVE", "IN_PROGRESS"])
+        if include_completed:
+            allowed_statuses.append("COMPLETED")
+
+        # Si no se incluyen todos los estados posibles, añadir el filtro $in a la query
+        if len(allowed_statuses) < 4:
+            query["status"] = {"$in": allowed_statuses}
+
         cursor = self.tasks.find(query)
         tasks = await cursor.to_list(100)
         for t in tasks:
             t["_id"] = str(t["_id"])
         return tasks
- 
+
+
     async def get_subtasks(self, parent_task_id: str) -> list:
         """Devuelve las subtareas de una tarea concreta."""
         cursor = self.tasks.find({"parent_task_id": parent_task_id})
@@ -434,25 +440,33 @@ class DatabaseService:
         for t in subtasks:
             t["_id"] = str(t["_id"])
         return subtasks
- 
+
     async def get_task_by_id(self, task_id: str) -> dict | None:
         """Devuelve una tarea por su ID."""
         task = await self.tasks.find_one({"_id": ObjectId(task_id)})
         if task:
             task["_id"] = str(task["_id"])
         return task
- 
+
     async def update_task(self, task_id: str, **fields):
-        """Actualiza campos sueltos de una tarea (title, description, due_date, completed...)."""
+        """Actualiza campos sueltos de una tarea (title, description, due_date, status...)."""
         if not fields:
             return
         await self.tasks.update_one({"_id": ObjectId(task_id)}, {"$set": fields})
- 
-    async def mark_task_completed(self, task_id: str, completed: bool = True):
-        """Atajo para marcar una tarea como completada/pendiente."""
-        await self.update_task(task_id, completed=completed)
- 
 
+    async def mark_task_completed(self, task_id: str, completed: bool = True):
+        """Marcar una tarea como completada ("COMPLETED") o revertirla a pendiente ("PENDING")."""
+        new_status = "COMPLETED" if completed else "PENDING"
+        await self.update_task(task_id, status=new_status)
+
+    async def mark_task_active(self, task_id: str, active: bool = True):
+        """Marcar una tarea como activa ("ACTIVE") o revertirla a pendiente ("PENDING")."""
+        new_status = "ACTIVE" if active else "PENDING"
+        await self.update_task(task_id, status=new_status)
+
+    async def mark_task_in_progress(self, task_id: str, in_progress: bool = True):
+        """Alias de compatibilidad para mark_task_active."""
+        await self.mark_task_active(task_id, active=in_progress)
 
     async def delete_task(self, task_id: str):
         """Elimina una tarea por su ID, eliminando también sus subtareas y entradas de tiempo."""

@@ -123,8 +123,8 @@ class AnalyticsService:
             except Exception:
                 pass
 
-            tasks_completed = sum(1 for t in tasks if t.get("completed") or t.get("status") == "completed")
-            tasks_pending = sum(1 for t in tasks if not (t.get("completed") or t.get("status") == "completed"))
+            tasks_completed = sum(1 for t in tasks if t.get("completed") or str(t.get("status")).upper() == "COMPLETED")
+            tasks_pending = sum(1 for t in tasks if not (t.get("completed") or str(t.get("status")).upper() == "COMPLETED"))
 
             result.append({
                 "name": s_name,
