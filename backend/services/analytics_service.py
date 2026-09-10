@@ -82,9 +82,8 @@ class AnalyticsService:
 
             sessions = []
             for e in subj_entries:
-                t_interval = e.get("timeInterval", {})
-                start_str = t_interval.get("start")
-                end_str = t_interval.get("end")
+                start_str = e.get("start") or e.get("timeInterval", {}).get("start")
+                end_str = e.get("end") or e.get("timeInterval", {}).get("end")
                 if start_str and end_str:
                     try:
                         start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
@@ -203,9 +202,8 @@ class AnalyticsService:
         hours_by_weekday = {}
 
         for e in clockify_entries:
-            t_interval = e.get("timeInterval", {})
-            start_str = t_interval.get("start")
-            end_str = t_interval.get("end")
+            start_str = e.get("start") or e.get("timeInterval", {}).get("start")
+            end_str = e.get("end") or e.get("timeInterval", {}).get("end")
             if start_str and end_str:
                 try:
                     start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))

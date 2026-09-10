@@ -349,7 +349,11 @@ class SubjectGradeRequest(BaseModel):
 ##################################################################
 def get_datetime_context() -> str:
     """Devuelve la fecha y hora actual formateada en español como contexto para el agente."""
-    now = datetime.now()
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("Europe/Madrid"))
+    except Exception:
+        now = datetime.now().astimezone()
     dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
     meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
     dia_semana = dias[now.weekday()]
@@ -357,6 +361,7 @@ def get_datetime_context() -> str:
     fecha_str = f"{dia_semana}, {now.day} de {mes} de {now.year}"
     hora_str = now.strftime("%H:%M")
     return f"\n[CONTEXTO DEL SISTEMA: La fecha y hora actual es {fecha_str} a las {hora_str}. Usa este dato si el usuario te pregunta qué día es hoy o para calcular fechas límite de tareas.]"
+
 
 
 @app.post("/api/chat")
