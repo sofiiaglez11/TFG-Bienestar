@@ -605,6 +605,15 @@ class DatabaseService:
         """Devuelve el informe de bienestar más reciente del usuario."""
         return await self.get_latest_wellbeing_report(user_id)
 
+    async def has_wellbeing_report_for_date(self, user_id: str, date_str: str) -> bool:
+        """Verifica si el usuario ya ha registrado un informe de bienestar para una fecha concreta (YYYY-MM-DD)."""
+        count = await self.wellbeing_entries.count_documents({
+            "user_id": user_id,
+            "date": date_str
+        })
+        return count > 0
+
+
     async def get_wellbeing_trends(self, user_id: str) -> list:
         """Devuelve los últimos 7 informes de bienestar ordenados por fecha."""
         cursor = self.wellbeing_entries.find(

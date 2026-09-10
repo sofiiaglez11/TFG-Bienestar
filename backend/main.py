@@ -181,9 +181,15 @@ WELLBEING_PROMPT = (
     "   Habla siempre en lenguaje cotidiano y empático.\n"
     "9. El clockify_time_entry_id es OBLIGATORIO. Siempre estará disponible en el campo "
     "   [DATOS_SESION: clockify_time_entry_id=XXX] del mensaje actual. Extráelo de ahí. NUNCA lo inventes ni uses wb_get_latest_time_entry.\n"
+    "REGLA DE INFORME DE BIENESTAR DIARIO Y SEGUIMIENTO DE PLANNING:\n"
+    "1. Si el contexto del sistema indica que el usuario AÚN NO ha registrado sus horas de sueño hoy, "
+    "   aprovecha tu intervención para preguntarle de forma cálida y conversacional cuántas horas durmió hoy y cómo se siente.\n"
+    "2. Cuando el usuario proporcione sus horas de sueño, usa la herramienta `wb_add_wellbeing_report` para registrar la fecha de hoy, sus horas de sueño (`sleep_hours`) y los demás datos que haya compartido.\n"
+    "3. Si el contexto del sistema incluye un PLAN DE ESTUDIO ACTIVO DETECTADO, recuérdale de forma amigable su planning actual y su progreso alcanzado (% horas reales vs planificadas).\n"
     "IMPORTANTE: Si el usuario empieza a hablar de otra cosa (bienestar general, estrés, sueño), atiende también eso, "
     "pero intenta cerrar el informe primero si es posible."
 )
+
 
 
 # GENERAL_PROMPT = (
@@ -363,6 +369,62 @@ def get_datetime_context() -> str:
     return f"\n[CONTEXTO DEL SISTEMA: La fecha y hora actual es {fecha_str} a las {hora_str}. Usa este dato si el usuario te pregunta qué día es hoy o para calcular fechas límite de tareas.]"
 
 
+async def get_daily_check_context(user_id: str, db_service: DatabaseService, analytics_service: AnalyticsService) -> str:
+    """
+    Comprueba si hoy el usuario ha registrado su informe de bienestar (horas de sueño)
+    y el estado de su plan de estudio activo para aportar contexto al agente.
+    """
+    context_parts = []
+    try:
+        from zoneinfo import ZoneInfo
+        today_str = datetime.now(ZoneInfo("Europe/Madrid")).strftime("%Y-%m-%d")
+    except Exception:
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+    # 1. Comprobar si ya existe informe de bienestar para hoy
+    try:
+        has_today_report = await db_service.has_wellbeing_report_for_date(user_id, today_str)
+        if not has_today_report:
+            context_parts.append(
+                f" Hoy ({today_str}) el usuario AÚN NO ha registrado sus horas de sueño en el informe de bienestar (wb_add_wellbeing_report). "
+                f"Aprovecha tu respuesta para preguntarle de forma cálida cuántas horas ha dormido hoy "
+                f"y cómo se siente para poder registrar su informe de bienestar."
+            )
+    except Exception as e:
+        import sys
+        print(f"[DAILY CHECK] Error comprobando informe de hoy: {e}", file=sys.stderr)
+
+    # 2. Comprobar si hay un plan de estudio activo
+    try:
+        if analytics_service:
+            plan_progress = await analytics_service.get_study_plan_progress(user_id, days=7)
+            if plan_progress and plan_progress.get("has_active_plan"):
+                p_title = plan_progress.get("plan_title", "Plan Activo")
+                p_pct = plan_progress.get("overall_progress_pct", 0)
+                p_actual = plan_progress.get("total_actual_hours", 0)
+                p_planned = plan_progress.get("total_planned_hours", 0)
+                
+                subj_progress_str = []
+                for s_name, s_data in plan_progress.get("progress_by_subject", {}).items():
+                    subj_progress_str.append(f"{s_name}: {s_data.get('actual_hours', 0)}h/{s_data.get('planned_hours', 0)}h ({s_data.get('progress_pct', 0)}%)")
+                
+                subj_info = (", ".join(subj_progress_str)) if subj_progress_str else "sin desglose"
+                
+                context_parts.append(
+                    f" PLAN DE ESTUDIO ACTIVO DETECTADO: '{p_title}'. "
+                    f"Progreso global actual: {p_pct}% ({p_actual}h reales / {p_planned}h planificadas). "
+                    f"Desglose por asignaturas: [{subj_info}]. "
+                    f"Recuérdale amigablemente su plan de estudio activo y coméntale cómo va con él."
+                )
+    except Exception as e:
+        import sys
+        print(f"[DAILY CHECK] Error comprobando plan activo: {e}", file=sys.stderr)
+
+    if not context_parts:
+        return ""
+    
+    return f"\n[CONTEXTO DE INICIO DE DÍA / PLANIFICACIÓN: {''.join(context_parts)}]"
+
 
 @app.post("/api/chat")
 async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_user_id)):
@@ -380,7 +442,9 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
 
         date_context = get_datetime_context()
         timer_context = await get_timer_context(user_id, db_service)
-        message_with_context = request.message + date_context + timer_context
+        daily_context = await get_daily_check_context(user_id, db_service, analytics_service)
+        message_with_context = request.message + date_context + timer_context + daily_context
+
 
         # Obtenemos la lista de herramientas disponibles en el MCP
         # y ocultamos el campo "user_id" para que la IA no se lo invente.
@@ -441,21 +505,28 @@ async def get_proactive_greeting(user_id: str = Depends(get_current_user_id)):
     """
     # Comprobar si hay algún reporte de bienestar reciente para personalizar el saludo
     latest_wellbeing = await db_service.get_latest_wellbeing_report(user_id)
+    daily_context = await get_daily_check_context(user_id, db_service, analytics_service)
     
     prompt = (
         "El usuario acaba de iniciar sesión en la plataforma. "
-        "Dale un saludo cálido, breve y proactivo. Pregúntale activamente qué tal ha descansado "
-        "o cómo afronta el día de hoy."
+        "Dale un saludo cálido, breve y proactivo. "
+        "Si aún no ha registrado sus horas de sueño hoy, pregúntale activamente cuántas horas ha dormido hoy "
+        "y cómo se siente para poder registrar su informe de bienestar. "
+        "Si además tiene un plan de estudio activo, recuérdaselo brevemente diciéndole cómo va con su progreso."
     )
     
     if latest_wellbeing:
         prompt += f" Ten en cuenta que en su último registro dijo haber dormido {latest_wellbeing.get('sleep_hours', 'N/A')} horas."
+
+    if daily_context:
+        prompt += daily_context
 
     wellbeing_agent.set_config([])  # Sin tools para un saludo directo
     result = await wellbeing_agent.run_agentic_conversation(
         user_message=prompt,
         tool_executor=None
     )
+
 
     # Guardar la pregunta del bot en el historial
     greeting_msg = await db_service.insert_message(
