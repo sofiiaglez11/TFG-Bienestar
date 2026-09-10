@@ -1,8 +1,11 @@
 import os
+import re
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from bson import ObjectId
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
+
  
  
 load_dotenv()
@@ -24,6 +27,8 @@ class DatabaseService:
         self.wellbeing_entries = self.db["wellbeing_entries"]
         self.study_reports = self.db["study_reports"]
         self.study_plans = self.db["study_plans"]
+
+
 
     async def ensure_indexes(self):
         """
@@ -390,6 +395,7 @@ class DatabaseService:
         priority es opcional: entero entre 1 (muy baja) y 5 (muy alta).
         Al crearlas, el campo status por defecto es "PENDING".
         """
+        now_iso = datetime.now(timezone.utc).isoformat()
         task = {
             "user_id": user_id,
             "subject_id": subject_id,
@@ -399,9 +405,11 @@ class DatabaseService:
             "description": description,
             "due_date": due_date,
             "type": type,
-            "status":"PENDING", # "PENDING", "ACTIVE", "COMPLETED"
+            "status": "PENDING", # "PENDING", "ACTIVE", "COMPLETED"
             "priority": priority,
-            "tags": tags if tags is not None else []
+            "tags": tags if tags is not None else [],
+            "created_at": now_iso,
+            "completed_at": None
         }
         result = await self.tasks.insert_one(task)
         task["_id"] = str(result.inserted_id)
@@ -452,12 +460,22 @@ class DatabaseService:
         """Actualiza campos sueltos de una tarea (title, description, due_date, status...)."""
         if not fields:
             return
+        
+        # Gestionar automáticamente completed_at según la actualización de status
+        if "status" in fields:
+            if fields["status"] == "COMPLETED" and "completed_at" not in fields:
+                fields["completed_at"] = datetime.now(timezone.utc).isoformat()
+            elif fields["status"] in ["PENDING", "ACTIVE", "IN_PROGRESS"] and "completed_at" not in fields:
+                fields["completed_at"] = None
+
         await self.tasks.update_one({"_id": ObjectId(task_id)}, {"$set": fields})
 
     async def mark_task_completed(self, task_id: str, completed: bool = True):
         """Marcar una tarea como completada ("COMPLETED") o revertirla a pendiente ("PENDING")."""
         new_status = "COMPLETED" if completed else "PENDING"
-        await self.update_task(task_id, status=new_status)
+        completed_at = datetime.now(timezone.utc).isoformat() if completed else None
+        await self.update_task(task_id, status=new_status, completed_at=completed_at)
+
 
     async def mark_task_active(self, task_id: str, active: bool = True):
         """Marcar una tarea como activa ("ACTIVE") o revertirla a pendiente ("PENDING")."""
@@ -706,7 +724,7 @@ class DatabaseService:
     ) -> dict:
         """
         Crea un nuevo plan de estudio para el usuario.
-        Archiva cualquier otro plan de estudio activo previo.
+        Archiva cualquier otro plan de estudio activo previo y asegura la asignación de due_date en las tareas del plan.
         """
         # Archivar planes activos previos del usuario
         await self.study_plans.update_many(
@@ -715,11 +733,73 @@ class DatabaseService:
         )
 
         now = datetime.now(timezone.utc)
+        base_start = start_date or now.strftime("%Y-%m-%d")
+
+        try:
+            base_dt = datetime.strptime(base_start, "%Y-%m-%d").replace(tzinfo=ZoneInfo("Europe/Madrid"))
+        except Exception:
+            try:
+                base_dt = datetime.strptime(base_start, "%Y-%m-%d")
+            except Exception:
+                base_dt = now
+
+        weekday_map = {
+            "lunes": 0, "martes": 1, "miércoles": 2, "miercoles": 2,
+            "jueves": 3, "viernes": 4, "sábado": 5, "sabado": 5, "domingo": 6
+        }
+
+        processed_items = []
+        for item in items:
+            it = dict(item) if isinstance(item, dict) else {}
+            day_raw = str(it.get("day", "")).strip()
+            due_date = it.get("due_date")
+
+            if not due_date:
+                if re.match(r"^\d{4}-\d{2}-\d{2}$", day_raw):
+                    due_date = day_raw
+                elif day_raw.lower() in weekday_map:
+                    target_wd = weekday_map[day_raw.lower()]
+                    days_ahead = (target_wd - base_dt.weekday() + 7) % 7
+                    due_date = (base_dt + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+                else:
+                    due_date = base_start
+            
+            it["due_date"] = due_date
+            processed_items.append(it)
+
+            # Si el elemento tiene asignatura y descripción/tarea, vincular o crear tarea en la BD con due_date
+            subj_name = it.get("subject_name")
+            task_desc = it.get("description") or it.get("task")
+            if subj_name and task_desc:
+                sub_doc = await self.subjects.find_one({
+                    "user_id": user_id,
+                    "name": {"$regex": f"^{re.escape(subj_name)}$", "$options": "i"}
+                })
+                subj_id = str(sub_doc["_id"]) if sub_doc else None
+
+                if subj_id:
+                    existing = await self.tasks.find_one({
+                        "user_id": user_id,
+                        "subject_id": subj_id,
+                        "title": {"$regex": f"^{re.escape(task_desc)}$", "$options": "i"}
+                    })
+                    if existing:
+                        if existing.get("due_date") != due_date:
+                            await self.update_task(str(existing["_id"]), due_date=due_date)
+                    else:
+                        await self.create_task(
+                            user_id=user_id,
+                            title=task_desc,
+                            subject_id=subj_id,
+                            description=f"Tarea del plan de estudio '{title}'",
+                            due_date=due_date
+                        )
+
         plan = {
             "user_id": user_id,
             "title": title,
-            "items": items,
-            "start_date": start_date or now.strftime("%Y-%m-%d"),
+            "items": processed_items,
+            "start_date": base_start,
             "end_date": end_date,
             "status": "active",
             "created_at": now.isoformat()
@@ -728,6 +808,7 @@ class DatabaseService:
         result = await self.study_plans.insert_one(plan)
         plan["_id"] = str(result.inserted_id)
         return plan
+
 
     async def get_active_study_plan(self, user_id: str) -> dict | None:
         """Devuelve el plan de estudio actualmente activo del usuario."""

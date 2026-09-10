@@ -232,7 +232,7 @@ class AnalyticsService:
         }
 
     async def get_study_plan_progress(self, user_id: str, days: int = 7) -> dict:
-        """Calcula el progreso del plan de estudio activo frente a las horas reales estudiadas."""
+        """Calcula el progreso del plan de estudio activo frente a las horas reales estudiadas y comprueba tareas atrasadas o no completadas."""
         try:
             plan = await self.db_service.get_active_study_plan(user_id)
             if not plan:
@@ -264,17 +264,58 @@ class AnalyticsService:
 
             overall_pct = round((total_actual_hours / total_planned_hours) * 100, 1) if total_planned_hours > 0 else 0.0
 
+            # Evaluación de desvíos en tareas asociadas a las fechas del plan
+            overdue_tasks = []
+            try:
+                from zoneinfo import ZoneInfo
+                today_str = datetime.now(ZoneInfo("Europe/Madrid")).strftime("%Y-%m-%d")
+            except Exception:
+                today_str = datetime.now().strftime("%Y-%m-%d")
+
+            cursor = self.db_service.tasks.find({"user_id": user_id, "due_date": {"$ne": None}})
+            all_user_tasks = await cursor.to_list(200)
+
+            subjects_list = await self.db_service.get_subjects_by_user(user_id, include_archived=True)
+            subj_id_to_name = {str(s["_id"]): s.get("name", "Asignatura") for s in subjects_list}
+
+            for t in all_user_tasks:
+                due_d = t.get("due_date")
+                status = t.get("status")
+                completed_at = t.get("completed_at")
+                s_name = subj_id_to_name.get(str(t.get("subject_id")), "General")
+                
+                due_d_clean = due_d[:10] if due_d and len(due_d) >= 10 else due_d
+
+                if due_d_clean and due_d_clean < today_str and status != "COMPLETED":
+                    overdue_tasks.append({
+                        "title": t.get("title", "Tarea sin título"),
+                        "subject_name": s_name,
+                        "due_date": due_d_clean,
+                        "status": "INCUMPLIDA_PENDIENTE"
+                    })
+                elif due_d_clean and completed_at and str(completed_at)[:10] > due_d_clean:
+                    overdue_tasks.append({
+                        "title": t.get("title", "Tarea sin título"),
+                        "subject_name": s_name,
+                        "due_date": due_d_clean,
+                        "completed_at": str(completed_at)[:10],
+                        "status": "COMPLETADA_FUERA_DE_PLAZO"
+                    })
+
             return {
                 "has_active_plan": True,
                 "plan_title": plan.get("title", "Plan de Estudio"),
                 "total_planned_hours": round(total_planned_hours, 1),
                 "total_actual_hours": round(total_actual_hours, 1),
                 "overall_progress_pct": min(100.0, overall_pct),
-                "progress_by_subject": progress_by_subject
+                "progress_by_subject": progress_by_subject,
+                "overdue_tasks": overdue_tasks,
+                "has_overdue_tasks": len(overdue_tasks) > 0
             }
         except Exception as e:
             print(f"[ANALYTICS] Error al calcular el progreso del plan: {e}", file=sys.stderr)
             return {"has_active_plan": False}
+
 
     async def get_user_analytics(self, user_id: str, days: int = 7) -> dict:
         """Método principal que agrega todo."""

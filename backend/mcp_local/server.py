@@ -1442,15 +1442,43 @@ async def get_active_time_entry(user_id: str):
         
         # Obtener el timer activo directamente de Clockify
         active_entry = cs.get_active_time_entry()
-        # print(f"TOOL GET ACTIVE TIME ENTRY: active_entry={active_entry}", file=sys.stderr, flush=True)
         
         if not active_entry:
             return "No tienes ningún cronómetro en marcha ahora mismo."
+
+        desc = active_entry.get("description", "sin descripción")
+        project_name = active_entry.get("project", {}).get("name", "") if active_entry.get("project") else ""
+        start_raw = active_entry.get("timeInterval", {}).get("start", "")
         
-        return f"Cronómetro activo: {active_entry}"
+        start_str = start_raw
+        elapsed_str = ""
+        if start_raw:
+            try:
+                from zoneinfo import ZoneInfo
+                start_dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+                local_dt = start_dt.astimezone(ZoneInfo("Europe/Madrid"))
+                start_str = local_dt.strftime("%H:%M")
+                
+                now_dt = datetime.now(ZoneInfo("Europe/Madrid"))
+                elapsed_seconds = max(0, (now_dt - local_dt).total_seconds())
+                elapsed_mins = int(elapsed_seconds // 60)
+                if elapsed_mins >= 60:
+                    hrs = elapsed_mins // 60
+                    mins = elapsed_mins % 60
+                    elapsed_str = f"{hrs}h {mins}m"
+                else:
+                    elapsed_str = f"{elapsed_mins} minutos"
+            except Exception:
+                start_str = start_raw
+        
+        return (
+            f"Cronómetro activo: Asignatura '{project_name}', Tarea/Descripción '{desc}'. "
+            f"Hora de inicio: {start_str} (hora local de España). "
+            f"Tiempo transcurrido hasta ahora: {elapsed_str}."
+        )
     except Exception as e:
-        # print(f"Error al obtener el cronómetro activo: {str(e)}", file=sys.stderr, flush=True)
         return f"Error al obtener el cronómetro activo: {str(e)}"
+
 
 @mcp.tool()
 async def log_time_entry(user_id: str, subject_name: str, start_time: str, end_time: str,
@@ -1788,7 +1816,7 @@ async def edit_logged_study_hours(user_id: str, time_entry_id: Optional[str] = N
         if isinstance(res, dict) and res.get("error"):
             return f"Error al actualizar la entrada de tiempo: {res['error']}"
 
-        return f"Entrada de tiempo '{target_id}' actualizada correctamente en Clockify."
+        return "Entrada de tiempo actualizada correctamente en Clockify."
     except Exception as e:
         print(f"[MCP TOOL ERROR: EDIT_LOGGED_STUDY_HOURS] {e}", file=sys.stderr, flush=True)
         return f"Error al editar la entrada de tiempo: {str(e)}"
@@ -1853,7 +1881,7 @@ async def delete_time_entry(user_id: str, time_entry_id: Optional[str] = None, s
         if isinstance(res, dict) and res.get("error"):
             return f"Error al eliminar la entrada de tiempo: {res['error']}"
 
-        return f"Entrada de tiempo '{target_id}' eliminada correctamente de Clockify."
+        return "Sesión de estudio eliminada correctamente de Clockify."
     except Exception as e:
         print(f"[MCP TOOL ERROR: DELETE_TIME_ENTRY] {e}", file=sys.stderr, flush=True)
         return f"Error al eliminar la entrada de tiempo: {str(e)}"
@@ -1951,7 +1979,7 @@ async def wb_get_latest_time_entry(user_id: str):
         start = latest.get("timeInterval", {}).get("start", "")
         end = latest.get("timeInterval", {}).get("end", "")
         
-        return f"Última sesión en Clockify: ID={entry_id}, Asignatura='{proj_name}', Descripción='{desc}', Inicio={start}, Fin={end}"
+        return f"Última sesión en Clockify: Asignatura='{proj_name}', Descripción='{desc}', Inicio={start}, Fin={end}"
     except Exception as e:
         return f"Error al consultar la última sesión de tiempo: {str(e)}"
 
@@ -2013,7 +2041,7 @@ async def wb_add_study_report(
             mood_after=mood_after,
             notes=notes,
         )
-        return f"Informe de sesión guardado correctamente (ID: {report['_id']})."
+        return "Informe de sesión guardado correctamente."
     except Exception as e:
         return f"Error al guardar el informe de sesión: {str(e)}"
 
@@ -2222,7 +2250,7 @@ async def create_study_plan(
             start_date=start_date,
             end_date=end_date
         )
-        return f"¡Plan de estudio '{title}' guardado correctamente! ID del plan: {plan['_id']}. El sistema realizará el seguimiento del progreso automáticamente."
+        return f"¡Plan de estudio '{title}' guardado correctamente! El sistema realizará el seguimiento del progreso automáticamente."
     except Exception as e:
         return f"Error al guardar el plan de estudio: {str(e)}"
 

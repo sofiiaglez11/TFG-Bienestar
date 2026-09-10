@@ -136,9 +136,11 @@ ACADEMIC_PROMPT = (
     "REGLA DE CREACIÓN Y SEGUIMIENTO DE PLANES DE ESTUDIO:\n"
     "Cuando el usuario te pida ayuda para organizarse o estructurar sus días/semana de estudio (ej: 'ayúdame a organizarme', 'cómo distribuyo mi semana'):\n"
     "1. Proponle un plan claro estructurado por días, asignaturas/bloques temáticos y tareas concretas a realizar (puedes basarte en horas o en tareas con fecha de vencimiento).\n"
-    "2. Cuando el usuario acepte o confirme la propuesta (ej: 'me parece bien', 'guárdalo', 'confirmo el plan'), ejecuta la herramienta `create_study_plan` mapeando tu propuesta en la lista 'items' (cada item con day, subject_name, planned_hours y description/tarea).\n"
-    "3. Si el usuario pregunta qué plan tiene activo o qué le toca estudiar según su plan, utiliza la herramienta `get_active_study_plan`."
+    "2. Cuando el usuario acepte o confirme la propuesta (ej: 'me parece bien', 'guárdalo', 'confirmo el plan'), ejecuta la herramienta `create_study_plan` mapeando tu propuesta en la lista 'items' (cada item con day, subject_name, planned_hours, description/tarea y asignándole siempre la fecha de vencimiento adecuada `due_date` en formato YYYY-MM-DD según la planificación).\n"
+    "3. Si el usuario pregunta qué plan tiene activo o qué le toca estudiar según su plan, utiliza la herramienta `get_active_study_plan`.\n"
+    "4. Si el contexto del sistema incluye alertas por tareas vencidas o no completadas dentro del plan, avisa al usuario con empatía sobre el desvío de su planificación para ayudarle a reajustar sus tareas a tiempo."
 )
+
 
 WELLBEING_PROMPT = (
     "Eres un asistente empático y comprensivo especializado en bienestar y salud mental para estudiantes. "
@@ -228,11 +230,21 @@ ADVISOR_PROMPT = (
     # "   - Si consideras que no hace falta recomendación, responde exactamente: NO_ADVICE"
 )
 
-academic_agent.set_system_instruction(ACADEMIC_PROMPT)
-wellbeing_agent.set_system_instruction(WELLBEING_PROMPT)
-general_agent.set_system_instruction(GENERAL_PROMPT)
+NO_IDS_PROMPT_RULE = (
+    "\nREGLA OBLIGATORIA DE FORMATO — PROHIBICIÓN DE USAR IDs TÉCNICOS EN TUS RESPUESTAS:\n"
+    "NUNCA muestres ni le leas al usuario IDs técnicos internos de la base de datos o de Clockify "
+    "(como cadenas alfanuméricas de identificadores '65a...', '68b...', IDs de sesiones, IDs de tareas, IDs de proyectos, IDs de informes, etc.). "
+    "Aunque las herramientas o el contexto del sistema incluyan identificadores como ID o clockify_time_entry_id, "
+    "debes ignorar esos IDs al redactar tu mensaje final. Refiérete SIEMPRE a los elementos por su nombre, título, asignatura, "
+    "fecha u hora de forma 100% natural, cercana e inteligible para una persona.\n"
+)
+
+academic_agent.set_system_instruction(ACADEMIC_PROMPT + NO_IDS_PROMPT_RULE)
+wellbeing_agent.set_system_instruction(WELLBEING_PROMPT + NO_IDS_PROMPT_RULE)
+general_agent.set_system_instruction(GENERAL_PROMPT + NO_IDS_PROMPT_RULE)
 if hasattr(advisor_agent, "set_system_instruction"):
-    advisor_agent.set_system_instruction(ADVISOR_PROMPT)
+    advisor_agent.set_system_instruction(ADVISOR_PROMPT + NO_IDS_PROMPT_RULE)
+
 
 langgraph_service = LangGraphService(
     academic_agent=academic_agent,
@@ -300,14 +312,37 @@ async def get_timer_context(user_id: str, db_service: DatabaseService) -> str:
             return ""
         
         desc = active.get("description", "sin descripción")
-        start = active.get("timeInterval", {}).get("start", "")
+        start_raw = active.get("timeInterval", {}).get("start", "")
+        start_str = start_raw
+        elapsed_str = ""
+        if start_raw:
+            try:
+                from zoneinfo import ZoneInfo
+                start_dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+                local_dt = start_dt.astimezone(ZoneInfo("Europe/Madrid"))
+                start_str = local_dt.strftime("%H:%M")
+                
+                # Calcular tiempo transcurrido
+                now_dt = datetime.now(ZoneInfo("Europe/Madrid"))
+                elapsed_seconds = max(0, (now_dt - local_dt).total_seconds())
+                elapsed_mins = int(elapsed_seconds // 60)
+                if elapsed_mins >= 60:
+                    hrs = elapsed_mins // 60
+                    mins = elapsed_mins % 60
+                    elapsed_str = f" (lleva {hrs}h {mins}m activo)"
+                else:
+                    elapsed_str = f" (lleva {elapsed_mins} minutos activo)"
+            except Exception:
+                start_str = start_raw
+
         return (
             f"\n[CONTEXTO DEL SISTEMA: El usuario tiene un cronómetro activo "
-            f"desde {start} para '{desc}'. Si es relevante para la conversación, "
-            f"puedes mencionarlo o recordárselo al usuario.]"
+            f"iniciado a las {start_str} (hora local de España){elapsed_str} para '{desc}'. "
+            f"Si es relevante para la conversación, puedes mencionarlo o recordárselo al usuario.]"
         )
     except Exception:
         return ""
+
  
 app.add_middleware(
     CORSMiddleware,
@@ -416,6 +451,20 @@ async def get_daily_check_context(user_id: str, db_service: DatabaseService, ana
                     f"Desglose por asignaturas: [{subj_info}]. "
                     f"Recuérdale amigablemente su plan de estudio activo y coméntale cómo va con él."
                 )
+
+                if plan_progress.get("has_overdue_tasks"):
+                    overdue_list = plan_progress.get("overdue_tasks", [])
+                    overdue_details = []
+                    for ot in overdue_list:
+                        status_label = "pendiente/sin terminar" if ot.get("status") == "INCUMPLIDA_PENDIENTE" else f"completada con retraso ({ot.get('completed_at')})"
+                        overdue_details.append(f"• '{ot.get('title')}' ({ot.get('subject_name')}, venció: {ot.get('due_date')}, estado: {status_label})")
+                    
+                    context_parts.append(
+                        f" ⚠️ ALERTAS DE INCUMPLIMIENTO/DESVÍO DEL PLAN: Se han detectado tareas no completadas dentro del plazo del plan o retrasadas: "
+                        f"[{'; '.join(overdue_details)}]. "
+                        f"Avisa al usuario con empatía sobre este retraso e incítale a reorganizarse, ya que no se está siguiendo el plan según lo previsto."
+                    )
+
     except Exception as e:
         import sys
         print(f"[DAILY CHECK] Error comprobando plan activo: {e}", file=sys.stderr)
