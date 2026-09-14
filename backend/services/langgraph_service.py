@@ -17,7 +17,7 @@ class GraphState(TypedDict):
     response_text: str
 
 class LangGraphService:
-    ADVISOR_EVERY_N_MESSAGES = 5
+    ADVISOR_EVERY_N_MESSAGES = 40
 
     def __init__(self, academic_agent, wellbeing_agent, general_agent, advisor_agent, orchestrator, mcp_client, db_service, analytics_service=None):
         self.academic_agent = academic_agent
@@ -264,24 +264,15 @@ class LangGraphService:
             return await self.mcp_client.call_tool(name, arguments)
 
         # Extraer sugerencias/recomendaciones previas dadas por el asistente en esta sesión
-        past_advice_list = []
-        for msg in history_msgs:
-            if msg.get("role") == "assistant":
-                agent_used = msg.get("agent_used", "")
-                content = msg.get("content", "")
-                if agent_used and ("ASESOR" in agent_used or "ADVISOR" in agent_used):
-                    past_advice_list.append(content)
-                elif content:
-                    paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
-                    for p in paragraphs:
-                        p_lower = p.lower()
-                        if any(kw in p_lower for kw in ["por cierto", "sugerencia", "consejo", "revisando tus datos", "te sugiero", "un pequeño apunte", "recuerda que", "te aconsejo"]):
-                            past_advice_list.append(p)
+        past_advice_text = self._extract_past_advice(history_msgs)
 
-        recent_past_advice = past_advice_list[-5:]
-        past_advice_text = "\n".join([f"• \"{adv}\"" for adv in recent_past_advice]) if recent_past_advice else "Ninguno todavía en esta sesión."
-
-        # Obtener analytics detalladas usando los tres métodos separados
+        # Comprobar si se ha hablado de tareas en la sesión actual
+        tasks_discussed = self._were_tasks_discussed(history_msgs)
+        tasks_status_note = (
+            "SÍ (ya se ha mencionado el tema de tareas en la sesión)."
+            if tasks_discussed else
+            "NO (¡IMPORTANTE: Si no se ha hablado de tareas hoy y el estudiante tiene tareas pendientes o activas, pregúntale amigablemente cómo las lleva o si quiere ponerse con alguna de ellas!)."
+        )
         academic_text = ""
         wellbeing_text = ""
         patterns_text = ""
@@ -304,6 +295,8 @@ class LangGraphService:
             f"\"\"\"\n{response_text}\n\"\"\"\n\n"
             f"Cuando generes la respuesta, no incluyas la respuesta del agente principal, solo da la recomendación.\n\n"
             f"MOTIVO DEL DISPARADOR: {advisor_trigger}\n\n"
+            f"=== SEGUIMIENTO DE TAREAS HOY ===\n"
+            f"¿Se ha hablado de tareas en esta conversación hoy?: {tasks_status_note}\n\n"
             f"=== CONSEJOS / RECOMENDACIONES DADAS ANTERIORMENTE AL USUARIO EN ESTA SESIÓN ===\n"
             f"{past_advice_text}\n\n"
             f"=== DATOS ACADÉMICOS (últimos 7 días) ===\n"
@@ -314,6 +307,7 @@ class LangGraphService:
             f"{patterns_text}\n\n"
             f"INSTRUCCIONES:\n"
             f"1. Analiza los datos de arriba buscando patrones concretos:\n"
+            f"   - Si NO se ha hablado de tareas hoy y hay tareas pendientes o activas, hazle una pregunta amigable sobre su avance o estado.\n"
             f"   - Asignaturas con pocas horas o baja concentración\n"
             f"   - Días de la semana con peor rendimiento o peor descanso\n"
             f"   - Sesiones nocturnas tardías\n"
@@ -351,7 +345,43 @@ class LangGraphService:
         print(f"[LANGGRAPH ADVISOR NODE] Sin recomendación. Trigger: {advisor_trigger}.", file=sys.stderr)
         return {"response_text": response_text}
 
+    # Helpers de extracción de contexto de la sesión
+    TASK_TOOLS = {"get_tasks", "add_task", "edit_task", "complete_task", "mark_task_active", "delete_task", "set_task_hierarchy", "start_timer", "stop_timer"}
 
+    def _extract_past_advice(self, history_msgs: List[Dict[str, Any]]) -> str:
+        """Extrae de forma limpia los consejos o recomendaciones previas generadas por el asesor en la sesión."""
+        past_advice = []
+        for msg in history_msgs:
+            if msg.get("role") != "assistant":
+                continue
+            agent_used = msg.get("agent_used", "")
+            content = str(msg.get("content", "")).strip()
+            if not content:
+                continue
+
+            # Si la respuesta fue generada o enriquecida por el Asesor
+            if agent_used and ("ASESOR" in agent_used or "ADVISOR" in agent_used):
+                parts = content.split("\n\n")
+                advice_part = parts[-1] if len(parts) > 1 else content
+                past_advice.append(advice_part)
+
+        recent = past_advice[-5:]
+        if not recent:
+            return "Ninguno todavía en esta sesión."
+        return "\n".join([f"• \"{adv}\"" for adv in recent])
+
+    def _were_tasks_discussed(self, history_msgs: List[Dict[str, Any]]) -> bool:
+        """Comprueba si se han ejecutado herramientas relativas a tareas o cronómetros en la sesión."""
+        for msg in history_msgs:
+            tool_calls = msg.get("tool_calls", [])
+            for call in tool_calls:
+                name = call.get("name", "") if isinstance(call, dict) else str(call)
+                if any(tk in name for tk in ["task", "timer"]):
+                    return True
+            content = str(msg.get("content", ""))
+            if any(tool_name in content for tool_name in self.TASK_TOOLS):
+                return True
+        return False
 
     # Helpers de formateo dentro de LangGraphService
 
