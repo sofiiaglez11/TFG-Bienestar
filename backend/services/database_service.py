@@ -415,9 +415,13 @@ class DatabaseService:
         task["_id"] = str(result.inserted_id)
         return task
 
-    async def get_tasks_by_subject(self, subject_id: str, include_completed: bool = True, include_active: bool = True, include_in_progress: bool = True, include_pending: bool = True) -> list:
-        """Devuelve todas las tareas de una asignatura según los filtros de estado."""
-        query = {"subject_id": subject_id}
+    async def get_tasks_by_subject(self, subject_id: str = None, user_id: str = None, include_completed: bool = True, include_active: bool = True, include_in_progress: bool = True, include_pending: bool = True, priorities: list[int] = None) -> list:
+        """Devuelve todas las tareas de una asignatura (o de todas las asignaturas si subject_id es None y se pasa user_id) según filtros de estado y prioridades."""
+        query = {}
+        if subject_id:
+            query["subject_id"] = subject_id
+        elif user_id:
+            query["user_id"] = user_id
         
         # Combinar la opción include_active e include_in_progress por compatibilidad
         want_active = include_active or include_in_progress
@@ -434,8 +438,12 @@ class DatabaseService:
         if len(allowed_statuses) < 4:
             query["status"] = {"$in": allowed_statuses}
 
+        if priorities:
+            # Soportar filtro por lista de prioridades (ej: [1, 2])
+            query["priority"] = {"$in": priorities}
+
         cursor = self.tasks.find(query)
-        tasks = await cursor.to_list(100)
+        tasks = await cursor.to_list(300)
         for t in tasks:
             t["_id"] = str(t["_id"])
         return tasks

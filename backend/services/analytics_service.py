@@ -252,19 +252,7 @@ class AnalyticsService:
             actual_by_subject = {s["name"]: s["total_hours_week"] for s in academic}
             total_actual_hours = sum(actual_by_subject.values())
 
-            progress_by_subject = {}
-            for subj, p_hrs in planned_by_subject.items():
-                a_hrs = actual_by_subject.get(subj, 0.0)
-                pct = round((a_hrs / p_hrs) * 100, 1) if p_hrs > 0 else 100.0
-                progress_by_subject[subj] = {
-                    "planned_hours": p_hrs,
-                    "actual_hours": a_hrs,
-                    "progress_pct": min(100.0, pct)
-                }
-
-            overall_pct = round((total_actual_hours / total_planned_hours) * 100, 1) if total_planned_hours > 0 else 0.0
-
-            # Evaluación de desvíos en tareas asociadas a las fechas del plan
+            # Evaluación de desvíos y tareas asociadas al plan
             overdue_tasks = []
             try:
                 from zoneinfo import ZoneInfo
@@ -272,11 +260,51 @@ class AnalyticsService:
             except Exception:
                 today_str = datetime.now().strftime("%Y-%m-%d")
 
-            cursor = self.db_service.tasks.find({"user_id": user_id, "due_date": {"$ne": None}})
-            all_user_tasks = await cursor.to_list(200)
+            cursor = self.db_service.tasks.find({"user_id": user_id})
+            all_user_tasks = await cursor.to_list(500)
 
             subjects_list = await self.db_service.get_subjects_by_user(user_id, include_archived=True)
             subj_id_to_name = {str(s["_id"]): s.get("name", "Asignatura") for s in subjects_list}
+
+            total_plan_tasks = 0
+            completed_plan_tasks = 0
+            progress_by_subject = {}
+
+            for subj, p_hrs in planned_by_subject.items():
+                a_hrs = actual_by_subject.get(subj, 0.0)
+                h_pct = round((a_hrs / p_hrs) * 100, 1) if p_hrs > 0 else 100.0
+
+                # Tareas de esta asignatura
+                subj_tasks = [t for t in all_user_tasks if subj_id_to_name.get(str(t.get("subject_id")), "").lower() == subj.lower()]
+                subj_total_tasks = len(subj_tasks)
+                subj_completed_tasks = len([t for t in subj_tasks if t.get("status") == "COMPLETED"])
+
+                t_pct = round((subj_completed_tasks / subj_total_tasks) * 100, 1) if subj_total_tasks > 0 else 0.0
+
+                total_plan_tasks += subj_total_tasks
+                completed_plan_tasks += subj_completed_tasks
+
+                # Progreso principal: por tareas si las hay, por horas si no hay tareas todavía
+                main_subj_pct = t_pct if subj_total_tasks > 0 else min(100.0, h_pct)
+
+                progress_by_subject[subj] = {
+                    "planned_hours": p_hrs,
+                    "actual_hours": a_hrs,
+                    "hours_progress_pct": min(100.0, h_pct),
+                    "total_tasks": subj_total_tasks,
+                    "completed_tasks": subj_completed_tasks,
+                    "tasks_progress_pct": t_pct,
+                    "progress_pct": main_subj_pct
+                }
+
+            hours_overall_pct = round((total_actual_hours / total_planned_hours) * 100, 1) if total_planned_hours > 0 else 0.0
+            tasks_overall_pct = round((completed_plan_tasks / total_plan_tasks) * 100, 1) if total_plan_tasks > 0 else 0.0
+
+            # Progreso general priorizando tareas completadas
+            if total_plan_tasks > 0:
+                overall_pct = tasks_overall_pct
+            else:
+                overall_pct = min(100.0, hours_overall_pct)
 
             for t in all_user_tasks:
                 due_d = t.get("due_date")
@@ -307,6 +335,10 @@ class AnalyticsService:
                 "plan_title": plan.get("title", "Plan de Estudio"),
                 "total_planned_hours": round(total_planned_hours, 1),
                 "total_actual_hours": round(total_actual_hours, 1),
+                "hours_overall_pct": min(100.0, hours_overall_pct),
+                "total_plan_tasks": total_plan_tasks,
+                "completed_plan_tasks": completed_plan_tasks,
+                "tasks_overall_pct": tasks_overall_pct,
                 "overall_progress_pct": min(100.0, overall_pct),
                 "progress_by_subject": progress_by_subject,
                 "overdue_tasks": overdue_tasks,

@@ -253,13 +253,7 @@ class LangGraphService:
         user_id = state.get("user_id", "")
         response_text = state.get("response_text", "")
         history_msgs = state.get("history_msgs", [])
-        # tools_raw = state.get("tools_raw", [])
         advisor_trigger = state.get("advisor_trigger", "")
-
-        # read_only_tools = [
-        #     t for t in tools_raw
-        #     if t["name"].startswith("get_") or t["name"].startswith("wb_get_") or t["name"].startswith("list_")
-        # ]
 
         self.advisor_agent.set_config([])
         self.advisor_agent.load_history(history_msgs)
@@ -268,6 +262,24 @@ class LangGraphService:
             if name != "get_agent_capabilities":
                 arguments["user_id"] = user_id
             return await self.mcp_client.call_tool(name, arguments)
+
+        # Extraer sugerencias/recomendaciones previas dadas por el asistente en esta sesión
+        past_advice_list = []
+        for msg in history_msgs:
+            if msg.get("role") == "assistant":
+                agent_used = msg.get("agent_used", "")
+                content = msg.get("content", "")
+                if agent_used and ("ASESOR" in agent_used or "ADVISOR" in agent_used):
+                    past_advice_list.append(content)
+                elif content:
+                    paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+                    for p in paragraphs:
+                        p_lower = p.lower()
+                        if any(kw in p_lower for kw in ["por cierto", "sugerencia", "consejo", "revisando tus datos", "te sugiero", "un pequeño apunte", "recuerda que", "te aconsejo"]):
+                            past_advice_list.append(p)
+
+        recent_past_advice = past_advice_list[-5:]
+        past_advice_text = "\n".join([f"• \"{adv}\"" for adv in recent_past_advice]) if recent_past_advice else "Ninguno todavía en esta sesión."
 
         # Obtener analytics detalladas usando los tres métodos separados
         academic_text = ""
@@ -280,7 +292,6 @@ class LangGraphService:
                 wellbeing_data = await self.analytics_service.get_wellbeing_analytics(user_id, days=7)
                 patterns_data = await self.analytics_service.get_patterns(user_id, days=7)
 
-                # Formateamos cada sección por separado para que el LLM pueda razonar sobre cada una
                 academic_text = self._format_academic(academic_data)
                 wellbeing_text = self._format_wellbeing(wellbeing_data)
                 patterns_text = self._format_patterns(patterns_data)
@@ -293,6 +304,8 @@ class LangGraphService:
             f"\"\"\"\n{response_text}\n\"\"\"\n\n"
             f"Cuando generes la respuesta, no incluyas la respuesta del agente principal, solo da la recomendación.\n\n"
             f"MOTIVO DEL DISPARADOR: {advisor_trigger}\n\n"
+            f"=== CONSEJOS / RECOMENDACIONES DADAS ANTERIORMENTE AL USUARIO EN ESTA SESIÓN ===\n"
+            f"{past_advice_text}\n\n"
             f"=== DATOS ACADÉMICOS (últimos 7 días) ===\n"
             f"{academic_text}\n\n"
             f"=== BIENESTAR (últimos 7 días) ===\n"
@@ -306,15 +319,18 @@ class LangGraphService:
             f"   - Sesiones nocturnas tardías\n"
             f"   - Desequilibrio entre asignaturas (una muy desatendida vs otra con muchas horas)\n"
             f"   - Relación entre mal descanso y baja concentración al día siguiente\n"
-            f"2. Si encuentras un patrón relevante, redacta UNA recomendación concreta y empática.\n"
-            f"   CITA DATOS ESPECÍFICOS: nombra la asignatura, el día, las horas concretas.\n"
-            f"   Ejemplo correcto: 'He visto que los martes dedicas solo 20 min a Física y tu estado de ánimo ese día es de 2/5...'\n"
-            f"   Ejemplo incorrecto: 'Deberías descansar más y estudiar mejor...'\n"
-            f"3. Introduce la recomendación con una frase natural como:\n"
+            f"2. REGLA ESTRICTA DE NO REPETICIÓN:\n"
+            f"   - Revisa la lista de 'CONSEJOS / RECOMENDACIONES DADAS ANTERIORMENTE' arriba.\n"
+            f"   - Si el consejo o patrón que vas a sugerir ES EL MISMO o MUY SIMILAR a uno que ya le diste anteriormente:\n"
+            f"     a) Si no hay novedad sustancial, responde exactamente: NO_ADVICE (no repitas el mismo consejo).\n"
+            f"     b) Si la situación es urgente y exige volver a mencionarlo, NO des la explicación larga; RESÚMELA AL MÁXIMO en 1 sola frase corta usando una muletilla como 'Como te comenté antes...' o 'Como pequeña sugerencia rápida...'.\n"
+            f"3. Si encuentras un patrón NUEVO y relevante, redacta UNA recomendación concreta y empática citando datos específicos (asignatura, día, horas).\n"
+            f"4. Introduce la recomendación con una frase natural como:\n"
             f"   'Por cierto, revisando tus datos de esta semana...' o 'Un pequeño apunte sobre tu progreso:...'\n"
-            f"4. Si los datos son equilibrados y no hay nada destacable, responde exactamente: NO_ADVICE\n"
-            f"5. NUNCA uses separadores como '---', HTML ni markdown excesivo."
+            f"5. Si los datos son equilibrados y no hay nada destacable, responde exactamente: NO_ADVICE\n"
+            f"6. NUNCA uses separadores como '---', HTML ni markdown excesivo."
         )
+
 
         result = await self.advisor_agent.run_agentic_conversation(
             user_message=prompt_advisor,
@@ -324,13 +340,17 @@ class LangGraphService:
         advice_text = (result.text or "").strip()
         if advice_text and "NO_ADVICE" not in advice_text:
             updated_response = f"{response_text}\n\n{advice_text}"
-            # updated_response = advice_text
+            active_dom = state.get("active_domain", "ACADEMICO")
 
             print(f"[LANGGRAPH ADVISOR NODE] Recomendación añadida (Trigger: {advisor_trigger}).", file=sys.stderr)
-            return {"response_text": updated_response}
+            return {
+                "response_text": updated_response,
+                "active_domain": f"{active_dom}+ASESOR"
+            }
 
         print(f"[LANGGRAPH ADVISOR NODE] Sin recomendación. Trigger: {advisor_trigger}.", file=sys.stderr)
         return {"response_text": response_text}
+
 
 
     # Helpers de formateo dentro de LangGraphService

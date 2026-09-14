@@ -893,48 +893,68 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
  
 
 @mcp.tool()
-async def get_tasks(user_id: str, subject_name: str, include_completed: bool = True, include_active: bool = True, include_in_progress: bool = True, include_pending: bool = True):
+async def get_tasks(user_id: str, subject_name: Optional[str] = None, include_completed: bool = True, include_active: bool = True, include_pending: bool = True, priorities: Optional[list[int]] = None):
     """
-    Devuelve las tareas de una asignatura como datos estructurados (JSON).
-    Úsala cuando el usuario pregunte 'qué tareas tengo de X' o 'muéstrame las tareas de X'.
+    Devuelve las tareas como datos estructurados (JSON).
+    Úsala cuando el usuario pregunte por sus tareas en general ('qué tareas tengo', 'tareas de prioridad 1 y 2') o de una asignatura concreta ('tareas de Matemáticas').
+
+    - Si `subject_name` es None, 'todas' o 'all', devuelve las tareas de TODAS las asignaturas del usuario en una sola llamada.
+    - `priorities`: lista opcional de enteros de prioridad (1-5) para filtrar directamente (ej: [1, 2] para obtener tareas de prioridad 1 y 2).
 
     La respuesta es un JSON con esta estructura:
     {
-      "subject": "Nombre asignatura",
+      "subject": "Nombre asignatura o 'Todas las asignaturas'",
       "total": N,
       "tasks": [
         {
           "title": "...",
+          "subject": "Nombre asignatura",
           "status": "COMPLETED" | "ACTIVE" | "PENDING",
+          "priority": 1..5,        // 1=prioridad MÁS ALTA, 5=mínima
           "due_date": "...",      // null si no tiene fecha
           "description": "...",
           "subtasks": [           // lista vacía si no tiene subtareas
-            { "title": "...", "status": "COMPLETED" | "ACTIVE" | "PENDING", "due_date": "...", "description": "..." }
+            { "title": "...", "subject": "...", "status": "COMPLETED" | "ACTIVE" | "PENDING", "priority": 1..5, "due_date": "...", "description": "..." }
           ]
         }
       ]
     }
 
     Interpreta estos datos para presentarlos de forma clara al usuario:
+    - Muestra la asignatura a la que pertenece cada tarea si se consultan todas las asignaturas
     - Muestra cada tarea principal y debajo sus subtareas con jerarquía visible
     - Clasifica e indica su estado diferenciando claramente entre ACTIVAS ⚡, PENDIENTES ⏳ y COMPLETADAS ✅
-    - Menciona la fecha de vencimiento si existe
+    - Menciona la fecha de vencimiento y prioridad si existen
     """
     try:
-        print(f"[MCP TOOL: GET_TASKS] Iniciando consulta para user_id={user_id}", file=sys.stderr, flush=True)
-        subject = await _find_subject_by_name(user_id, subject_name)
-        if not subject:
-            return f"No encontré ninguna asignatura llamada '{subject_name}'."
+        print(f"[MCP TOOL: GET_TASKS] user_id={user_id}, subject_name='{subject_name}', priorities={priorities}", file=sys.stderr, flush=True)
+        
+        is_all = not subject_name or subject_name.strip().lower() in ["todas", "all", "none", ""]
+        subject_id = None
+        target_subject_name = "Todas las asignaturas"
+
+        # Mapeo de IDs de asignatura a nombres
+        user_subjects = await db_service.get_subjects_by_user(user_id)
+        subject_id_to_name = {str(s["_id"]): s.get("name", "") for s in user_subjects}
+
+        if not is_all:
+            subject = await _find_subject_by_name(user_id, subject_name)
+            if not subject:
+                return f"No encontré ninguna asignatura llamada '{subject_name}'."
+            subject_id = subject["_id"]
+            target_subject_name = subject.get("name", subject_name)
 
         all_tasks = await db_service.get_tasks_by_subject(
-            subject["_id"],
+            subject_id=subject_id,
+            user_id=user_id,
             include_completed=include_completed,
             include_active=include_active,
-            include_in_progress=include_in_progress,
-            include_pending=include_pending
+            include_pending=include_pending,
+            priorities=priorities
         )
         if not all_tasks:
-            return f"No tienes tareas registradas para '{subject_name}'."
+            filtro_prioridad = f" de prioridad {priorities}" if priorities else ""
+            return f"No tienes tareas registradas{filtro_prioridad} para '{target_subject_name}'."
 
         # Separar tareas raíz de subtareas y agruparlas por padre
         all_task_ids = {t["_id"] for t in all_tasks}
@@ -952,8 +972,10 @@ async def get_tasks(user_id: str, subject_name: str, include_completed: bool = T
         def serialize(t):
             children = subtasks_by_parent.get(t["_id"], [])
             children.sort(key=lambda st: st.get("priority") or 6)
+            s_name = subject_id_to_name.get(t.get("subject_id"), target_subject_name)
             return {
                 "title": t.get("title"),
+                "subject": s_name,
                 "status": t.get("status"),
                 "due_date": t.get("due_date"),
                 "description": t.get("description") or "",
@@ -968,7 +990,7 @@ async def get_tasks(user_id: str, subject_name: str, include_completed: bool = T
         tasks_data = [serialize(root) for root in root_tasks]
 
         return json.dumps({
-            "subject": subject_name,
+            "subject": target_subject_name,
             "total": len(all_tasks),
             "tasks": tasks_data
         }, ensure_ascii=False, indent=2)
@@ -1816,7 +1838,7 @@ async def edit_logged_study_hours(user_id: str, time_entry_id: Optional[str] = N
         if isinstance(res, dict) and res.get("error"):
             return f"Error al actualizar la entrada de tiempo: {res['error']}"
 
-        return "Entrada de tiempo actualizada correctamente en Clockify."
+        return f"Entrada de tiempo '{target_id}' actualizada correctamente en Clockify."
     except Exception as e:
         print(f"[MCP TOOL ERROR: EDIT_LOGGED_STUDY_HOURS] {e}", file=sys.stderr, flush=True)
         return f"Error al editar la entrada de tiempo: {str(e)}"
@@ -1881,7 +1903,7 @@ async def delete_time_entry(user_id: str, time_entry_id: Optional[str] = None, s
         if isinstance(res, dict) and res.get("error"):
             return f"Error al eliminar la entrada de tiempo: {res['error']}"
 
-        return "Sesión de estudio eliminada correctamente de Clockify."
+        return f"Entrada de tiempo '{target_id}' eliminada correctamente de Clockify."
     except Exception as e:
         print(f"[MCP TOOL ERROR: DELETE_TIME_ENTRY] {e}", file=sys.stderr, flush=True)
         return f"Error al eliminar la entrada de tiempo: {str(e)}"
@@ -1979,7 +2001,7 @@ async def wb_get_latest_time_entry(user_id: str):
         start = latest.get("timeInterval", {}).get("start", "")
         end = latest.get("timeInterval", {}).get("end", "")
         
-        return f"Última sesión en Clockify: Asignatura='{proj_name}', Descripción='{desc}', Inicio={start}, Fin={end}"
+        return f"Última sesión en Clockify: ID={entry_id}, Asignatura='{proj_name}', Descripción='{desc}', Inicio={start}, Fin={end}"
     except Exception as e:
         return f"Error al consultar la última sesión de tiempo: {str(e)}"
 
@@ -2041,7 +2063,7 @@ async def wb_add_study_report(
             mood_after=mood_after,
             notes=notes,
         )
-        return "Informe de sesión guardado correctamente."
+        return f"Informe de sesión guardado correctamente (ID: {report['_id']})."
     except Exception as e:
         return f"Error al guardar el informe de sesión: {str(e)}"
 
@@ -2250,7 +2272,7 @@ async def create_study_plan(
             start_date=start_date,
             end_date=end_date
         )
-        return f"¡Plan de estudio '{title}' guardado correctamente! El sistema realizará el seguimiento del progreso automáticamente."
+        return f"¡Plan de estudio '{title}' guardado correctamente! ID del plan: {plan['_id']}. El sistema realizará el seguimiento del progreso automáticamente."
     except Exception as e:
         return f"Error al guardar el plan de estudio: {str(e)}"
 
