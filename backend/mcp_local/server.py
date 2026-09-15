@@ -1332,12 +1332,15 @@ async def delete_task(user_id: str, subject_name: str, task_title: str):
         clockify_proj_id = subject.get("clockify_project_id")
         if clockify_task_id and clockify_proj_id:
             try:
+
                 cs = await _get_user_clockify_service(user_id)
-                cs_resp = cs.delete_task(
+                cs.delete_task(
                     project_id=clockify_proj_id,
                     task_id=clockify_task_id,
                     task_name=task.get("title")
                 )
+                print("[TOOL DELETE TASK] Tarea eliminada de Clockify", file=sys.stderr, flush=True)
+
             except Exception as ce:
                 # NO BORRAR DE MONGO SI CLOCKIFY FALLA (para evitar inconsistencias)
                 return (
@@ -1346,8 +1349,9 @@ async def delete_task(user_id: str, subject_name: str, task_title: str):
                 )
 
 
-        # 2. Eliminar en MongoDB (tarea y sus time_entries)
+        # 2. Eliminar en MongoDB 
         await db_service.delete_task(task["_id"])
+        print("[TOOL DELETE TASK] Tarea eliminada de MongoDB", file=sys.stderr, flush=True)
         return f"Tarea '{task_title}' y todos sus tiempos eliminados permanentemente tanto de Clockify como de la base de datos."
     except Exception as e:
         return f"Error al eliminar la tarea: {str(e)}"

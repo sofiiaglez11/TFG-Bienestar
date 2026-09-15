@@ -113,7 +113,7 @@ export default function ChatPage() {
         const data = await res.json();
         setClockifyConnected(data.connected);
         localStorage.setItem("clockifyConnected", data.connected.toString());
-        // Si ya está conectado, cargamos el historial normalmente
+        // Si ya está conectado, cargar el historial normalmente
         if (data.connected) {
           loadChatHistory(token);
         }
@@ -213,7 +213,7 @@ export default function ChatPage() {
       return;
     }
 
-    // Añadimos inmediatamente el mensaje del usuario a la pantalla
+    // Añadir inmediatamente el mensaje del usuario a la pantalla
     const userMessage = {
       role: "user",
       content: text,
@@ -647,125 +647,139 @@ export default function ChatPage() {
           overflow: "hidden",
         }}
       >
-        {activeTab === "chat" ? (
-          <>
-            {/* Banner de bienvenida/onboarding si Clockify no está configurado */}
-            {/* Si Clockify no está conectado, mostramos la tarjeta centrada en el chat */}
-            {!clockifyConnected ? (
+        <div
+          style={{
+            flex: 1,
+            display: activeTab === "chat" ? "flex" : "none",
+            flexDirection: "column",
+            height: "100%",
+            position: "relative",
+            overflow: "hidden",
+          }}
+        >
+          {/* Banner de bienvenida/onboarding si Clockify no está configurado */}
+          {!clockifyConnected ? (
+            <div
+              style={{
+                flex: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "20px",
+              }}
+            >
               <div
                 style={{
-                  flex: 1,
+                  maxWidth: "480px",
+                  width: "100%",
+                  padding: "32px",
+                  borderRadius: "20px",
+                  background: "var(--bg-surface)",
+                  border: "1px solid var(--border)",
+                  boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.05)",
+                  textAlign: "center",
                   display: "flex",
+                  flexDirection: "column",
                   alignItems: "center",
-                  justifyContent: "center",
-                  padding: "20px",
+                  gap: "18px",
                 }}
               >
                 <div
                   style={{
-                    maxWidth: "480px",
-                    width: "100%",
-                    padding: "32px",
-                    borderRadius: "20px",
-                    background: "var(--bg-surface)",
-                    border: "1px solid var(--border)",
-                    boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.05)",
-                    textAlign: "center",
+                    width: "56px",
+                    height: "56px",
+                    borderRadius: "16px",
+                    background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
                     display: "flex",
-                    flexDirection: "column",
                     alignItems: "center",
-                    gap: "18px",
+                    justifyContent: "center",
+                    fontSize: "28px",
                   }}
                 >
-                  <div
-                    style={{
-                      width: "56px",
-                      height: "56px",
-                      borderRadius: "16px",
-                      background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: "28px",
-                    }}
-                  >
-                    🎓
-                  </div>
-
-                  <div>
-                    <h2 style={{ margin: "0 0 6px 0", fontSize: "20px", color: "var(--text-primary)" }}>
-                      ¡Bienvenido/a, {userName}!
-                    </h2>
-                    <p style={{ margin: 0, fontSize: "14px", color: "var(--text-secondary)", lineHeight: "1.5" }}>
-                      Conecta tu cuenta de Clockify para que te pueda ayudar a analizar tus hábitos de estudio.
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={() => setShowClockifyModal(true)}
-                    style={{
-                      width: "100%",
-                      padding: "12px 20px",
-                      borderRadius: "10px",
-                      border: "none",
-                      background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                      color: "#ffffff",
-                      fontWeight: "600",
-                      fontSize: "14px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "8px",
-                      boxShadow: "0 4px 12px rgba(99,102,241,0.25)",
-                      transition: "transform 0.1s ease, opacity 0.2s",
-                    }}
-                    onMouseOver={(e) => (e.currentTarget.style.opacity = "0.9")}
-                    onMouseOut={(e) => (e.currentTarget.style.opacity = "1")}
-                  >
-                    Vincular Clockify
-                  </button>
+                  🎓
                 </div>
+
+                <div>
+                  <h2 style={{ margin: "0 0 6px 0", fontSize: "20px", color: "var(--text-primary)" }}>
+                    ¡Bienvenido/a, {userName}!
+                  </h2>
+                  <p style={{ margin: 0, fontSize: "14px", color: "var(--text-secondary)", lineHeight: "1.5" }}>
+                    Conecta tu cuenta de Clockify para que te pueda ayudar a analizar tus hábitos de estudio.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setShowClockifyModal(true)}
+                  style={{
+                    width: "100%",
+                    padding: "12px 20px",
+                    borderRadius: "10px",
+                    border: "none",
+                    background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                    color: "#ffffff",
+                    fontWeight: "600",
+                    fontSize: "14px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                    boxShadow: "0 4px 12px rgba(99,102,241,0.25)",
+                    transition: "transform 0.1s ease, opacity 0.2s",
+                  }}
+                  onMouseOver={(e) => (e.currentTarget.style.opacity = "0.9")}
+                  onMouseOut={(e) => (e.currentTarget.style.opacity = "1")}
+                >
+                  Vincular Clockify
+                </button>
               </div>
-            ) : (
-              <>
-                {/* Message Area */}
-                <ChatWindow
-                  messages={messages}
-                  isLoading={isLoading}
-                  hasMore={hasMore}
-                  isLoadingMore={isLoadingMore}
-                  onLoadMore={loadMoreMessages}
-                />
+            </div>
+          ) : (
+            <>
+              {/* Message Area */}
+              <ChatWindow
+                messages={messages}
+                isLoading={isLoading}
+                hasMore={hasMore}
+                isLoadingMore={isLoadingMore}
+                onLoadMore={loadMoreMessages}
+              />
 
-                {/* Error Banner */}
-                {error && (
-                  <div
-                    style={{
-                      margin: "0 16px 8px",
-                      padding: "10px 14px",
-                      background: "#fef2f2",
-                      border: "1px solid #fecaca",
-                      borderRadius: "8px",
-                      color: "#dc2626",
-                      fontSize: "13px",
-                    }}
-                  >
-                    {error}
-                  </div>
-                )}
+              {/* Error Banner */}
+              {error && (
+                <div
+                  style={{
+                    margin: "0 16px 8px",
+                    padding: "10px 14px",
+                    background: "#fef2f2",
+                    border: "1px solid #fecaca",
+                    borderRadius: "8px",
+                    color: "#dc2626",
+                    fontSize: "13px",
+                  }}
+                >
+                  {error}
+                </div>
+              )}
 
-                {/* Input */}
-                <ChatInput onSend={sendMessage} isLoading={isLoading} />
-              </>
-            )}
-          </>
-        ) : (
+              {/* Input */}
+              <ChatInput onSend={sendMessage} isLoading={isLoading} />
+            </>
+          )}
+        </div>
 
-          <div style={{ flex: 1, padding: "24px", overflow: "hidden" }}>
-            <StudentDashboard isInline={true} />
-          </div>
-        )}
+        <div
+          style={{
+            flex: 1,
+            display: activeTab === "stats" ? "flex" : "none",
+            flexDirection: "column",
+            height: "100%",
+            padding: "24px",
+            overflow: "hidden",
+          }}
+        >
+          <StudentDashboard isInline={true} />
+        </div>
       </div>
 
       {/* Modals */}

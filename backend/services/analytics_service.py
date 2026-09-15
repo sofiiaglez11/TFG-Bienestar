@@ -200,6 +200,8 @@ class AnalyticsService:
 
         late_sessions = []
         hours_by_weekday = {}
+        # Registrar la fecha concreta de cada día de la semana para mostrarla en el frontend
+        date_by_weekday = {}
 
         for e in clockify_entries:
             start_str = e.get("start") or e.get("timeInterval", {}).get("start")
@@ -215,6 +217,10 @@ class AnalyticsService:
                     day = WEEKDAYS.get(start_dt.weekday(), start_dt.strftime("%A"))
                     duration_hrs = (end_dt - start_dt).total_seconds() / 3600.0
                     hours_by_weekday[day] = hours_by_weekday.get(day, 0.0) + duration_hrs
+                    # Guardar la fecha más reciente conocida para cada día de la semana
+                    date_str = start_dt.strftime("%Y-%m-%d")
+                    if day not in date_by_weekday or date_str > date_by_weekday[day]:
+                        date_by_weekday[day] = date_str
                 except Exception:
                     pass
 
@@ -227,7 +233,9 @@ class AnalyticsService:
             "late_night_sessions": late_sessions,
             "hours_by_weekday": {d: round(h, 1) for d, h in hours_by_weekday.items()},
             "most_productive_weekday": most_prod,
+            "most_productive_date": date_by_weekday.get(most_prod) if most_prod else None,
             "least_productive_weekday": least_prod,
+            "least_productive_date": date_by_weekday.get(least_prod) if least_prod else None,
             "study_plan_progress": plan_progress
         }
 
@@ -395,3 +403,261 @@ class AnalyticsService:
             lines.append(f"  - Día con peor estado de ánimo: {wellbeing['worst_day']}")
 
         return "\n".join(lines)
+
+    async def get_time_breakdown(self, user_id: str, days: int = 30) -> dict:
+        """
+        Calcula el tiempo dedicado desglosado por:
+        1. Asignatura
+        2. Tarea
+        3. Etiqueta (Tag)
+        """
+        subjects = await self.db_service.get_subjects_by_user(user_id, include_archived=True)
+        proj_to_subj = {s.get("clockify_project_id"): s.get("name") for s in subjects if s.get("clockify_project_id")}
+
+        cs = await self._get_user_clockify_service(user_id)
+        clockify_entries = []
+        if cs:
+            try:
+                clockify_entries = await asyncio.to_thread(cs.get_time_entries, days_back=days)
+            except Exception as e:
+                print(f"[ANALYTICS] Error al obtener entradas para breakdown: {e}", file=sys.stderr)
+
+        subj_hours = {}
+        task_hours = {}
+        tag_hours = {}
+        total_tracked_seconds = 0.0
+
+        # Construir mapa de tareas desde MongoDB:
+        # - title_lower -> tags[]  (para match por descripción de Clockify)
+        # - clockify_task_id -> tags[]  (para match exacto por ID si existe)
+        task_title_to_tags = {}    # key: título en minúsculas
+        task_ck_id_to_tags = {}    # key: clockify_task_id
+        try:
+            user_tasks = await self.db_service.get_tasks_by_subject(user_id=user_id)
+            for t in user_tasks:
+                tags = [tag for tag in (t.get("tags") or []) if tag and isinstance(tag, str)]
+                title_clean = (t.get("title") or "").lower().strip()
+                ck_id = t.get("clockify_task_id")
+                if title_clean:
+                    task_title_to_tags[title_clean] = tags
+                if ck_id:
+                    task_ck_id_to_tags[ck_id] = tags
+        except Exception as e:
+            print(f"[ANALYTICS] Error al leer tareas de MongoDB: {e}", file=sys.stderr)
+
+        for entry in clockify_entries:
+            start_str = entry.get("start") or entry.get("timeInterval", {}).get("start")
+            end_str = entry.get("end") or entry.get("timeInterval", {}).get("end")
+            if not (start_str and end_str):
+                continue
+            try:
+                dt1 = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                dt2 = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                duration_sec = max(0.0, (dt2 - dt1).total_seconds())
+                total_tracked_seconds += duration_sec
+                hrs = duration_sec / 3600.0
+
+                pid = entry.get("projectId")
+                subj_name = proj_to_subj.get(pid, "General / Otras")
+                subj_hours[subj_name] = subj_hours.get(subj_name, 0.0) + hrs
+
+                task_desc = entry.get("description") or (entry.get("task", {}) or {}).get("name") or "Estudio general"
+                t_key = f"{task_desc} ({subj_name})"
+                task_hours[t_key] = task_hours.get(t_key, 0.0) + hrs
+
+                # Buscar tags en MongoDB:
+                # 1. Por clockify_task_id de la entry si existe
+                # 2. Por match de descripción con el título de la tarea
+                ck_task_id = (entry.get("task") or {}).get("id") if isinstance(entry.get("task"), dict) else None
+                db_tags = []
+                if ck_task_id and ck_task_id in task_ck_id_to_tags:
+                    db_tags = task_ck_id_to_tags[ck_task_id]
+                else:
+                    desc_clean = (task_desc or "").lower().strip()
+                    if desc_clean in task_title_to_tags:
+                        db_tags = task_title_to_tags[desc_clean]
+
+                if db_tags:
+                    for tag in db_tags:
+                        tag_hours[tag] = tag_hours.get(tag, 0.0) + hrs
+                else:
+                    tag_hours["Sin etiqueta"] = tag_hours.get("Sin etiqueta", 0.0) + hrs
+            except Exception:
+                pass
+
+        total_tracked_hours = (total_tracked_seconds / 3600.0) if total_tracked_seconds > 0 else 1.0
+
+        by_subject = [
+            {"name": name, "hours": round(h, 2), "percentage": round((h / total_tracked_hours) * 100, 1)}
+            for name, h in sorted(subj_hours.items(), key=lambda x: x[1], reverse=True)
+        ]
+        by_task = [
+            {"title": name, "hours": round(h, 2), "minutes": round(h * 60)}
+            for name, h in sorted(task_hours.items(), key=lambda x: x[1], reverse=True)
+        ]
+        by_tag = [
+            {"tag": name, "hours": round(h, 2), "percentage": round((h / total_tracked_hours) * 100, 1)}
+            for name, h in sorted(tag_hours.items(), key=lambda x: x[1], reverse=True)
+            if name  # Filtrar entradas vacías
+        ]
+
+        return {
+            "by_subject": by_subject,
+            "by_task": by_task[:15],
+            "by_tag": by_tag
+        }
+
+    async def get_extended_subject_metrics(self, user_id: str) -> dict:
+        """
+        Calcula las estadísticas avanzadas por asignatura:
+        - Tareas completadas/no completadas última semana.
+        - Tareas creadas total vs completadas.
+        - Comparación de horas semana actual vs semana previa.
+        - Tareas pospuestas (fuera de plazo).
+        - Tareas desatendidas (sin tiempo o < 15 min).
+        """
+        subjects = await self.db_service.get_subjects_by_user(user_id, include_archived=True)
+        cs = await self._get_user_clockify_service(user_id)
+
+        # Entradas de tiempo de los últimos 14 días para comparar 0-7d vs 7-14d
+        clockify_entries_14d = []
+        if cs:
+            try:
+                clockify_entries_14d = await asyncio.to_thread(cs.get_time_entries, days_back=14)
+            except Exception as e:
+                print(f"[ANALYTICS] Error al obtener 14d clockify entries: {e}", file=sys.stderr)
+
+        now_utc = datetime.now(timezone.utc)
+        seven_days_ago = now_utc - timedelta(days=7)
+        fourteen_days_ago = now_utc - timedelta(days=14)
+        today_str = now_utc.strftime("%Y-%m-%d")
+
+        all_tasks = await self.db_service.get_tasks_by_subject(user_id=user_id)
+
+        metrics_by_subject = {}
+
+        for subject in subjects:
+            s_id = str(subject["_id"])
+            s_name = subject.get("name", "Asignatura")
+            clockify_proj_id = subject.get("clockify_project_id")
+
+            # 1. Comparación de horas semanal (0-7d vs 7-14d)
+            current_week_secs = 0.0
+            prev_week_secs = 0.0
+
+            subj_entries_14d = [
+                e for e in clockify_entries_14d
+                if clockify_proj_id and e.get("projectId") == clockify_proj_id
+            ]
+
+            for e in subj_entries_14d:
+                start_str = e.get("start") or e.get("timeInterval", {}).get("start")
+                end_str = e.get("end") or e.get("timeInterval", {}).get("end")
+                if start_str and end_str:
+                    try:
+                        s_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                        e_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                        dur_sec = max(0.0, (e_dt - s_dt).total_seconds())
+
+                        if s_dt >= seven_days_ago:
+                            current_week_secs += dur_sec
+                        elif s_dt >= fourteen_days_ago:
+                            prev_week_secs += dur_sec
+                    except Exception:
+                        pass
+
+            curr_week_hrs = round(current_week_secs / 3600.0, 1)
+            prev_week_hrs = round(prev_week_secs / 3600.0, 1)
+
+            if prev_week_hrs > 0:
+                change_pct = round(((curr_week_hrs - prev_week_hrs) / prev_week_hrs) * 100, 1)
+            else:
+                change_pct = 100.0 if curr_week_hrs > 0 else 0.0
+
+            # 2. Tareas de esta asignatura
+            subj_tasks = [t for t in all_tasks if str(t.get("subject_id")) == s_id]
+            total_tasks_created = len(subj_tasks)
+            total_tasks_completed = sum(1 for t in subj_tasks if t.get("status") == "COMPLETED" or t.get("completed"))
+
+            # Tareas última semana (creadas o con vencimiento en últimos 7 días)
+            last_week_tasks = []
+            for t in subj_tasks:
+                c_at = t.get("created_at")
+                d_date = t.get("due_date")
+                is_recent = False
+                if c_at:
+                    try:
+                        c_dt = datetime.fromisoformat(str(c_at).replace("Z", "+00:00"))
+                        if c_dt >= seven_days_ago:
+                            is_recent = True
+                    except Exception:
+                        pass
+                if d_date and not is_recent:
+                    d_clean = d_date[:10] if len(d_date) >= 10 else d_date
+                    if d_clean >= (seven_days_ago.strftime("%Y-%m-%d")):
+                        is_recent = True
+                if is_recent:
+                    last_week_tasks.append(t)
+
+            completed_last_week = sum(1 for t in last_week_tasks if t.get("status") == "COMPLETED" or t.get("completed"))
+            pending_last_week = len(last_week_tasks) - completed_last_week
+
+            # 3. Tareas pospuestas / entregadas fuera de plazo
+            overdue_tasks = []
+            for t in subj_tasks:
+                due_d = t.get("due_date")
+                status = t.get("status")
+                completed_at = t.get("completed_at")
+                due_d_clean = due_d[:10] if due_d and len(due_d) >= 10 else due_d
+
+                if due_d_clean and due_d_clean < today_str and status != "COMPLETED":
+                    overdue_tasks.append(t.get("title", "Tarea sin título"))
+                elif due_d_clean and completed_at and str(completed_at)[:10] > due_d_clean:
+                    overdue_tasks.append(t.get("title", "Tarea sin título"))
+
+            # 4. Tareas desatendidas (sin tiempo o < 15 min asignados)
+            # Mapear tiempo estudiado por tarea desde las entradas de Clockify
+            task_time_map = {}
+            for e in subj_entries_14d:
+                desc = (e.get("description") or "").lower().strip()
+                start_str = e.get("start") or e.get("timeInterval", {}).get("start")
+                end_str = e.get("end") or e.get("timeInterval", {}).get("end")
+                if desc and start_str and end_str:
+                    try:
+                        s_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                        e_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                        dur_min = (e_dt - s_dt).total_seconds() / 60.0
+                        task_time_map[desc] = task_time_map.get(desc, 0.0) + dur_min
+                    except Exception:
+                        pass
+
+            neglected_tasks = []
+            for t in subj_tasks:
+                if t.get("status") != "COMPLETED" and not t.get("completed"):
+                    t_title_clean = (t.get("title") or "").lower().strip()
+                    time_spent = task_time_map.get(t_title_clean, 0.0)
+                    if time_spent < 15.0: # menos de 15 minutos
+                        neglected_tasks.append(t.get("title", "Tarea sin título"))
+
+            metrics_by_subject[s_id] = {
+                "subject_name": s_name,
+                "weekly_comparison": {
+                    "current_week_hours": curr_week_hrs,
+                    "previous_week_hours": prev_week_hrs,
+                    "change_pct": change_pct
+                },
+                "total_tasks_created": total_tasks_created,
+                "total_tasks_completed": total_tasks_completed,
+                "last_week_tasks": {
+                    "total": len(last_week_tasks),
+                    "completed": completed_last_week,
+                    "pending": pending_last_week
+                },
+                "overdue_tasks_count": len(overdue_tasks),
+                "overdue_tasks": overdue_tasks,
+                "neglected_tasks_count": len(neglected_tasks),
+                "neglected_tasks": neglected_tasks
+            }
+
+        return metrics_by_subject
+

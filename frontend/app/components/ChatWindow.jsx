@@ -10,9 +10,10 @@ export default function ChatWindow({
 }) {
   const containerRef = useRef(null);
   const bottomRef = useRef(null);
-  const prevMessagesLengthRef = useRef(messages.length);
+  const prevMessagesLengthRef = useRef(0);
   const prevScrollHeightRef = useRef(0);
   const isPrependingRef = useRef(false);
+  const isFirstMountRef = useRef(true);
 
   // Para detectar el scroll cerca del top (y cargar mensajes más antiguos)
   const handleScroll = () => {
@@ -33,7 +34,12 @@ export default function ChatWindow({
     const prevLen = prevMessagesLengthRef.current;
     const currLen = messages.length;
 
-    if (isPrependingRef.current && currLen > prevLen) {
+    if (isFirstMountRef.current) {
+      isFirstMountRef.current = false;
+      if (currLen > 0) {
+        bottomRef.current?.scrollIntoView({ behavior: "instant" });
+      }
+    } else if (isPrependingRef.current && currLen > prevLen) {
       // Para mantener la posición del scroll tras cargar los mensajes antiguos
       const heightDifference = container.scrollHeight - prevScrollHeightRef.current;
       container.scrollTop = heightDifference;

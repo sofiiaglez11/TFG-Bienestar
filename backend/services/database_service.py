@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from bson import ObjectId
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
+import sys
 
  
  
@@ -22,7 +23,6 @@ class DatabaseService:
         self.periods = self.db["periods"]
         self.subjects = self.db["subjects"]
         self.tasks = self.db["tasks"]
-        # self.time_entries = self.db["time_entries"]
         self.history = self.db["history"]
         self.wellbeing_entries = self.db["wellbeing_entries"]
         self.study_reports = self.db["study_reports"]
@@ -206,9 +206,9 @@ class DatabaseService:
         )
         return clockify_data
 
-    async def update_clockify_key(self, user_id: str, api_key: str):
-        """Compatibilidad: Actualiza la API key de Clockify de un usuario."""
-        return await self.update_clockify_credentials(user_id=user_id, auth_type="api_key", token=api_key)
+    # async def update_clockify_key(self, user_id: str, api_key: str):
+    #     """Compatibilidad: Actualiza la API key de Clockify de un usuario."""
+    #     return await self.update_clockify_credentials(user_id=user_id, auth_type="api_key", token=api_key)
 
     async def get_clockify_credentials(self, user_id: str) -> dict | None:
         """Devuelve las credenciales de Clockify de un usuario."""
@@ -496,14 +496,19 @@ class DatabaseService:
 
     async def delete_task(self, task_id: str):
         """Elimina una tarea por su ID, eliminando también sus subtareas y entradas de tiempo."""
+
+        print(f"[DEBUG] El ID de la tarea a eliminar es: {task_id}", file=sys.stderr)
         str_id = str(task_id)
         task_oid = ObjectId(str_id)
         # Eliminar entradas de tiempo vinculadas
-        await self.time_entries.delete_many({"task_id": str_id})
+        # await self.time_entries.delete_many({"task_id": str_id})
+        # print(f"[DEBUG] Entradas de tiempo eliminadas", file=sys.stderr)
         # Eliminar subtareas
         await self.tasks.delete_many({"parent_task_id": str_id})
         # Eliminar la propia tarea
         await self.tasks.delete_one({"_id": task_oid})
+        print(f"[DEBUG] Tarea eliminada", file=sys.stderr)
+
 
 
     async def get_tasks_by_tag(self, user_id: str, tag: str) -> list:
@@ -586,9 +591,9 @@ class DatabaseService:
     #         entry["_id"] = str(entry["_id"])
     #     return entry
  
-    async def delete_time_entry(self, time_entry_id: str):
-        """Elimina una entrada de tiempo por su ID."""
-        await self.time_entries.delete_one({"_id": ObjectId(time_entry_id)})
+    # async def delete_time_entry(self, time_entry_id: str):
+    #     """Elimina una entrada de tiempo por su ID."""
+    #     await self.time_entries.delete_one({"_id": ObjectId(time_entry_id)})
  
  
     # ############################################################################

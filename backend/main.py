@@ -97,8 +97,13 @@ ACADEMIC_PROMPT = (
     "Cuando el usuario pregunte por sus tareas generales o filtradas por prioridad (ej: 'qué tareas tengo', 'qué tareas de prioridad 1 y 2 tengo'), usa get_tasks omitiendo subject_name (o subject_name=None) y pasando la lista de prioridades deseada (ej: priorities=[1, 2]). NUNCA hagas múltiples llamadas individuales a get_tasks por cada asignatura cuando el usuario haga una pregunta global.\n"
     "REGLA DE JERARQUÍA Y SUBTAREAS:\n"
     "Las tareas devueltas por get_tasks pueden incluir subtareas anidadas a múltiples niveles de profundidad (tarea -> subtarea -> sub-subtarea...).\n"
-    "Al responder al usuario, muestra SIEMPRE la jerarquía utilizando listas Markdown anidadas con sangría (ejemplo:\n- Tarea principal\n  - Subtarea 1\n  - Subtarea 2\n    - Sub-subtarea A).\n"
-    "Esto permite que la interfaz del chat active automáticamente los desplegables para cada tarea que tenga subtareas.\n"
+    
+    # "Al responder al usuario, muestra SIEMPRE la jerarquía utilizando listas Markdown anidadas con sangría (ejemplo:\n- Tarea principal\n  - Subtarea 1\n  - Subtarea 2\n    - Sub-subtarea A).\n"
+    # "Esto permite que la interfaz del chat active automáticamente los desplegables para cada tarea que tenga subtareas.\n"
+    "Al responder al usuario, muestra SIEMPRE la jerarquía de tareas utilizando tablas Markdown para que se muestre correctamente la jerarquia de tareas y subtareas.\n\n"
+    "Que en la tabla haya columnas para el nombre de la tarea, prioridad, fecha de vencimiento, etiquetas (tags) y estado"
+    "Respeta adicionalmente la sangria de las tareas para mostrar la jerarquia de tareas. Las tareas que sean subtareas de una tarea se mostrarán debajo de su tarea padre y con algún indicador de flecha"
+
     "REGLA DE FECHAS DE VENCIMIENTO:\n"
     "El parámetro 'due_date' acepta fecha sola ('2026-07-20') o fecha con hora en formato ISO ('2026-07-20T18:00:00' o '2026-07-20 18:00'). Si el usuario menciona una hora específica (ej: 'entregar a las 18:00'), inclúyela en el due_date.\n"
     "REGLA DE INFORMACIÓN AL CREAR ENTIDADES (TAREAS, PROYECTOS/ASIGNATURAS, PERIODOS):\n"
@@ -795,9 +800,32 @@ async def get_student_analytics(user_id: str = Depends(get_current_user_id)):
                 except Exception:
                     pass
 
+        # Obtener analíticas de bienestar, patrones, métricas extendidas y desglose de tiempo
+        wellbeing = {}
+        patterns = {}
+        study_plan = {}
+        ext_metrics = {}
+        time_breakdown = {}
+        try:
+            wellbeing = await analytics_service.get_wellbeing_analytics(user_id, days=7)
+            patterns = await analytics_service.get_patterns(user_id, days=7)
+            study_plan = patterns.get("study_plan_progress", {})
+            ext_metrics = await analytics_service.get_extended_subject_metrics(user_id)
+            time_breakdown = await analytics_service.get_time_breakdown(user_id, days=30)
+        except Exception as e:
+            print(f"[DASHBOARD] Error al calcular analíticas complementarias: {e}")
+
+        # Obtener informes de estudio para medir concentración media por asignatura
+        study_reports = []
+        try:
+            study_reports = await db_service.get_study_reports_by_user(user_id, limit=100)
+        except Exception as e:
+            pass
+
         analytics = []
         for subject in subjects:
             s_id = str(subject["_id"])
+            s_name = subject.get("name", "Asignatura")
             clockify_project_id = subject.get("clockify_project_id")
             
             # Obtener segundos del proyecto desde Clockify
@@ -806,15 +834,51 @@ async def get_student_analytics(user_id: str = Depends(get_current_user_id)):
                 seconds = project_seconds[clockify_project_id]
                 
             total_hours = round(seconds / 3600.0, 2)
+
+            # Concentración media basada en informes de estudio
+            s_name_clean = (s_name or "").lower().strip()
+            subj_reports = [
+                r for r in study_reports
+                if (r.get("subject_name") or "").lower().strip() == s_name_clean and r.get("study_quality") is not None
+            ]
+            avg_conc = round(sum(r["study_quality"] for r in subj_reports) / len(subj_reports), 1) if subj_reports else None
+
+            # Métricas extendidas por asignatura
+            subj_ext = ext_metrics.get(s_id, {})
+            last_week_tasks = subj_ext.get("last_week_tasks", {"total": 0, "completed": 0, "pending": 0})
+            total_tasks_created = subj_ext.get("total_tasks_created", 0)
+            total_tasks_completed = subj_ext.get("total_tasks_completed", 0)
+            weekly_comp = subj_ext.get("weekly_comparison", {"current_week_hours": total_hours, "previous_week_hours": 0.0, "change_pct": 0.0})
+            overdue_count = subj_ext.get("overdue_tasks_count", 0)
+            overdue_list = subj_ext.get("overdue_tasks", [])
+            neglected_count = subj_ext.get("neglected_tasks_count", 0)
+            neglected_list = subj_ext.get("neglected_tasks", [])
+
             analytics.append({
                 "id": s_id,
-                "name": subject.get("name", "Asignatura"),
+                "name": s_name,
                 "hours": total_hours,
                 "weekly_hours_goal": subject.get("weekly_hours_goal"),
-                "grade": subject.get("grade")
+                "grade": subject.get("grade"),
+                "avg_concentration": avg_conc,
+                "tasks_completed": total_tasks_completed,
+                "tasks_pending": max(0, total_tasks_created - total_tasks_completed),
+                "total_tasks_created": total_tasks_created,
+                "last_week_tasks": last_week_tasks,
+                "weekly_comparison": weekly_comp,
+                "overdue_tasks_count": overdue_count,
+                "overdue_tasks": overdue_list,
+                "neglected_tasks_count": neglected_count,
+                "neglected_tasks": neglected_list
             })
             
-        return {"analytics": analytics}
+        return {
+            "analytics": analytics,
+            "wellbeing": wellbeing,
+            "patterns": patterns,
+            "study_plan": study_plan,
+            "time_breakdown": time_breakdown
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al generar analíticas: {str(e)}")
 
