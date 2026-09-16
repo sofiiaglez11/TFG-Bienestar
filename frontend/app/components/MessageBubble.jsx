@@ -105,39 +105,58 @@ const getTagStyle = (tagText) => {
 const renderBadges = (text) => {
   if (typeof text !== "string") return text;
 
-  const tagRegex = /\[(.*?)\]/g;
+  // Regex para capturar !texto! (fechas vencidas/alertas) o [texto] (etiquetas/prioridades)
+  const regex = /!([^!]+)!|\[([^\]]+)\]/g;
   const parts = [];
   let lastIndex = 0;
   let match;
 
-  while ((match = tagRegex.exec(text)) !== null) {
+  while ((match = regex.exec(text)) !== null) {
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index));
     }
 
-    const tagText = match[1].trim();
-    const style = getTagStyle(tagText);
+    if (match[1] !== undefined) {
+      // Coincidencia con !texto! -> Fecha vencida en texto normal, rojo y negrita
+      const overdueText = match[1].trim();
+      parts.push(
+        <span
+          key={match.index}
+          style={{
+            color: "#dc2626",
+            fontWeight: "700",
+          }}
+        >
+          {overdueText}
+        </span>
+      );
+    } else if (match[2] !== undefined) {
+      // Coincidencia con [texto] -> Píldora de etiqueta/prioridad
+      const tagText = match[2].trim();
+      const style = getTagStyle(tagText);
 
-    parts.push(
-      <span
-        key={match.index}
-        style={{
-          display: "inline-block",
-          background: style.bg,
-          color: style.text,
-          border: `1px solid ${style.border}`,
-          borderRadius: "9999px",
-          padding: "2px 10px",
-          fontSize: "11px",
-          fontWeight: "600",
-          margin: "0 2px",
-          whiteSpace: "nowrap"
-        }}
-      >
-        {tagText}
-      </span>
-    );
-    lastIndex = tagRegex.lastIndex;
+      parts.push(
+        <span
+          key={match.index}
+          style={{
+            display: "inline-block",
+            background: style.bg,
+            color: style.text,
+            border: `1px solid ${style.border}`,
+            borderRadius: "9999px",
+            padding: "2px 10px",
+            fontSize: "11px",
+            fontWeight: "600",
+            margin: "0 2px",
+            whiteSpace: "nowrap"
+          }}
+        >
+          {tagText}
+        </span>
+      );
+    }
+
+    lastIndex = regex.lastIndex;
   }
 
   if (lastIndex < text.length) {

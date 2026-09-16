@@ -52,6 +52,43 @@ def _normalize(text: str) -> str:
         if unicodedata.category(c) != 'Mn'
     )
 
+
+def _normalize_due_date(val: Optional[str]) -> Optional[str]:
+    """Convierte fechas en formato DD/MM/YYYY a ISO YYYY-MM-DD para almacenamiento en BD."""
+    if not val:
+        return None
+    val = str(val).strip()
+    try:
+        if "/" in val:
+            parts = val.split(" ")
+            date_part = parts[0]
+            d, m, y = [int(p) for p in date_part.split("/")]
+            time_part = f"T{parts[1]}" if len(parts) > 1 else ""
+            return f"{y:04d}-{m:02d}-{d:02d}{time_part}"
+    except Exception:
+        pass
+    return val
+
+
+def _format_date_for_display(val: Optional[str]) -> str:
+    """Formatea una fecha ISO a DD/MM/YYYY (o DD/MM/YYYY HH:MM) para mostrar al usuario."""
+    if not val:
+        return "-"
+    val = str(val).strip()
+    try:
+        if "T" in val:
+            dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+            return dt.strftime("%d/%m/%Y %H:%M")
+        elif "-" in val:
+            parts = val.split(" ")
+            date_parts = parts[0].split("-")
+            if len(date_parts) == 3 and len(date_parts[0]) == 4:
+                time_str = f" {parts[1]}" if len(parts) > 1 else ""
+                return f"{int(date_parts[2]):02d}/{int(date_parts[1]):02d}/{date_parts[0]}{time_str}"
+    except Exception:
+        pass
+    return val
+
 async def _find_subject_by_name(user_id: str, name: str, include_archived: bool = False) -> dict | None:
     """Busca una asignatura por nombre (case-insensitive, sin tildes) entre las del usuario."""
     subjects = await db_service.get_subjects_by_user(user_id, include_archived=include_archived)
@@ -848,12 +885,13 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
             )
             clockify_task_id = clockify_task.get("id")
 
+        norm_due_date = _normalize_due_date(due_date) if due_date else None
         await db_service.create_task(
             user_id=user_id,
             subject_id=subject["_id"],
             title=title,
             description=description,
-            due_date=due_date,
+            due_date=norm_due_date,
             parent_task_id=parent_task_id,
             clockify_task_id=clockify_task_id,
             priority=priority,
@@ -1111,7 +1149,7 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
         if description is not None:
             updates["description"] = description
         if due_date is not None:
-            updates["due_date"] = due_date
+            updates["due_date"] = _normalize_due_date(due_date)
         if priority is not None:
             # Permitir borrar la prioridad pasando 0
             updates["priority"] = None if priority == 0 else priority
@@ -1152,7 +1190,8 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
         if description is not None:
             cambios.append("descripción actualizada")
         if due_date is not None:
-            cambios.append(f"fecha límite: '{due_date}'")
+            formatted_date = _format_date_for_display(updates.get("due_date"))
+            cambios.append(f"fecha límite: '{formatted_date}'")
         if priority is not None:
             p_label = {0: "eliminada", 1: "muy alta", 2: "alta", 3: "media", 4: "baja", 5: "muy baja"}.get(priority, str(priority))
             cambios.append(f"prioridad: {p_label}")
