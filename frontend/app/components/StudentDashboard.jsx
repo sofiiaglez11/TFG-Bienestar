@@ -40,7 +40,8 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
   const [savingGradeId, setSavingGradeId] = useState(null);
   const [gradeInputs, setGradeInputs] = useState({});
   const [activeSubTab, setActiveSubTab] = useState("academic"); // "academic" | "breakdown" | "wellbeing" | "patterns"
-  const [breakdownView, setBreakdownView] = useState("subject"); // "subject" | "task" | "tag"
+  const [subjectFilter, setSubjectFilter] = useState("All");
+  const [tagFilter, setTagFilter] = useState("All");
 
   useEffect(() => {
     if (isOpen || isInline) {
@@ -120,7 +121,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
     if (!isoDate) return null;
     try {
       const [year, month, day] = isoDate.split("-");
-      const months = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+      const months = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
       return `${parseInt(day)} ${months[parseInt(month) - 1]} ${year}`;
     } catch {
       return isoDate;
@@ -149,6 +150,21 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
   const WEEKDAYS_ORDER = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
   const reportsByDay = wellbeing.reports_by_weekday || {};
   const hoursByDay = patterns.hours_by_weekday || {};
+
+  const unifiedTasks = timeBreakdown.unified_tasks || [];
+
+  const availableSubjects = ["All", ...new Set(unifiedTasks.map(t => t.subject).filter(Boolean))];
+  const availableTags = ["All", ...new Set(unifiedTasks.flatMap(t => t.tags || []).filter(Boolean))];
+
+  const filteredTasks = unifiedTasks.filter(t => {
+    const matchSubject = subjectFilter === "All" || t.subject === subjectFilter;
+    const matchTag = tagFilter === "All" || (t.tags && t.tags.includes(tagFilter));
+    return matchSubject && matchTag;
+  });
+
+  const filteredTotalHoursRaw = filteredTasks.reduce((acc, t) => acc + t.hours + (t.minutes / 60), 0);
+  const filteredTotalHours = Math.floor(filteredTotalHoursRaw);
+  const filteredTotalMins = Math.round((filteredTotalHoursRaw - filteredTotalHours) * 60);
 
   return (
     <div style={isInline ? {
@@ -587,140 +603,98 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
             {/* PESTAÑA 2: DESGLOSE DE TIEMPO */}
             {activeSubTab === "breakdown" && (
               <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                {/* Selector de tipo de desglose */}
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button
-                    onClick={() => setBreakdownView("subject")}
-                    style={{
-                      padding: "6px 14px",
-                      borderRadius: "6px",
-                      border: "1px solid var(--border)",
-                      backgroundColor: breakdownView === "subject" ? "var(--bg-input)" : "transparent",
-                      fontWeight: breakdownView === "subject" ? "700" : "500",
-                      fontSize: "13px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px"
-                    }}
-                  >
-                    <BookOpen size={14} /> Por Asignatura
-                  </button>
-                  <button
-                    onClick={() => setBreakdownView("task")}
-                    style={{
-                      padding: "6px 14px",
-                      borderRadius: "6px",
-                      border: "1px solid var(--border)",
-                      backgroundColor: breakdownView === "task" ? "var(--bg-input)" : "transparent",
-                      fontWeight: breakdownView === "task" ? "700" : "500",
-                      fontSize: "13px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px"
-                    }}
-                  >
-                    <CheckSquare size={14} /> Por Tarea
-                  </button>
-                  <button
-                    onClick={() => setBreakdownView("tag")}
-                    style={{
-                      padding: "6px 14px",
-                      borderRadius: "6px",
-                      border: "1px solid var(--border)",
-                      backgroundColor: breakdownView === "tag" ? "var(--bg-input)" : "transparent",
-                      fontWeight: breakdownView === "tag" ? "700" : "500",
-                      fontSize: "13px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px"
-                    }}
-                  >
-                    <Tag size={14} /> Por Etiqueta / Tag
-                  </button>
+                {/* Filtros */}
+                <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", backgroundColor: "var(--bg-input)", padding: "12px", borderRadius: "10px", border: "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <label style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-secondary)" }}>Asignatura</label>
+                    <select
+                      value={subjectFilter}
+                      onChange={(e) => setSubjectFilter(e.target.value)}
+                      style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", backgroundColor: "var(--bg-surface)", color: "var(--text-primary)", fontSize: "13px" }}
+                    >
+                      {availableSubjects.map(s => <option key={s} value={s}>{s === "All" ? "Todas" : s}</option>)}
+                    </select>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <label style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-secondary)" }}>Etiqueta</label>
+                    <select
+                      value={tagFilter}
+                      onChange={(e) => setTagFilter(e.target.value)}
+                      style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", backgroundColor: "var(--bg-surface)", color: "var(--text-primary)", fontSize: "13px" }}
+                    >
+                      {availableTags.map(t => <option key={t} value={t}>{t === "All" ? "Todas" : t}</option>)}
+                    </select>
+                  </div>
+
+                  <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                    <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "600" }}>Tiempo Total Filtrado</span>
+                    <span style={{ fontSize: "18px", fontWeight: "700", color: "var(--brand)" }}>
+                      {filteredTotalHours} h {filteredTotalMins} min
+                    </span>
+                  </div>
                 </div>
 
-                {/* VISTA 1: Desglose por Asignatura */}
-                {breakdownView === "subject" && (
-                  <div>
-                    <h4 style={{ margin: "0 0 12px 0", fontSize: "15px", fontWeight: "600" }}>Tiempo por Asignatura (Últimos 30 días)</h4>
-                    {!(timeBreakdown.by_subject && timeBreakdown.by_subject.length > 0) ? (
-                      <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>No hay registros de tiempo por asignatura aún.</p>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        {timeBreakdown.by_subject.map((item, idx) => (
-                          <div key={idx} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                            <span style={{ width: "160px", fontSize: "13px", fontWeight: "600", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {item.name}
+                {/* Lista Unificada de Tareas */}
+                <div>
+                  <h4 style={{ margin: "0 0 12px 0", fontSize: "15px", fontWeight: "600", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <ListChecks size={18} /> Sesiones de Trabajo y Tareas
+                  </h4>
+                  {filteredTasks.length === 0 ? (
+                    <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>No hay registros de tareas con los filtros seleccionados.</p>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                      {filteredTasks.map((item, idx) => (
+                        <div key={idx} style={{
+                          padding: "12px 16px",
+                          borderRadius: "10px",
+                          backgroundColor: "var(--bg-input)",
+                          border: "1px solid var(--border)",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: "12px"
+                        }}>
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
+                            <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--brand)", marginTop: "1px" }}>
+                              {item.subject}
                             </span>
-                            <div style={{ flex: 1, backgroundColor: "var(--border)", height: "10px", borderRadius: "5px", overflow: "hidden" }}>
-                              <div style={{ width: `${item.percentage}%`, backgroundColor: "var(--brand)", height: "100%", borderRadius: "5px" }} />
-                            </div>
-                            <span style={{ width: "100px", fontSize: "13px", color: "var(--text-secondary)", textAlign: "right" }}>
-                              {item.hours}h ({item.percentage}%)
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                            <span style={{ fontSize: "14px", color: "var(--text-secondary)" }}>|</span>
 
-                {/* VISTA 2: Desglose por Tarea */}
-                {breakdownView === "task" && (
-                  <div>
-                    <h4 style={{ margin: "0 0 12px 0", fontSize: "15px", fontWeight: "600" }}>Tiempo Dedicado por Tarea</h4>
-                    {!(timeBreakdown.by_task && timeBreakdown.by_task.length > 0) ? (
-                      <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>No hay registros de tareas con tiempo asociado.</p>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        {timeBreakdown.by_task.map((item, idx) => (
-                          <div key={idx} style={{
-                            padding: "10px 14px",
-                            borderRadius: "8px",
-                            backgroundColor: "var(--bg-input)",
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center"
-                          }}>
-                            <span style={{ fontSize: "13px", fontWeight: "600" }}>{item.title}</span>
-                            <span style={{ fontSize: "13px", color: "var(--brand)", fontWeight: "600" }}>
-                              {item.hours} h ({item.minutes} min)
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* VISTA 3: Desglose por Etiqueta (Tag) */}
-                {breakdownView === "tag" && (
-                  <div>
-                    <h4 style={{ margin: "0 0 12px 0", fontSize: "15px", fontWeight: "600" }}>Tiempo por Etiqueta (Tag)</h4>
-                    {!(timeBreakdown.by_tag && timeBreakdown.by_tag.length > 0) ? (
-                      <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>No hay etiquetas registradas aún.</p>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        {timeBreakdown.by_tag.map((item, idx) => (
-                          <div key={idx} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                            <span style={{ width: "140px", fontSize: "13px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
-                              <Tag size={14} color="var(--brand)" /> {item.tag}
-                            </span>
-                            <div style={{ flex: 1, backgroundColor: "var(--border)", height: "10px", borderRadius: "5px", overflow: "hidden" }}>
-                              <div style={{ width: `${item.percentage}%`, backgroundColor: "#8b5cf6", height: "100%", borderRadius: "5px" }} />
+                            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                              <span style={{ fontSize: "14px", fontWeight: "600" }}>{item.title}</span>
+                              {item.tags && item.tags.length > 0 && (
+                                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                                  {item.tags.map(tag => (
+                                    <span key={tag} style={{
+                                      fontSize: "11px",
+                                      padding: "2px 8px",
+                                      borderRadius: "12px",
+                                      backgroundColor: "#f3e8ff",
+                                      color: "#7e22ce",
+                                      border: "1px solid #e9d5ff",
+                                      fontWeight: "600",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "4px"
+                                    }}>
+                                      <Tag size={10} /> {tag}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
-                            <span style={{ width: "100px", fontSize: "13px", color: "var(--text-secondary)", textAlign: "right" }}>
-                              {item.hours}h ({item.percentage}%)
+                          </div>
+                          <div style={{ whiteSpace: "nowrap" }}>
+                            <span style={{ fontSize: "14px", color: "var(--brand)", fontWeight: "700" }}>
+                              {item.hours} h {item.minutes > 0 ? `(${item.minutes} min)` : ""}
                             </span>
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

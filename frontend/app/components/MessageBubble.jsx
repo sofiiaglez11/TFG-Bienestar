@@ -2,71 +2,216 @@ import React, { useState, Children } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-// Componente para hacer que los <li> con sublistas sean desplegables/colapsables
-function CollapsibleLi({ children }) {
-  const [open, setOpen] = useState(true);
+// Helper para transformar texto tipo [Teoría] en píldoras con color
+// const renderBadges = (text) => {
+//   if (typeof text !== "string") return text;
 
-  const childrenArray = Children.toArray(children);
+//   // Captura exclusivamente el texto encerrado entre corchetes: [Teoría], [Alta], etc.
+//   const tagRegex = /\[(.*?)\]/g;
+//   const parts = [];
+//   let lastIndex = 0;
+//   let match;
 
-  const sublists = [];
-  const content = [];
+//   while ((match = tagRegex.exec(text)) !== null) {
+//     if (match.index > lastIndex) {
+//       parts.push(text.slice(lastIndex, match.index));
+//     }
 
-  childrenArray.forEach((child) => {
-    if (
-      child &&
-      child.props &&
-      (child.props.node?.tagName === "ul" ||
-        child.props.node?.tagName === "ol" ||
-        child.type === "ul" ||
-        child.type === "ol")
-    ) {
-      sublists.push(child);
-    } else {
-      content.push(child);
-    }
-  });
+//     const tagText = match[1].trim();
+//     const lower = tagText.toLowerCase();
 
-  if (sublists.length === 0) {
-    return <li style={{ marginBottom: "2px" }}>{children}</li>;
+//     // Paleta de colores para las píldoras
+//     let style = { bg: "rgba(99, 102, 241, 0.15)", text: "#4f46e5", border: "rgba(99, 102, 241, 0.4)" }; // Por defecto (Azul/Violeta)
+
+//     if (lower.includes("teorí") || lower.includes("teori")) {
+//       style = { bg: "rgba(59, 130, 246, 0.15)", text: "#2563eb", border: "rgba(59, 130, 246, 0.4)" }; // Azul
+//     } else if (lower.includes("práctic") || lower.includes("practic")) {
+//       style = { bg: "rgba(34, 197, 94, 0.15)", text: "#16a34a", border: "rgba(34, 197, 94, 0.4)" }; // Verde
+//     } else if (lower.includes("examen") || lower.includes("alta") || lower.includes("1")) {
+//       style = { bg: "rgba(239, 68, 68, 0.15)", text: "#dc2626", border: "rgba(239, 68, 68, 0.4)" }; // Rojo
+//     } else if (lower.includes("media") || lower.includes("pendiente") || lower.includes("2")) {
+//       style = { bg: "rgba(245, 158, 11, 0.15)", text: "#d97706", border: "rgba(245, 158, 11, 0.4)" }; // Naranja
+//     }
+
+//     parts.push(
+//       <span
+//         key={match.index}
+//         style={{
+//           display: "inline-block",
+//           background: style.bg,
+//           color: style.text,
+//           border: `1px solid ${style.border}`,
+//           borderRadius: "9999px", // Forma de ÓVALO / CÁPSULA
+//           padding: "2px 10px",
+//           fontSize: "11px",
+//           fontWeight: "600",
+//           margin: "0 2px",
+//           whiteSpace: "nowrap"
+//         }}
+//       >
+//         {tagText}
+//       </span>
+//     );
+//     lastIndex = tagRegex.lastIndex;
+//   }
+
+//   if (lastIndex < text.length) {
+//     parts.push(text.slice(lastIndex));
+//   }
+
+//   return parts.length > 0 ? parts : text;
+// };
+
+// Función para asignar colores consistentes según el texto
+const getTagStyle = (tagText) => {
+  const lower = tagText.toLowerCase().trim();
+
+  // // 1. Reglas fijas para etiquetas comunes
+  // if (["alta", "urgente", "examen"].includes(lower)) {
+  //   return { bg: "rgba(239, 68, 68, 0.15)", text: "#dc2626", border: "rgba(239, 68, 68, 0.4)" }; // Rojo
+  // }
+  // if (["media", "en proceso", "pendiente"].includes(lower)) {
+  //   return { bg: "rgba(245, 158, 11, 0.15)", text: "#d97706", border: "rgba(245, 158, 11, 0.4)" }; // Naranja
+  // }
+  // if (["baja", "completada", "finalizada"].includes(lower)) {
+  //   return { bg: "rgba(34, 197, 94, 0.15)", text: "#16a34a", border: "rgba(34, 197, 94, 0.4)" }; // Verde
+  // }
+  // if (["teoría", "teoria"].includes(lower)) {
+  //   return { bg: "rgba(59, 130, 246, 0.15)", text: "#2563eb", border: "rgba(59, 130, 246, 0.4)" }; // Azul
+  // }
+  // if (["práctica", "practica"].includes(lower)) {
+  //   return { bg: "rgba(168, 85, 247, 0.15)", text: "#9333ea", border: "rgba(168, 85, 247, 0.4)" }; // Morado
+  // }
+
+  // 2. Paleta dinámica para cualquier otra etiqueta (Garantiza que el mismo texto = mismo color)
+  const palette = [
+    { bg: "rgba(14, 165, 233, 0.15)", text: "#0284c7", border: "rgba(14, 165, 233, 0.4)" },  // Celeste
+    { bg: "rgba(236, 72, 153, 0.15)", text: "#db2777", border: "rgba(236, 72, 153, 0.4)" },  // Rosa
+    { bg: "rgba(20, 184, 166, 0.15)", text: "#0d9488", border: "rgba(20, 184, 166, 0.4)" },  // Turquesa
+    { bg: "rgba(249, 115, 22, 0.15)", text: "#ea580c", border: "rgba(249, 115, 22, 0.4)" },  // Naranja Intenso
+    { bg: "rgba(99, 102, 241, 0.15)", text: "#4f46e5", border: "rgba(99, 102, 241, 0.4)" },  // Índigo
+    { bg: "rgba(107, 114, 128, 0.15)", text: "#4b5563", border: "rgba(107, 114, 128, 0.4)" }  // Gris
+  ];
+
+  let hash = 0;
+  for (let i = 0; i < lower.length; i++) {
+    hash = lower.charCodeAt(i) + ((hash << 5) - hash);
   }
 
-  return (
-    <li style={{ listStyle: "none", marginBottom: "4px", marginLeft: "-14px" }}>
-      <div
+  const index = Math.abs(hash) % palette.length;
+  return palette[index];
+};
+
+const renderBadges = (text) => {
+  if (typeof text !== "string") return text;
+
+  const tagRegex = /\[(.*?)\]/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = tagRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+
+    const tagText = match[1].trim();
+    const style = getTagStyle(tagText);
+
+    parts.push(
+      <span
+        key={match.index}
         style={{
-          display: "flex",
-          alignItems: "flex-start",
-          gap: "6px",
-          cursor: "pointer",
-          userSelect: "none",
-        }}
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen(!open);
+          display: "inline-block",
+          background: style.bg,
+          color: style.text,
+          border: `1px solid ${style.border}`,
+          borderRadius: "9999px",
+          padding: "2px 10px",
+          fontSize: "11px",
+          fontWeight: "600",
+          margin: "0 2px",
+          whiteSpace: "nowrap"
         }}
       >
-        <span
-          style={{
-            fontSize: "10px",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: "12px",
-            height: "12px",
-            transform: open ? "rotate(90deg)" : "rotate(0deg)",
-            transition: "transform 0.15s ease",
-            marginTop: "5px",
-            opacity: 0.7,
-          }}
-        >
-          ▶
-        </span>
-        <div style={{ flex: 1 }}>{content}</div>
-      </div>
-      {open && <div style={{ paddingLeft: "14px", marginTop: "2px" }}>{sublists}</div>}
-    </li>
-  );
-}
+        {tagText}
+      </span>
+    );
+    lastIndex = tagRegex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : text;
+};
+
+// // Componente para hacer que los <li> con sublistas sean desplegables/colapsables
+// function CollapsibleLi({ children }) {
+//   const [open, setOpen] = useState(true);
+
+//   const childrenArray = Children.toArray(children);
+
+//   const sublists = [];
+//   const content = [];
+
+//   childrenArray.forEach((child) => {
+//     if (
+//       child &&
+//       child.props &&
+//       (child.props.node?.tagName === "ul" ||
+//         child.props.node?.tagName === "ol" ||
+//         child.type === "ul" ||
+//         child.type === "ol")
+//     ) {
+//       sublists.push(child);
+//     } else {
+//       content.push(child);
+//     }
+//   });
+
+//   if (sublists.length === 0) {
+//     return <li style={{ marginBottom: "2px" }}>{children}</li>;
+//   }
+
+//   return (
+//     <li style={{ listStyle: "none", marginBottom: "4px", marginLeft: "-14px" }}>
+//       <div
+//         style={{
+//           display: "flex",
+//           alignItems: "flex-start",
+//           gap: "6px",
+//           cursor: "pointer",
+//           userSelect: "none",
+//         }}
+//         onClick={(e) => {
+//           e.stopPropagation();
+//           setOpen(!open);
+//         }}
+//       >
+//         <span
+//           style={{
+//             fontSize: "10px",
+//             display: "inline-flex",
+//             alignItems: "center",
+//             justifyContent: "center",
+//             width: "12px",
+//             height: "12px",
+//             transform: open ? "rotate(90deg)" : "rotate(0deg)",
+//             transition: "transform 0.15s ease",
+//             marginTop: "5px",
+//             opacity: 0.7,
+//           }}
+//         >
+//           ▶
+//         </span>
+//         <div style={{ flex: 1 }}>{content}</div>
+//       </div>
+//       {open && <div style={{ paddingLeft: "14px", marginTop: "2px" }}>{sublists}</div>}
+//     </li>
+//   );
+// }
 
 export default function MessageBubble({ message }) {
   const isUser = message.role === "user";
@@ -169,7 +314,7 @@ export default function MessageBubble({ message }) {
                 ol: ({ children }) => (
                   <ol style={{ margin: "4px 0 8px 0", paddingLeft: "20px" }}>{children}</ol>
                 ),
-                li: CollapsibleLi,
+                //li: CollapsibleLi,
                 // Código inline
                 code: ({ inline, children }) =>
                   inline ? (
@@ -247,9 +392,17 @@ export default function MessageBubble({ message }) {
                     {children}
                   </th>
                 ),
+                // td: ({ children }) => (
+                //   <td style={{ border: "1px solid var(--border)", padding: "4px 8px" }}>
+                //     {children}
+                //   </td>
+                // ),
+
                 td: ({ children }) => (
                   <td style={{ border: "1px solid var(--border)", padding: "4px 8px" }}>
-                    {children}
+                    {React.Children.map(children, (child) =>
+                      typeof child === "string" ? renderBadges(child) : child
+                    )}
                   </td>
                 ),
                 // Blockquote

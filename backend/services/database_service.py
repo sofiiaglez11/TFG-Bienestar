@@ -727,6 +727,102 @@ class DatabaseService:
     ############################################################################
     # METHODS FOR STUDY PLANS
 
+    # async def create_study_plan(
+    #     self,
+    #     user_id: str,
+    #     title: str,
+    #     items: list,
+    #     start_date: str = None,
+    #     end_date: str = None
+    # ) -> dict:
+    #     """
+    #     Crea un nuevo plan de estudio para el usuario.
+    #     Archiva cualquier otro plan de estudio activo previo y asegura la asignación de due_date en las tareas del plan.
+    #     """
+    #     # Archivar planes activos previos del usuario
+    #     await self.study_plans.update_many(
+    #         {"user_id": user_id, "status": "active"},
+    #         {"$set": {"status": "archived"}}
+    #     )
+
+    #     now = datetime.now(timezone.utc)
+    #     base_start = start_date or now.strftime("%Y-%m-%d")
+
+    #     try:
+    #         base_dt = datetime.strptime(base_start, "%Y-%m-%d").replace(tzinfo=ZoneInfo("Europe/Madrid"))
+    #     except Exception:
+    #         try:
+    #             base_dt = datetime.strptime(base_start, "%Y-%m-%d")
+    #         except Exception:
+    #             base_dt = now
+
+    #     weekday_map = {
+    #         "lunes": 0, "martes": 1, "miércoles": 2, "miercoles": 2,
+    #         "jueves": 3, "viernes": 4, "sábado": 5, "sabado": 5, "domingo": 6
+    #     }
+
+    #     processed_items = []
+    #     for item in items:
+    #         it = dict(item) if isinstance(item, dict) else {}
+    #         day_raw = str(it.get("day", "")).strip()
+    #         due_date = it.get("due_date")
+
+    #         if not due_date:
+    #             if re.match(r"^\d{4}-\d{2}-\d{2}$", day_raw):
+    #                 due_date = day_raw
+    #             elif day_raw.lower() in weekday_map:
+    #                 target_wd = weekday_map[day_raw.lower()]
+    #                 days_ahead = (target_wd - base_dt.weekday() + 7) % 7
+    #                 due_date = (base_dt + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+    #             else:
+    #                 due_date = base_start
+            
+    #         it["due_date"] = due_date
+    #         processed_items.append(it)
+
+    #         # Si el elemento tiene asignatura y descripción/tarea, vincular o crear tarea en la BD con due_date
+    #         subj_name = it.get("subject_name")
+    #         task_desc = it.get("description") or it.get("task")
+    #         if subj_name and task_desc:
+    #             sub_doc = await self.subjects.find_one({
+    #                 "user_id": user_id,
+    #                 "name": {"$regex": f"^{re.escape(subj_name)}$", "$options": "i"}
+    #             })
+    #             subj_id = str(sub_doc["_id"]) if sub_doc else None
+
+    #             if subj_id:
+    #                 existing = await self.tasks.find_one({
+    #                     "user_id": user_id,
+    #                     "subject_id": subj_id,
+    #                     "title": {"$regex": f"^{re.escape(task_desc)}$", "$options": "i"}
+    #                 })
+    #                 if existing:
+    #                     if existing.get("due_date") != due_date:
+    #                         await self.update_task(str(existing["_id"]), due_date=due_date)
+    #                 else:
+    #                     await self.create_task(
+    #                         user_id=user_id,
+    #                         title=task_desc,
+    #                         subject_id=subj_id,
+    #                         description=f"Tarea del plan de estudio '{title}'",
+    #                         due_date=due_date
+    #                     )
+
+    #     plan = {
+    #         "user_id": user_id,
+    #         "title": title,
+    #         "items": processed_items,
+    #         "start_date": base_start,
+    #         "end_date": end_date,
+    #         "status": "active",
+    #         "created_at": now.isoformat()
+    #     }
+
+    #     result = await self.study_plans.insert_one(plan)
+    #     plan["_id"] = str(result.inserted_id)
+    #     return plan
+
+
     async def create_study_plan(
         self,
         user_id: str,
@@ -736,10 +832,9 @@ class DatabaseService:
         end_date: str = None
     ) -> dict:
         """
-        Crea un nuevo plan de estudio para el usuario.
-        Archiva cualquier otro plan de estudio activo previo y asegura la asignación de due_date en las tareas del plan.
+        Crea un nuevo plan de estudio asociando sesiones a asignaturas y tareas existentes
+        sin generar tareas basura en la lista global.
         """
-        # Archivar planes activos previos del usuario
         await self.study_plans.update_many(
             {"user_id": user_id, "status": "active"},
             {"$set": {"status": "archived"}}
@@ -761,6 +856,9 @@ class DatabaseService:
             "jueves": 3, "viernes": 4, "sábado": 5, "sabado": 5, "domingo": 6
         }
 
+        # Cargar tareas existentes del usuario para hacer referencias cruzadas
+        user_tasks = await self.tasks.find({"user_id": user_id}).to_list(length=1000)
+
         processed_items = []
         for item in items:
             it = dict(item) if isinstance(item, dict) else {}
@@ -778,35 +876,32 @@ class DatabaseService:
                     due_date = base_start
             
             it["due_date"] = due_date
-            processed_items.append(it)
-
-            # Si el elemento tiene asignatura y descripción/tarea, vincular o crear tarea en la BD con due_date
             subj_name = it.get("subject_name")
-            task_desc = it.get("description") or it.get("task")
-            if subj_name and task_desc:
+            desc = it.get("description") or it.get("task", "")
+            linked_tasks = []
+
+            if subj_name:
                 sub_doc = await self.subjects.find_one({
                     "user_id": user_id,
                     "name": {"$regex": f"^{re.escape(subj_name)}$", "$options": "i"}
                 })
-                subj_id = str(sub_doc["_id"]) if sub_doc else None
+                if sub_doc:
+                    subj_id = str(sub_doc["_id"])
+                    it["subject_id"] = subj_id
 
-                if subj_id:
-                    existing = await self.tasks.find_one({
-                        "user_id": user_id,
-                        "subject_id": subj_id,
-                        "title": {"$regex": f"^{re.escape(task_desc)}$", "$options": "i"}
-                    })
-                    if existing:
-                        if existing.get("due_date") != due_date:
-                            await self.update_task(str(existing["_id"]), due_date=due_date)
-                    else:
-                        await self.create_task(
-                            user_id=user_id,
-                            title=task_desc,
-                            subject_id=subj_id,
-                            description=f"Tarea del plan de estudio '{title}'",
-                            due_date=due_date
-                        )
+                    # Si la actividad menciona el título de una tarea existente, vincula la tarea y actualiza su vencimiento
+                    for task in user_tasks:
+                        if str(task.get("subject_id")) == subj_id:
+                            t_title = task.get("title", "").strip()
+                            if t_title.lower() in desc.lower() and len(t_title) > 2:
+                                t_id = str(task["_id"])
+                                linked_tasks.append(t_id)
+                                if task.get("due_date") != due_date:
+                                    await self.update_task(t_id, due_date=due_date)
+
+            it["linked_task_ids"] = linked_tasks
+            # NUNCA se invoca create_task: las actividades como 'Revisar' se quedan solo dentro del plan
+            processed_items.append(it)
 
         plan = {
             "user_id": user_id,
@@ -821,7 +916,6 @@ class DatabaseService:
         result = await self.study_plans.insert_one(plan)
         plan["_id"] = str(result.inserted_id)
         return plan
-
 
     async def get_active_study_plan(self, user_id: str) -> dict | None:
         """Devuelve el plan de estudio actualmente activo del usuario."""

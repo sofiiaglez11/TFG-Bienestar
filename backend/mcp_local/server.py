@@ -989,6 +989,8 @@ async def get_tasks(user_id: str, subject_name: Optional[str] = None, include_co
 
         tasks_data = [serialize(root) for root in root_tasks]
 
+        print(f"[MCP TOOL: GET_TASKS] response={tasks_data}", file=sys.stderr, flush=True)
+
         return json.dumps({
             "subject": target_subject_name,
             "total": len(all_tasks),
@@ -1514,7 +1516,9 @@ async def log_time_entry(user_id: str, subject_name: str, start_time: str, end_t
     ya conocidas (a diferencia de start_timer/stop_timer, que son para tiempo real).
     Útil cuando el usuario dice 'estuve estudiando Matemáticas de 10:00 a 12:00 hoy'.
     IMPORTANTE: start_time y end_time deben tener formato ISO 8601 (ej: '2026-07-08T10:00:00Z').
-    Si existe una tareaa concreta para esa sesión, se puede indicar task_title; si no, se deja vacío.
+    Si existe una tarea concreta para esa sesión, se puede indicar task_title; si no, se deja vacío.
+    Para description, usa una frase MUY CORTA que resuma la sesión (ej: "Ejercicios tema 1", "Repaso general"). 
+    Nunca pongas la frase literal y completa del usuario. Si hay una tarea asociada, puedes usar el título de la tarea o dejarlo vacío.
     """
     try:
         if not start_time.endswith('Z') and '+' not in start_time:
@@ -1725,6 +1729,8 @@ async def log_study_hours(user_id: str, subject_name: str, hours: float,
     Registra una sesión de estudio indicando solo cuántas horas se han dedicado,
     sin necesidad de especificar hora de inicio ni fin. El sistema calcula automáticamente
     que la sesión terminó ahora y empezó hace X horas.
+    Para description, usa una frase CORTA que resuma la sesión (ej: "Ejercicios tema 1", "Repaso general"). 
+    Nunca pongas la frase literal y completa del usuario. Si hay una tarea asociada, usa el título de la tarea.
     """
     try:
         print(f"[MCP TOOL: LOG_STUDY_HOURS] user_id={user_id}, subject_name='{subject_name}', hours={hours}, task_title='{task_title}', desc='{description}'", file=sys.stderr, flush=True)
@@ -2244,26 +2250,36 @@ async def wb_get_study_reports(user_id: str, subject_name: str = None, limit: in
 
 
 @mcp.tool()
-async def create_study_plan(
-    user_id: str,
-    title: str,
-    items: list,
-    start_date: str = None,
-    end_date: str = None
-):
+# async def create_study_plan(user_id: str, title: str, items: list, start_date: str = None, end_date: str = None):
+#     """
+#     Registra oficialmente un plan de estudio en el sistema una vez que el usuario confirma la propuesta.
+#     Úsala ÚNICAMENTE cuando el usuario haya aceptado o confirmado el plan estructurado propuesto.
+
+#     Parámetros:
+#     - title: título descriptivo del plan (ej: 'Plan de repaso para exámenes finales', 'Plan semanal de estudio').
+#     - items: lista de elementos con la estructura por día. Cada elemento es un objeto con:
+#         * day: día de la semana (ej: 'Lunes', 'Martes').
+#         * subject_name: nombre de la asignatura.
+#         * planned_hours: horas planificadas (número flotante o entero, ej: 1.5, 2.0).
+#         * description: qué tareas u objetivos se trabajarán ese día en esa asignatura.
+#     - start_date: fecha de inicio del plan (YYYY-MM-DD), opcional.
+#     - end_date: fecha de fin del plan (YYYY-MM-DD), opcional.
+#     """
+
+@mcp.tool()
+async def create_study_plan(user_id: str, title: str, items: list, start_date: str = None, end_date: str = None):
     """
-    Registra oficialmente un plan de estudio en el sistema una vez que el usuario confirma la propuesta.
-    Úsala ÚNICAMENTE cuando el usuario haya aceptado o confirmado el plan estructurado propuesto.
+    Registra un plan de estudio estructurado por bloques/sesiones diarias.
 
     Parámetros:
-    - title: título descriptivo del plan (ej: 'Plan de repaso para exámenes finales', 'Plan semanal de estudio').
-    - items: lista de elementos con la estructura por día. Cada elemento es un objeto con:
-        * day: día de la semana (ej: 'Lunes', 'Martes').
-        * subject_name: nombre de la asignatura.
-        * planned_hours: horas planificadas (número flotante o entero, ej: 1.5, 2.0).
-        * description: qué tareas u objetivos se trabajarán ese día en esa asignatura.
-    - start_date: fecha de inicio del plan (YYYY-MM-DD), opcional.
-    - end_date: fecha de fin del plan (YYYY-MM-DD), opcional.
+    - title: Título del plan.
+    - items: Lista de sesiones diarias. Cada elemento debe ser un objeto con:
+        * day: Día de la semana o fecha (ej: 'Lunes', '2026-09-20').
+        * subject_name: Nombre de la asignatura asociada (opcional si es revisión general).
+        * planned_hours: Tiempo asignado en horas (ej: 1.5).
+        * description: Detalle de la actividad a realizar (ej: 'Avanzar con la tarea A y repasar apuntes').
+    - start_date: Fecha inicio (YYYY-MM-DD).
+    - end_date: Fecha fin (YYYY-MM-DD).
     """
     try:
         if not items or not isinstance(items, list):

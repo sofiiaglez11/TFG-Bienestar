@@ -406,10 +406,8 @@ class AnalyticsService:
 
     async def get_time_breakdown(self, user_id: str, days: int = 30) -> dict:
         """
-        Calcula el tiempo dedicado desglosado por:
-        1. Asignatura
-        2. Tarea
-        3. Etiqueta (Tag)
+        Calcula el tiempo dedicado, devolviendo una lista unificada de tareas
+        con sus asignaturas y etiquetas asociadas, y el tiempo total.
         """
         subjects = await self.db_service.get_subjects_by_user(user_id, include_archived=True)
         proj_to_subj = {s.get("clockify_project_id"): s.get("name") for s in subjects if s.get("clockify_project_id")}
@@ -422,16 +420,13 @@ class AnalyticsService:
             except Exception as e:
                 print(f"[ANALYTICS] Error al obtener entradas para breakdown: {e}", file=sys.stderr)
 
-        subj_hours = {}
-        task_hours = {}
-        tag_hours = {}
         total_tracked_seconds = 0.0
+        unified_tasks_map = {}
 
         # Construir mapa de tareas desde MongoDB:
-        # - title_lower -> tags[]  (para match por descripción de Clockify)
-        # - clockify_task_id -> tags[]  (para match exacto por ID si existe)
-        task_title_to_tags = {}    # key: título en minúsculas
-        task_ck_id_to_tags = {}    # key: clockify_task_id
+        task_title_to_tags = {}    
+        task_ck_id_to_tags = {}    
+        task_ck_id_to_name = {}    
         try:
             user_tasks = await self.db_service.get_tasks_by_subject(user_id=user_id)
             for t in user_tasks:
@@ -442,6 +437,7 @@ class AnalyticsService:
                     task_title_to_tags[title_clean] = tags
                 if ck_id:
                     task_ck_id_to_tags[ck_id] = tags
+                    task_ck_id_to_name[ck_id] = t.get("title", "Tarea sin título")
         except Exception as e:
             print(f"[ANALYTICS] Error al leer tareas de MongoDB: {e}", file=sys.stderr)
 
@@ -459,52 +455,57 @@ class AnalyticsService:
 
                 pid = entry.get("projectId")
                 subj_name = proj_to_subj.get(pid, "General / Otras")
-                subj_hours[subj_name] = subj_hours.get(subj_name, 0.0) + hrs
 
-                task_desc = entry.get("description") or (entry.get("task", {}) or {}).get("name") or "Estudio general"
-                t_key = f"{task_desc} ({subj_name})"
-                task_hours[t_key] = task_hours.get(t_key, 0.0) + hrs
+                ck_task_id = entry.get("taskId")
+                if ck_task_id and ck_task_id in task_ck_id_to_name:
+                    task_name = task_ck_id_to_name[ck_task_id]
+                else:
+                    task_name = "Sesiones sin tarea asociada"
+                
+                t_key = f"{task_name}_{subj_name}"
 
                 # Buscar tags en MongoDB:
-                # 1. Por clockify_task_id de la entry si existe
-                # 2. Por match de descripción con el título de la tarea
-                ck_task_id = (entry.get("task") or {}).get("id") if isinstance(entry.get("task"), dict) else None
                 db_tags = []
                 if ck_task_id and ck_task_id in task_ck_id_to_tags:
                     db_tags = task_ck_id_to_tags[ck_task_id]
                 else:
-                    desc_clean = (task_desc or "").lower().strip()
+                    task_desc = entry.get("description") or ""
+                    desc_clean = task_desc.lower().strip()
                     if desc_clean in task_title_to_tags:
                         db_tags = task_title_to_tags[desc_clean]
 
-                if db_tags:
-                    for tag in db_tags:
-                        tag_hours[tag] = tag_hours.get(tag, 0.0) + hrs
-                else:
-                    tag_hours["Sin etiqueta"] = tag_hours.get("Sin etiqueta", 0.0) + hrs
+                if t_key not in unified_tasks_map:
+                    unified_tasks_map[t_key] = {
+                        "title": task_name,
+                        "subject": subj_name,
+                        "tags": list(set(db_tags)),
+                        "hours_raw": 0.0
+                    }
+                
+                unified_tasks_map[t_key]["hours_raw"] += hrs
+
             except Exception:
                 pass
 
-        total_tracked_hours = (total_tracked_seconds / 3600.0) if total_tracked_seconds > 0 else 1.0
+        total_tracked_hours = (total_tracked_seconds / 3600.0) if total_tracked_seconds > 0 else 0.0
 
-        by_subject = [
-            {"name": name, "hours": round(h, 2), "percentage": round((h / total_tracked_hours) * 100, 1)}
-            for name, h in sorted(subj_hours.items(), key=lambda x: x[1], reverse=True)
-        ]
-        by_task = [
-            {"title": name, "hours": round(h, 2), "minutes": round(h * 60)}
-            for name, h in sorted(task_hours.items(), key=lambda x: x[1], reverse=True)
-        ]
-        by_tag = [
-            {"tag": name, "hours": round(h, 2), "percentage": round((h / total_tracked_hours) * 100, 1)}
-            for name, h in sorted(tag_hours.items(), key=lambda x: x[1], reverse=True)
-            if name  # Filtrar entradas vacías
-        ]
+        unified_tasks = []
+        for t_key, data in unified_tasks_map.items():
+            hrs_raw = data["hours_raw"]
+            if hrs_raw > 0:
+                unified_tasks.append({
+                    "title": data["title"],
+                    "subject": data["subject"],
+                    "tags": data["tags"],
+                    "hours": round(hrs_raw, 2),
+                    "minutes": round(hrs_raw * 60)
+                })
+        
+        unified_tasks.sort(key=lambda x: (x["hours"] + x["minutes"]/60), reverse=True)
 
         return {
-            "by_subject": by_subject,
-            "by_task": by_task[:15],
-            "by_tag": by_tag
+            "unified_tasks": unified_tasks,
+            "total_tracked_hours": round(total_tracked_hours, 2)
         }
 
     async def get_extended_subject_metrics(self, user_id: str) -> dict:
