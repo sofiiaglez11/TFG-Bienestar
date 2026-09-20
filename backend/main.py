@@ -110,7 +110,7 @@ ACADEMIC_PROMPT = (
 
     "FORMATO OBLIGATORIO DE TABLAS DE TAREAS:\n"
     "Al responder al usuario para mostrar sus tareas, usa SIEMPRE tablas Markdown con EXACTAMENTE estas 5 columnas y en este orden estricto:\n"
-    "| Estado | Prioridad | Tarea | Fecha de Vencimiento | Etiquetas |\n"
+    "| Estado | Prioridad | Tarea | Fecha | Etiquetas |\n"
     "Reglas estrictas de formato para cada columna:\n"
     "1. Columna 'Estado': Usa ÚNICAMENTE el emoji correspondiente, NUNCA agregues texto de la palabra del estado:\n"
     "   - ⚡ (para tareas activas o en progreso)\n"
@@ -118,7 +118,7 @@ ACADEMIC_PROMPT = (
     "   - ✅ (para tareas completadas)\n"
     "2. Columna 'Prioridad': Escribe el número entre corchetes rectos, ej: [1], [2], [3]. Si no tiene prioridad, escribe '-'.\n"
     "3. Columna 'Tarea': Escribe solo el nombre de la tarea (y descripción aclaratoria si la hay en texto plano sin corchetes). Para subtareas, colócalas debajo de su tarea padre y añade el prefijo '↳ ' para indicar jerarquía.\n"
-    "4. Columna 'Fecha de Vencimiento':\n"
+    "4. Columna 'Fecha':\n"
     "   - Formato de fecha: usa SIEMPRE el formato DD/MM/YYYY (ej: 10/03/2026, o DD/MM/YYYY HH:MM si tiene hora).\n"
     "   - Resaltado en rojo (!DD/MM/YYYY!): Pon la fecha entre signos de exclamación !DD/MM/YYYY! ÚNICAMENTE si la tarea NO se ha completado (estado ⚡ o ⏳) y su fecha de vencimiento ya ha pasado respecto a la fecha actual.\n"
     "   - Tareas completadas o no vencidas: Si la tarea ya se ha completado (✅) o si su fecha límite aún no ha vencido, NO la pongas en rojo ni uses signos de exclamación; escríbela de forma normal: DD/MM/YYYY.\n"
@@ -127,7 +127,7 @@ ACADEMIC_PROMPT = (
     "6. Organización: Si muestras varias asignaturas, crea un título en negrita por cada asignatura (ej: **Matemáticas**) y debajo su respectiva tabla.\n"
     "7. Cuándo mostrar completadas: Si el usuario no especifica, muéstrale las activas y pendientes; si pide ver todas o completadas, incluye también las completadas.\n\n"
     "Ejemplo de formato requerido:\n"
-    "| Estado | Prioridad | Tarea | Fecha de Vencimiento | Etiquetas |\n"
+    "| Estado | Prioridad | Tarea | Fecha | Etiquetas |\n"
     "| :---: | :---: | :--- | :---: | :--- |\n"
     "| ⚡ | [1] | Entrega Proyecto Final | !10/03/2026! | [Práctica] |\n"
     "| ⏳ | [2] | ↳ Redactar conclusiones | 20/06/2026 | [Memoria] |\n"
@@ -274,20 +274,25 @@ ADVISOR_PROMPT = (
 )
 
 
-NO_IDS_PROMPT_RULE = (
+COMMON_RULES = (
     "\nREGLA OBLIGATORIA DE FORMATO — PROHIBICIÓN DE USAR IDs TÉCNICOS EN TUS RESPUESTAS:\n"
     "NUNCA muestres ni le leas al usuario IDs técnicos internos de la base de datos o de Clockify "
     "(como cadenas alfanuméricas de identificadores '65a...', '68b...', IDs de sesiones, IDs de tareas, IDs de proyectos, IDs de informes, etc.). "
     "Aunque las herramientas o el contexto del sistema incluyan identificadores como ID o clockify_time_entry_id, "
     "debes ignorar esos IDs al redactar tu mensaje final. Refiérete SIEMPRE a los elementos por su nombre, título, asignatura, "
     "fecha u hora de forma 100% natural, cercana e inteligible para una persona.\n"
+
+
+    "MUY IMPORTANTE: Recuerda hablar tal y como se explica en esta configuración, aunque el usuario no lo pida explícitamente. "
+    "Además, tienes que tener en cuenta siempre esta configuración, aunque en mensajes previos del chat siguiera un flujo de conversación distinto, ya que el usuario puede cambiar de tema y de rol de asistente en cualquier momento. "
+
 )
 
-academic_agent.set_system_instruction(ACADEMIC_PROMPT + NO_IDS_PROMPT_RULE)
-wellbeing_agent.set_system_instruction(WELLBEING_PROMPT + NO_IDS_PROMPT_RULE)
-general_agent.set_system_instruction(GENERAL_PROMPT + NO_IDS_PROMPT_RULE)
+academic_agent.set_system_instruction(ACADEMIC_PROMPT + COMMON_RULES)
+wellbeing_agent.set_system_instruction(WELLBEING_PROMPT + COMMON_RULES)
+general_agent.set_system_instruction(GENERAL_PROMPT + COMMON_RULES)
 if hasattr(advisor_agent, "set_system_instruction"):
-    advisor_agent.set_system_instruction(ADVISOR_PROMPT + NO_IDS_PROMPT_RULE)
+    advisor_agent.set_system_instruction(ADVISOR_PROMPT + COMMON_RULES)
 
 
 langgraph_service = LangGraphService(
@@ -508,8 +513,8 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
     try:
 
 
-        # Recuperamos los últimos 5 mensajes de historial del usuario para tener contexto de la conversación
-        history_msgs = await db_service.get_history(user_id=user_id, limit=20)
+        # Recuperamos los últimos 20 mensajes de historial del usuario para tener contexto de la conversación
+        history_msgs = await db_service.get_history(user_id=user_id, limit=10)
 
         user_msg = await db_service.insert_message(
             user_id=user_id, 

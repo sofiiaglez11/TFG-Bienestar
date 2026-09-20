@@ -1,17 +1,17 @@
 services:
-  # BASE DE DATOS MONGODB LOCAL
-  db:
-    image: mongo:latest
-    container_name: tfg_mongodb_dev
-    # command: mongod --quiet
-    logging:
-      driver: "none"
-    ports:
-      - "27018:27017"
-    volumes:
-      - mongo_data_dev:/data/db
-    networks:
-      - tfg_network
+  # # BASE DE DATOS MONGODB LOCAL
+  # db:
+  #   image: mongo:latest
+  #   container_name: tfg_mongodb_dev
+  #   # command: mongod --quiet
+  #   logging:
+  #     driver: "none"
+  #   ports:
+  #     - "27018:27017"
+  #   volumes:
+  #     - mongo_data_dev:/data/db
+  #   networks:
+  #     - tfg_network
 
   # BACKEND FASTAPI — modo desarrollo con hot-reload
   backend:
