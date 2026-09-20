@@ -224,11 +224,10 @@ WELLBEING_PROMPT = (
     "   Habla siempre en lenguaje cotidiano y empático.\n"
     "9. El clockify_time_entry_id es OBLIGATORIO. Siempre estará disponible en el campo "
     "   [DATOS_SESION: clockify_time_entry_id=XXX] del mensaje actual. Extráelo de ahí. NUNCA lo inventes ni uses wb_get_latest_time_entry.\n"
-    "REGLA DE INFORME DE BIENESTAR DIARIO Y SEGUIMIENTO DE PLANNING:\n"
+    "REGLA DE INFORME DE BIENESTAR DIARIO:\n"
     "1. Si el contexto del sistema indica que el usuario AÚN NO ha registrado sus horas de sueño hoy, "
     "   aprovecha tu intervención para preguntarle de forma cálida y conversacional cuántas horas durmió hoy y cómo se siente.\n"
     "2. Cuando el usuario proporcione sus horas de sueño, usa la herramienta `wb_add_wellbeing_report` para registrar la fecha de hoy, sus horas de sueño (`sleep_hours`) y los demás datos que haya compartido.\n"
-    "3. Si el contexto del sistema incluye un PLAN DE ESTUDIO ACTIVO DETECTADO, recuérdale de forma amigable su planning actual y su progreso alcanzado (% horas reales vs planificadas).\n"
     "IMPORTANTE: Si el usuario empieza a hablar de otra cosa (bienestar general, estrés, sueño), atiende también eso, "
     "pero intenta cerrar el informe primero si es posible."
 )
@@ -478,45 +477,25 @@ async def get_daily_check_context(user_id: str, db_service: DatabaseService, ana
         import sys
         print(f"[DAILY CHECK] Error comprobando informe de hoy: {e}", file=sys.stderr)
 
-    # 2. Comprobar si hay un plan de estudio activo
+    # 2. Comprobar únicamente si hay desvíos / tareas retrasadas en el plan activo
     try:
         if analytics_service:
             plan_progress = await analytics_service.get_study_plan_progress(user_id, days=7)
-            if plan_progress and plan_progress.get("has_active_plan"):
-                p_title = plan_progress.get("plan_title", "Plan Activo")
-                p_pct = plan_progress.get("overall_progress_pct", 0)
-                p_actual = plan_progress.get("total_actual_hours", 0)
-                p_planned = plan_progress.get("total_planned_hours", 0)
-                
-                subj_progress_str = []
-                for s_name, s_data in plan_progress.get("progress_by_subject", {}).items():
-                    subj_progress_str.append(f"{s_name}: {s_data.get('actual_hours', 0)}h/{s_data.get('planned_hours', 0)}h ({s_data.get('progress_pct', 0)}%)")
-                
-                subj_info = (", ".join(subj_progress_str)) if subj_progress_str else "sin desglose"
+            if plan_progress and plan_progress.get("has_active_plan") and plan_progress.get("has_overdue_tasks"):
+                overdue_list = plan_progress.get("overdue_tasks", [])
+                overdue_details = []
+                for ot in overdue_list:
+                    status_label = "pendiente/sin terminar" if ot.get("status") == "INCUMPLIDA_PENDIENTE" else f"completada con retraso ({ot.get('completed_at')})"
+                    overdue_details.append(f"• '{ot.get('title')}' ({ot.get('subject_name')}, venció: {ot.get('due_date')}, estado: {status_label})")
                 
                 context_parts.append(
-                    f" PLAN DE ESTUDIO ACTIVO DETECTADO: '{p_title}'. "
-                    f"Progreso global actual: {p_pct}% ({p_actual}h reales / {p_planned}h planificadas). "
-                    f"Desglose por asignaturas: [{subj_info}]. "
-                    f"Recuérdale amigablemente su plan de estudio activo y coméntale cómo va con él."
+                    f" ⚠️ ALERTAS DE INCUMPLIMIENTO/DESVÍO DEL PLAN: Se han detectado tareas no completadas dentro del plazo del plan o retrasadas: "
+                    f"[{'; '.join(overdue_details)}]. "
+                    f"Avisa al usuario con empatía sobre este retraso e incítale a reorganizarse, ya que no se está siguiendo el plan según lo previsto."
                 )
-
-                if plan_progress.get("has_overdue_tasks"):
-                    overdue_list = plan_progress.get("overdue_tasks", [])
-                    overdue_details = []
-                    for ot in overdue_list:
-                        status_label = "pendiente/sin terminar" if ot.get("status") == "INCUMPLIDA_PENDIENTE" else f"completada con retraso ({ot.get('completed_at')})"
-                        overdue_details.append(f"• '{ot.get('title')}' ({ot.get('subject_name')}, venció: {ot.get('due_date')}, estado: {status_label})")
-                    
-                    context_parts.append(
-                        f" ⚠️ ALERTAS DE INCUMPLIMIENTO/DESVÍO DEL PLAN: Se han detectado tareas no completadas dentro del plazo del plan o retrasadas: "
-                        f"[{'; '.join(overdue_details)}]. "
-                        f"Avisa al usuario con empatía sobre este retraso e incítale a reorganizarse, ya que no se está siguiendo el plan según lo previsto."
-                    )
-
     except Exception as e:
         import sys
-        print(f"[DAILY CHECK] Error comprobando plan activo: {e}", file=sys.stderr)
+        print(f"[DAILY CHECK] Error comprobando alertas del plan activo: {e}", file=sys.stderr)
 
     if not context_parts:
         return ""

@@ -633,18 +633,56 @@ class LangGraphService:
                     "NO le vuelvas a preguntar por el sueño. En su lugar, pregúntale qué tiene planificado estudiar hoy o cómo le gustaría enfocar la jornada.\n"
                 )
 
-            # Plan activo context
-            if self.analytics_service:
-                try:
-                    plan_progress = await self.analytics_service.get_study_plan_progress(user_id, days=7)
-                    if plan_progress and plan_progress.get("has_active_plan"):
-                        p_title = plan_progress.get("plan_title", "Plan Activo")
-                        p_pct = plan_progress.get("overall_progress_pct", 0)
-                        login_prompt += f"\nPlan de estudio activo detectado: '{p_title}' ({p_pct}% completado). Puedes animarle brevemente con su avance.\n"
-                except Exception as e:
-                    print(f"[LANGGRAPH GREETING] Error obteniendo progreso del plan: {e}", file=sys.stderr)
+            # 4. Plan de estudio activo y tareas específicas para hoy
+            today_plan_tasks = []
+            plan_title = None
+            try:
+                active_plan = await self.db_service.get_active_study_plan(user_id)
+                if active_plan:
+                    plan_title = active_plan.get("title", "Plan Activo")
+                    items = active_plan.get("items", [])
 
-            login_prompt += "Sé conciso, empático y natural. No uses listas largas innecesarias."
+                    try:
+                        from zoneinfo import ZoneInfo
+                        now_dt = datetime.now(ZoneInfo("Europe/Madrid"))
+                    except Exception:
+                        now_dt = datetime.now()
+
+                    dias_semana = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+                    dias_semana_raw = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]
+                    weekday_name = dias_semana[now_dt.weekday()]
+                    weekday_raw = dias_semana_raw[now_dt.weekday()]
+                    today_date_str = now_dt.strftime("%Y-%m-%d")
+
+                    for it in items:
+                        it_day = (it.get("day") or "").lower().strip()
+                        it_due = (it.get("due_date") or "").strip()
+                        if it_day in (weekday_name, weekday_raw) or it_due == today_date_str:
+                            s_name = it.get("subject_name") or "Estudio"
+                            hrs = it.get("planned_hours", 0)
+                            desc = it.get("description") or it.get("task", "")
+                            hrs_str = f"{hrs}h" if hrs else ""
+                            desc_str = f" - {desc}" if desc else ""
+                            today_plan_tasks.append(f"• {s_name} ({hrs_str}{desc_str})")
+            except Exception as e:
+                print(f"[LANGGRAPH GREETING] Error obteniendo tareas del plan de hoy: {e}", file=sys.stderr)
+
+            if today_plan_tasks:
+                login_prompt += (
+                    f"\n4. SEGUIMIENTO DEL PLAN DE ESTUDIO PARA HOY ('{plan_title}'):\n"
+                    f"Hoy el usuario tiene programadas en su planificación:\n"
+                    f"{chr(10).join(today_plan_tasks)}\n"
+                    "Menciónale de forma concreta y motivadora lo que tiene previsto estudiar hoy y "
+                    "pregúntale directamente si quiere que pongamos en marcha el temporizador para comenzar con alguna de esas tareas.\n"
+                )
+            elif plan_title:
+                login_prompt += (
+                    f"\n4. PLAN DE ESTUDIO ACTIVO ('{plan_title}'):\n"
+                    "Tiene un plan activo, aunque hoy no tiene tareas específicas marcadas. "
+                    "Pregúntale amigablemente qué le gustaría avanzar hoy.\n"
+                )
+
+            login_prompt += "\nSé conciso, empático y natural. No uses listas innecesariamente largas."
             proactive_prompt = login_prompt
 
         inputs = {
