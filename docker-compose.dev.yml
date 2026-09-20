@@ -39,8 +39,8 @@ services:
     container_name: tfg_frontend_dev
     ports:
       - "3000:3000"
-    env_file:
-      - frontend/.env.local
+#    env_file:
+#      - frontend/.env.local
     environment:
       - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
       # Necesario para que Next.js detecte cambios de archivo dentro del contenedor (polling)

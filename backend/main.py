@@ -411,6 +411,10 @@ class RegisterRequest(BaseModel):
     name: str
     password: str
 
+class ProactiveGreetingRequest(BaseModel):
+    is_login: Optional[bool] = False
+    force_onboarding: Optional[bool] = False
+
 
 
 class ClockifyCredentialsRequest(BaseModel):
@@ -592,47 +596,36 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
  
 
 @app.post("/api/chat/proactive-greeting")
-async def get_proactive_greeting(user_id: str = Depends(get_current_user_id)):
+async def get_proactive_greeting(
+    request: Optional[ProactiveGreetingRequest] = None,
+    user_id: str = Depends(get_current_user_id)
+):
     """
-    Endpoint que llama React justo al hacer Login. 
-    Llama directamente al Agente de Bienestar para generar un saludo proactivo.
+    Endpoint que genera el saludo proactivo adecuado a través del grafo de LangGraph:
+    - Si es un usuario nuevo (o sin historial ni asignaturas): ejecuta onboarding_node (GENERAL)
+    - Si es un usuario recurrente (inicio de sesión): ejecuta login_greeting_node (BIENESTAR)
     """
-    # Comprobar si hay algún reporte de bienestar reciente para personalizar el saludo
-    latest_wellbeing = await db_service.get_latest_wellbeing_report(user_id)
-    daily_context = await get_daily_check_context(user_id, db_service, analytics_service)
-    
-    prompt = (
-        "El usuario acaba de iniciar sesión en la plataforma. "
-        "Dale un saludo cálido, breve y proactivo. "
-        "Si aún no ha registrado sus horas de sueño hoy, pregúntale activamente cuántas horas ha dormido hoy "
-        "y cómo se siente para poder registrar su informe de bienestar. "
-        "Si además tiene un plan de estudio activo, recuérdaselo brevemente diciéndole cómo va con su progreso."
-    )
-    
-    if latest_wellbeing:
-        prompt += f" Ten en cuenta que en su último registro dijo haber dormido {latest_wellbeing.get('sleep_hours', 'N/A')} horas."
+    is_force_onboarding = request.force_onboarding if request else False
 
-    if daily_context:
-        prompt += daily_context
-
-    wellbeing_agent.set_config([])  # Sin tools para un saludo directo
-    result = await wellbeing_agent.run_agentic_conversation(
-        user_message=prompt,
-        tool_executor=None
+    result = await langgraph_service.run_proactive_greeting(
+        user_id=user_id,
+        is_force_onboarding=is_force_onboarding
     )
 
+    response_text = result["response"]
+    agent_used = result["agent_used"]
 
-    # Guardar la pregunta del bot en el historial
+    # Guardar el saludo en el historial de MongoDB
     greeting_msg = await db_service.insert_message(
         user_id=user_id,
         role="assistant",
-        content=result.text,
-        agent_used="BIENESTAR"
+        content=response_text,
+        agent_used=agent_used
     )
 
     return {
-        "response": result.text,
-        "agent_used": "BIENESTAR",
+        "response": response_text,
+        "agent_used": agent_used,
         "timestamp": greeting_msg.get("timestamp")
     }
 

@@ -36,26 +36,31 @@ export default function ChatPage() {
     router.push("/login");
   };
 
-  // 2. Función para disparar el saludo proactivo inicial
-  const triggerProactiveGreeting = async (tok) => {
+  // 2. Función para disparar el saludo proactivo inicial o de login
+  const triggerProactiveGreeting = async (tok, isAppend = false) => {
     try {
       const res = await fetch(`${BACKEND_URL}/api/chat/proactive-greeting`, {
         method: "POST",
         headers: {
+          "Content-Type": "application/json",
           Authorization: `Bearer ${tok}`,
         },
+        body: JSON.stringify({ is_login: isAppend }),
       });
 
       if (res.ok) {
         const data = await res.json();
-        setMessages([
-          {
-            role: "assistant",
-            content: data.response,
-            agent_used: data.agent_used,
-            timestamp: data.timestamp || new Date().toISOString(),
-          },
-        ]);
+        const newMsg = {
+          role: "assistant",
+          content: data.response,
+          agent_used: data.agent_used,
+          timestamp: data.timestamp || new Date().toISOString(),
+        };
+        if (isAppend) {
+          setMessages((prev) => [...prev, newMsg]);
+        } else {
+          setMessages([newMsg]);
+        }
       }
     } catch (err) {
       console.error("Error al obtener saludo proactivo:", err);
@@ -86,8 +91,17 @@ export default function ChatPage() {
       if (data.history && data.history.length > 0) {
         setMessages(data.history);
         setHasMore(data.has_more ?? false);
+
+        // Si el usuario acaba de iniciar sesión, generamos el saludo de login proactivo
+        const shouldGreetOnLogin = sessionStorage.getItem("triggerLoginGreeting") === "true";
+        if (shouldGreetOnLogin) {
+          sessionStorage.removeItem("triggerLoginGreeting");
+          triggerProactiveGreeting(tokenToUse, true);
+        }
       } else {
-        triggerProactiveGreeting(tokenToUse);
+        // Historial vacío: nuevo usuario / onboarding
+        sessionStorage.removeItem("triggerLoginGreeting");
+        triggerProactiveGreeting(tokenToUse, false);
       }
     } catch (err) {
       console.error(err);

@@ -45,6 +45,7 @@ export default function LoginPage() {
 
             const data = await response.json();
             localStorage.setItem("token", data.token);
+            sessionStorage.setItem("triggerLoginGreeting", "true");
             if (data.user) {
                 localStorage.setItem("userName", data.user.name || "");
                 localStorage.setItem("userEmail", data.user.email || "");
