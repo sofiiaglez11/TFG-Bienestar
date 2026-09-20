@@ -23,12 +23,13 @@ import {
   Sparkles,
   Layers,
   CheckSquare,
-  Clock3
+  Clock3,
+  RefreshCw
 } from "lucide-react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
-export default function StudentDashboard({ isOpen, onClose, isInline = false }) {
+export default function StudentDashboard({ isOpen, onClose, isInline = false, isActive = false }) {
   const [data, setData] = useState({
     analytics: [],
     wellbeing: {},
@@ -44,10 +45,10 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
   const [tagFilter, setTagFilter] = useState("All");
 
   useEffect(() => {
-    if (isOpen || isInline) {
+    if (isOpen || (isInline && isActive)) {
       fetchAnalytics();
     }
-  }, [isOpen, isInline]);
+  }, [isOpen, isInline, isActive]);
 
   const fetchAnalytics = async () => {
     setLoading(true);
@@ -126,6 +127,16 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
     } catch {
       return isoDate;
     }
+  };
+
+  // Formatea horas decimales -> "X h Y min"
+  const formatTime = (hours) => {
+    const h = Math.floor(hours);
+    const m = Math.round((hours - h) * 60);
+    if (h === 0 && m === 0) return "0 min";
+    if (h === 0) return `${m} min`;
+    if (m === 0) return `${h} h`;
+    return `${h} h ${m} min`;
   };
 
   const totalHours = analytics.reduce((acc, curr) => acc + (curr.hours || 0), 0);
@@ -221,6 +232,27 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
           </div>
           <div style={{ display: "flex", gap: "10px" }}>
             <button
+              onClick={fetchAnalytics}
+              disabled={loading}
+              title="Actualizar datos"
+              style={{
+                padding: "8px 14px",
+                borderRadius: "8px",
+                border: "1px solid var(--border)",
+                backgroundColor: "var(--bg-input)",
+                color: "var(--text-primary)",
+                cursor: loading ? "not-allowed" : "pointer",
+                fontWeight: "500",
+                fontSize: "13px",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                opacity: loading ? 0.7 : 1
+              }}
+            >
+              <RefreshCw size={16} style={{ animation: loading ? "spin 1s linear infinite" : "none" }} /> {loading ? "Actualizando..." : "Actualizar"}
+            </button>
+            <button
               onClick={handlePrintReport}
               style={{
                 padding: "8px 14px",
@@ -255,7 +287,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
             <div style={{ fontSize: "12px", color: "#1e40af", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
               <Clock size={16} /> Total Horas
             </div>
-            <div style={{ fontSize: "1.6rem", fontWeight: "700", color: "#1d4ed8", marginTop: "4px" }}>{totalHours.toFixed(1)} h</div>
+            <div style={{ fontSize: "1.6rem", fontWeight: "700", color: "#1d4ed8", marginTop: "4px" }}>{formatTime(totalHours)}</div>
           </div>
           <div style={{ padding: "16px", borderRadius: "12px", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0" }}>
             <div style={{ fontSize: "12px", color: "#166534", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
@@ -396,7 +428,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
                           {studyPlan.overall_progress_pct}%
                         </span>
                         <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-                          {studyPlan.total_actual_hours}h / {studyPlan.total_planned_hours}h planificadas
+                          {formatTime(studyPlan.total_actual_hours || 0)} / {formatTime(studyPlan.total_planned_hours || 0)} planificadas
                         </div>
                       </div>
                     </div>
@@ -446,7 +478,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
                                 <h4 style={{ margin: 0, fontSize: "1.1rem", fontWeight: "700" }}>{item.name}</h4>
                                 <div style={{ display: "flex", alignItems: "center", gap: "14px", marginTop: "6px", fontSize: "13px", color: "var(--text-secondary)", flexWrap: "wrap" }}>
                                   <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                                    <Clock size={14} /> {item.hours} hrs totales
+                                    <Clock size={14} /> {formatTime(item.hours)} totales
                                   </span>
 
                                   {/* Comparativa semanal */}
@@ -463,7 +495,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
                                     border: isUp ? "1px solid #bbf7d0" : isDown ? "1px solid #fecaca" : "none"
                                   }}>
                                     {isUp ? <TrendingUp size={14} /> : isDown ? <TrendingDown size={14} /> : null}
-                                    {wComp.current_week_hours || 0}h esta semana ({wComp.change_pct > 0 ? `+${wComp.change_pct}%` : `${wComp.change_pct}%`} vs sem. anterior)
+                                    {formatTime(wComp.current_week_hours || 0)} esta semana ({wComp.change_pct > 0 ? `+${wComp.change_pct}%` : `${wComp.change_pct}%`} vs sem. anterior)
                                   </span>
                                 </div>
                               </div>
@@ -630,7 +662,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
                   <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
                     <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "600" }}>Tiempo Total Filtrado</span>
                     <span style={{ fontSize: "18px", fontWeight: "700", color: "var(--brand)" }}>
-                      {filteredTotalHours} h {filteredTotalMins} min
+                      {formatTime(filteredTotalHoursRaw)}
                     </span>
                   </div>
                 </div>
@@ -687,7 +719,8 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
                           </div>
                           <div style={{ whiteSpace: "nowrap" }}>
                             <span style={{ fontSize: "14px", color: "var(--brand)", fontWeight: "700" }}>
-                              {item.hours} h {item.minutes > 0 ? `(${item.minutes} min)` : ""}
+                              {formatTime(item.hours)}
+
                             </span>
                           </div>
                         </div>
@@ -872,8 +905,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false }) 
                               transition: "width 0.4s ease"
                             }} />
                           </div>
-                          <span style={{ width: "50px", fontSize: "13px", fontWeight: "600", textAlign: "right" }}>{hrs} h</span>
-                        </div>
+                          <span style={{ width: "70px", fontSize: "13px", fontWeight: "600", textAlign: "right" }}>{formatTime(hrs)}</span>                        </div>
                       );
                     })}
                   </div>

@@ -251,7 +251,7 @@ class AnalyticsService:
             total_planned_hours = 0.0
 
             for item in items:
-                subj = (item.get("subject_name") or "Otras / General").strip()
+                subj = (item.get("subject_name") or "Sin Asignatura").strip()
                 hrs = float(item.get("planned_hours", 0) or 0)
                 planned_by_subject[subj] = planned_by_subject.get(subj, 0.0) + hrs
                 total_planned_hours += hrs
@@ -454,7 +454,7 @@ class AnalyticsService:
                 hrs = duration_sec / 3600.0
 
                 pid = entry.get("projectId")
-                subj_name = proj_to_subj.get(pid, "General / Otras")
+                subj_name = proj_to_subj.get(pid, "Sin Asignatura")
 
                 ck_task_id = entry.get("taskId")
                 if ck_task_id and ck_task_id in task_ck_id_to_name:

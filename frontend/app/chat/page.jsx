@@ -792,7 +792,7 @@ export default function ChatPage() {
             overflow: "hidden",
           }}
         >
-          <StudentDashboard isInline={true} />
+          <StudentDashboard isInline={true} isActive={activeTab === "stats"} />
         </div>
       </div>
 
