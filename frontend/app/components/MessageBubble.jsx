@@ -2,88 +2,12 @@ import React, { useState, Children } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-// Helper para transformar texto tipo [Teoría] en píldoras con color
-// const renderBadges = (text) => {
-//   if (typeof text !== "string") return text;
-
-//   // Captura exclusivamente el texto encerrado entre corchetes: [Teoría], [Alta], etc.
-//   const tagRegex = /\[(.*?)\]/g;
-//   const parts = [];
-//   let lastIndex = 0;
-//   let match;
-
-//   while ((match = tagRegex.exec(text)) !== null) {
-//     if (match.index > lastIndex) {
-//       parts.push(text.slice(lastIndex, match.index));
-//     }
-
-//     const tagText = match[1].trim();
-//     const lower = tagText.toLowerCase();
-
-//     // Paleta de colores para las píldoras
-//     let style = { bg: "rgba(99, 102, 241, 0.15)", text: "#4f46e5", border: "rgba(99, 102, 241, 0.4)" }; // Por defecto (Azul/Violeta)
-
-//     if (lower.includes("teorí") || lower.includes("teori")) {
-//       style = { bg: "rgba(59, 130, 246, 0.15)", text: "#2563eb", border: "rgba(59, 130, 246, 0.4)" }; // Azul
-//     } else if (lower.includes("práctic") || lower.includes("practic")) {
-//       style = { bg: "rgba(34, 197, 94, 0.15)", text: "#16a34a", border: "rgba(34, 197, 94, 0.4)" }; // Verde
-//     } else if (lower.includes("examen") || lower.includes("alta") || lower.includes("1")) {
-//       style = { bg: "rgba(239, 68, 68, 0.15)", text: "#dc2626", border: "rgba(239, 68, 68, 0.4)" }; // Rojo
-//     } else if (lower.includes("media") || lower.includes("pendiente") || lower.includes("2")) {
-//       style = { bg: "rgba(245, 158, 11, 0.15)", text: "#d97706", border: "rgba(245, 158, 11, 0.4)" }; // Naranja
-//     }
-
-//     parts.push(
-//       <span
-//         key={match.index}
-//         style={{
-//           display: "inline-block",
-//           background: style.bg,
-//           color: style.text,
-//           border: `1px solid ${style.border}`,
-//           borderRadius: "9999px", // Forma de ÓVALO / CÁPSULA
-//           padding: "2px 10px",
-//           fontSize: "11px",
-//           fontWeight: "600",
-//           margin: "0 2px",
-//           whiteSpace: "nowrap"
-//         }}
-//       >
-//         {tagText}
-//       </span>
-//     );
-//     lastIndex = tagRegex.lastIndex;
-//   }
-
-//   if (lastIndex < text.length) {
-//     parts.push(text.slice(lastIndex));
-//   }
-
-//   return parts.length > 0 ? parts : text;
-// };
 
 // Función para asignar colores consistentes según el texto
 const getTagStyle = (tagText) => {
   const lower = tagText.toLowerCase().trim();
 
-  // // 1. Reglas fijas para etiquetas comunes
-  // if (["alta", "urgente", "examen"].includes(lower)) {
-  //   return { bg: "rgba(239, 68, 68, 0.15)", text: "#dc2626", border: "rgba(239, 68, 68, 0.4)" }; // Rojo
-  // }
-  // if (["media", "en proceso", "pendiente"].includes(lower)) {
-  //   return { bg: "rgba(245, 158, 11, 0.15)", text: "#d97706", border: "rgba(245, 158, 11, 0.4)" }; // Naranja
-  // }
-  // if (["baja", "completada", "finalizada"].includes(lower)) {
-  //   return { bg: "rgba(34, 197, 94, 0.15)", text: "#16a34a", border: "rgba(34, 197, 94, 0.4)" }; // Verde
-  // }
-  // if (["teoría", "teoria"].includes(lower)) {
-  //   return { bg: "rgba(59, 130, 246, 0.15)", text: "#2563eb", border: "rgba(59, 130, 246, 0.4)" }; // Azul
-  // }
-  // if (["práctica", "practica"].includes(lower)) {
-  //   return { bg: "rgba(168, 85, 247, 0.15)", text: "#9333ea", border: "rgba(168, 85, 247, 0.4)" }; // Morado
-  // }
-
-  // 2. Paleta dinámica para cualquier otra etiqueta (Garantiza que el mismo texto = mismo color)
+  // Paleta dinámica para cualquier otra etiqueta (Garantiza que el mismo texto = mismo color)
   const palette = [
     { bg: "rgba(14, 165, 233, 0.15)", text: "#0284c7", border: "rgba(14, 165, 233, 0.4)" },  // Celeste
     { bg: "rgba(236, 72, 153, 0.15)", text: "#db2777", border: "rgba(236, 72, 153, 0.4)" },  // Rosa
@@ -102,10 +26,20 @@ const getTagStyle = (tagText) => {
   return palette[index];
 };
 
+
 const renderBadges = (text) => {
   if (typeof text !== "string") return text;
 
-  // Regex para capturar !texto! (fechas vencidas/alertas) o [texto] (etiquetas/prioridades)
+  // 1. Interpretar <br> o <br/> como saltos de línea reales de React
+  if (text.includes("<br")) {
+    const parts = text.split(/<br\s*\/?>/gi);
+    return parts.reduce((acc, part, i) => {
+      if (i === 0) return [renderBadges(part)];
+      return [...acc, <br key={`br-${i}`} />, renderBadges(part)];
+    }, []);
+  }
+
+  // 2. Regex para !texto! (fechas) y [texto] (etiquetas)
   const regex = /!([^!]+)!|\[([^\]]+)\]/g;
   const parts = [];
   let lastIndex = 0;
@@ -117,7 +51,7 @@ const renderBadges = (text) => {
     }
 
     if (match[1] !== undefined) {
-      // Coincidencia con !texto! -> Fecha vencida en texto normal, rojo y negrita
+      // Fecha vencida (!texto!) -> Texto en rojo, negrita y sin romper línea
       const overdueText = match[1].trim();
       parts.push(
         <span
@@ -125,35 +59,39 @@ const renderBadges = (text) => {
           style={{
             color: "#dc2626",
             fontWeight: "700",
+            whiteSpace: "nowrap",
           }}
         >
           {overdueText}
         </span>
       );
     } else if (match[2] !== undefined) {
-      // Coincidencia con [texto] -> Píldora de etiqueta/prioridad
-      const tagText = match[2].trim();
-      const style = getTagStyle(tagText);
+      // Píldoras ([texto]) -> Si la IA manda [backend, prompt], lo dividimos por comas
+      const rawText = match[2].trim();
+      const subTags = rawText.split(",").map((t) => t.trim()).filter(Boolean);
 
-      parts.push(
-        <span
-          key={match.index}
-          style={{
-            display: "inline-block",
-            background: style.bg,
-            color: style.text,
-            border: `1px solid ${style.border}`,
-            borderRadius: "9999px",
-            padding: "2px 10px",
-            fontSize: "11px",
-            fontWeight: "600",
-            margin: "0 2px",
-            whiteSpace: "nowrap"
-          }}
-        >
-          {tagText}
-        </span>
-      );
+      subTags.forEach((tagText, subIdx) => {
+        const style = getTagStyle(tagText);
+        parts.push(
+          <span
+            key={`${match.index}-${subIdx}`}
+            style={{
+              display: "inline-block",
+              background: style.bg,
+              color: style.text,
+              border: `1px solid ${style.border}`,
+              borderRadius: "9999px",
+              padding: "2px 8px",
+              fontSize: "11px",
+              fontWeight: "600",
+              margin: "1px 2px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {tagText}
+          </span>
+        );
+      });
     }
 
     lastIndex = regex.lastIndex;
@@ -386,45 +324,49 @@ export default function MessageBubble({ message }) {
                 hr: () => (
                   <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "8px 0" }} />
                 ),
-                // Tablas (remark-gfm)
+                // Tablas (remark-gfm)ç
+
+              // Tablas (remark-gfm)
                 table: ({ children }) => (
-                  <table
-                    style={{
-                      borderCollapse: "collapse",
-                      width: "100%",
-                      margin: "6px 0",
-                      fontSize: "13px",
-                    }}
-                  >
-                    {children}
-                  </table>
+                  <div style={{ overflowX: "auto", margin: "8px 0", maxWidth: "100%" }}>
+                    <table
+                      style={{
+                        borderCollapse: "collapse",
+                        width: "100%",
+                        fontSize: "13px",
+                      }}
+                    >
+                      {children}
+                    </table>
+                  </div>
                 ),
                 th: ({ children }) => (
                   <th
                     style={{
                       border: "1px solid var(--border)",
-                      padding: "4px 8px",
-                      background: "rgba(0,0,0,0.1)",
-                      textAlign: "left",
+                      padding: "6px 8px",
+                      background: "rgba(0,0,0,0.06)",
+                      fontWeight: "700",
+                      whiteSpace: "nowrap", // Evita que 'Estado', 'Prioridad' o 'Fecha' se dividan
                     }}
                   >
                     {children}
                   </th>
                 ),
-                // td: ({ children }) => (
-                //   <td style={{ border: "1px solid var(--border)", padding: "4px 8px" }}>
-                //     {children}
-                //   </td>
-                // ),
-
                 td: ({ children }) => (
-                  <td style={{ border: "1px solid var(--border)", padding: "4px 8px" }}>
+                  <td
+                    style={{
+                      border: "1px solid var(--border)",
+                      padding: "6px 8px",
+                      verticalAlign: "middle",
+                    }}
+                  >
                     {React.Children.map(children, (child) =>
                       typeof child === "string" ? renderBadges(child) : child
                     )}
                   </td>
                 ),
-                // Blockquote
+                
                 blockquote: ({ children }) => (
                   <blockquote
                     style={{
