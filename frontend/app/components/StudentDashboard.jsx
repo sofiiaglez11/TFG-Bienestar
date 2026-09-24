@@ -159,7 +159,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
   if (!isOpen && !isInline) return null;
 
   const WEEKDAYS_ORDER = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
-  const reportsByDay = wellbeing.reports_by_weekday || {};
+  const recentDays = wellbeing.recent_days || [];
   const hoursByDay = patterns.hours_by_weekday || {};
 
   const unifiedTasks = timeBreakdown.unified_tasks || [];
@@ -758,35 +758,48 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
                     <Moon size={18} /> Registro Semanal de Bienestar
                   </h3>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "10px" }}>
-                    {WEEKDAYS_ORDER.map((day) => {
-                      const dayData = reportsByDay[day];
-                      const sleepVal = dayData?.sleep;
-                      const moodVal = dayData?.mood;
-                      const energyVal = dayData?.energy;
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {recentDays.map((dayData, idx) => {
+                      const sleepVal = dayData.sleep;
+                      const moodVal = dayData.mood;
+                      const energyVal = dayData.energy;
+                      const formattedDate = formatDate(dayData.date) || dayData.date;
 
                       return (
-                        <div key={day} style={{
-                          padding: "12px",
+                        <div key={idx} style={{
+                          padding: "12px 16px",
                           borderRadius: "10px",
-                          border: "1px solid var(--border)",
                           backgroundColor: "var(--bg-input)",
-                          textAlign: "center",
+                          border: "1px solid var(--border)",
                           display: "flex",
-                          flexDirection: "column",
-                          gap: "8px"
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: "12px"
                         }}>
-                          <span style={{ fontWeight: "700", fontSize: "13px", color: "var(--text-primary)" }}>{day}</span>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                            <span style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)" }}>
+                              {dayData.day_name}, {formattedDate}
+                            </span>
+                          </div>
 
-                          <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" }}>
-                            <div style={{ color: "#2563eb", fontWeight: "500", display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
-                              <Moon size={12} /> {sleepVal !== null && sleepVal !== undefined ? `${sleepVal}h` : "-"}
+                          <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "#eff6ff", color: "#2563eb", padding: "4px 10px", borderRadius: "12px", border: "1px solid #dbeafe" }}>
+                              <Moon size={14} /> 
+                              <span style={{ fontSize: "12px", fontWeight: "600" }}>
+                                {sleepVal !== null && sleepVal !== undefined ? `${sleepVal}h Sueño` : "Sin datos"}
+                              </span>
                             </div>
-                            <div style={{ color: "#d97706", fontWeight: "500", display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
-                              <Smile size={12} /> {moodVal !== null && moodVal !== undefined ? `${moodVal}/5` : "-"}
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "#fef3c7", color: "#d97706", padding: "4px 10px", borderRadius: "12px", border: "1px solid #fde68a" }}>
+                              <Smile size={14} /> 
+                              <span style={{ fontSize: "12px", fontWeight: "600" }}>
+                                {moodVal !== null && moodVal !== undefined ? `Ánimo ${moodVal}/5` : "Sin datos"}
+                              </span>
                             </div>
-                            <div style={{ color: "#16a34a", fontWeight: "500", display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
-                              <Zap size={12} /> {energyVal !== null && energyVal !== undefined ? `${energyVal}/5` : "-"}
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "#dcfce7", color: "#16a34a", padding: "4px 10px", borderRadius: "12px", border: "1px solid #bbf7d0" }}>
+                              <Zap size={14} /> 
+                              <span style={{ fontSize: "12px", fontWeight: "600" }}>
+                                {energyVal !== null && energyVal !== undefined ? `Energía ${energyVal}/5` : "Sin datos"}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -801,7 +814,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
                   border: "1px solid var(--border)",
                   backgroundColor: "var(--bg-input)",
                   fontSize: "13px",
-                  color: "var(--text-secondary)",
+                  color: "var(--text-primary)",
                   lineHeight: "1.5"
                 }}>
                   <strong>Registro de Bienestar:</strong> Para guardar tus horas de descanso diarias o tu estado de ánimo, simplemente coméntaselo al tutor de bienestar en el chat (ej: <em>"Hoy he dormido 7 horas y me siento descansado"</em>).

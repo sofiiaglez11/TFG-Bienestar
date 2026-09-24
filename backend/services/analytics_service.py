@@ -138,10 +138,12 @@ class AnalyticsService:
         return result
 
     async def get_wellbeing_analytics(self, user_id: str, days: int = 7) -> dict:
-        """Sueño, estado de ánimo y energía por día de la semana."""
+        """Sueño, estado de ánimo y energía por día."""
         WEEKDAYS = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
         reports = await self.db_service.get_wellbeing_trends(user_id)
-        by_weekday = {}
+        
+        # Filtrar reports recientes y agrupar por YYYY-MM-DD
+        by_date = {}
         for r in reports:
             raw_date = r.get("date") or r.get("timestamp")
             if not raw_date:
@@ -153,37 +155,55 @@ class AnalyticsService:
                     dt = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00"))
                 except Exception:
                     continue
-
-            day = WEEKDAYS.get(dt.weekday(), dt.strftime("%A"))
-            if day not in by_weekday:
-                by_weekday[day] = {"sleep": [], "mood": [], "energy": []}
+            
+            date_str = dt.strftime("%Y-%m-%d")
+            if date_str not in by_date:
+                by_date[date_str] = {"sleep": [], "mood": [], "energy": []}
 
             if r.get("sleep_hours") is not None:
-                by_weekday[day]["sleep"].append(float(r["sleep_hours"]))
+                by_date[date_str]["sleep"].append(float(r["sleep_hours"]))
             if r.get("mood_score") is not None:
-                by_weekday[day]["mood"].append(float(r["mood_score"]))
+                by_date[date_str]["mood"].append(float(r["mood_score"]))
             st = r.get("energy_level") or r.get("stress_score") or r.get("fatigue_score")
             if st is not None:
-                by_weekday[day]["energy"].append(float(st))
+                by_date[date_str]["energy"].append(float(st))
 
-        summary = {}
-        for day, vals in by_weekday.items():
-            s_avg = round(sum(vals["sleep"]) / len(vals["sleep"]), 1) if vals["sleep"] else None
-            m_avg = round(sum(vals["mood"]) / len(vals["mood"]), 1) if vals["mood"] else None
-            e_avg = round(sum(vals["energy"]) / len(vals["energy"]), 1) if vals["energy"] else None
-            summary[day] = {"sleep": s_avg, "mood": m_avg, "energy": e_avg}
+        # Generar lista de los últimos 'days' días en orden descendente
+        today = datetime.now(timezone.utc).date()
+        recent_days_list = []
+        for i in range(days):
+            d = today - timedelta(days=i)
+            date_str = d.strftime("%Y-%m-%d")
+            day_name = WEEKDAYS.get(d.weekday(), "")
+            
+            vals = by_date.get(date_str)
+            if vals:
+                s_avg = round(sum(vals["sleep"]) / len(vals["sleep"]), 1) if vals["sleep"] else None
+                m_avg = round(sum(vals["mood"]) / len(vals["mood"]), 1) if vals["mood"] else None
+                e_avg = round(sum(vals["energy"]) / len(vals["energy"]), 1) if vals["energy"] else None
+            else:
+                s_avg = m_avg = e_avg = None
+                
+            recent_days_list.append({
+                "date": date_str,
+                "day_name": day_name,
+                "sleep": s_avg,
+                "mood": m_avg,
+                "energy": e_avg
+            })
 
         sleep_all = [float(r["sleep_hours"]) for r in reports if r.get("sleep_hours") is not None]
         avg_sleep = round(sum(sleep_all) / len(sleep_all), 1) if sleep_all else None
 
         worst_day = None
-        valid_mood_days = {d: summary[d]["mood"] for d in summary if summary[d]["mood"] is not None}
+        valid_mood_days = [d for d in recent_days_list if d["mood"] is not None]
         if valid_mood_days:
-            worst_day = min(valid_mood_days, key=valid_mood_days.get)
+            worst_day_item = min(valid_mood_days, key=lambda x: x["mood"])
+            worst_day = f"{worst_day_item['day_name']} {worst_day_item['date']}"
 
         return {
             "avg_sleep_hours": avg_sleep,
-            "reports_by_weekday": summary,
+            "recent_days": recent_days_list,
             "worst_day": worst_day
         }
 
