@@ -214,6 +214,7 @@ class AnalyticsService:
         clockify_entries = []
         if cs:
             try:
+                # Usar el periodo seleccionado por el usuario para la gráfica y los patrones
                 clockify_entries = await asyncio.to_thread(cs.get_time_entries, days_back=days)
             except Exception as e:
                 print(f"[ANALYTICS] Error al consultar Clockify para patrones: {e}", file=sys.stderr)
@@ -222,6 +223,9 @@ class AnalyticsService:
         hours_by_weekday = {}
         # Registrar la fecha concreta de cada día de la semana para mostrarla en el frontend
         date_by_weekday = {}
+        hours_by_date = {}
+
+        minutes_by_hour = [0.0] * 24
 
         for e in clockify_entries:
             start_str = e.get("start") or e.get("timeInterval", {}).get("start")
@@ -232,17 +236,47 @@ class AnalyticsService:
                     end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
                     
                     if start_dt.hour >= 23 or start_dt.hour < 6:
-                        late_sessions.append(f"{WEEKDAYS.get(start_dt.weekday())} a las {start_dt.strftime('%H:%M')}")
+                        # Para sesiones nocturnas, solo alertamos de las de los últimos 'days' días (ej: 7)
+                        if (datetime.now(timezone.utc) - start_dt).days <= days:
+                            late_sessions.append(f"{WEEKDAYS.get(start_dt.weekday())} a las {start_dt.strftime('%H:%M')}")
                     
                     day = WEEKDAYS.get(start_dt.weekday(), start_dt.strftime("%A"))
                     duration_hrs = (end_dt - start_dt).total_seconds() / 3600.0
                     hours_by_weekday[day] = hours_by_weekday.get(day, 0.0) + duration_hrs
-                    # Guardar la fecha más reciente conocida para cada día de la semana
+                    
                     date_str = start_dt.strftime("%Y-%m-%d")
+                    hours_by_date[date_str] = hours_by_date.get(date_str, 0.0) + duration_hrs
+
+                    # Guardar la fecha más reciente conocida para cada día de la semana
                     if day not in date_by_weekday or date_str > date_by_weekday[day]:
                         date_by_weekday[day] = date_str
+
+                    # Calcular minutos por hora para el gráfico de distribución
+                    curr_dt = start_dt
+                    while curr_dt < end_dt:
+                        next_hour = (curr_dt + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+                        segment_end = min(end_dt, next_hour)
+                        segment_mins = (segment_end - curr_dt).total_seconds() / 60.0
+                        minutes_by_hour[curr_dt.hour] += segment_mins
+                        curr_dt = segment_end
+
                 except Exception:
                     pass
+
+        # Para la lista diaria, limitar a 90 días como máximo (histórico = chart, no lista infinita)
+        list_days = min(days, 90)
+        recent_hours_list = []
+        today = datetime.now(timezone.utc).date()
+        for i in range(list_days):
+            d = today - timedelta(days=i)
+            date_str = d.strftime("%Y-%m-%d")
+            day_name = WEEKDAYS.get(d.weekday(), "")
+            hrs = hours_by_date.get(date_str, 0.0)
+            recent_hours_list.append({
+                "date": date_str,
+                "day_name": day_name,
+                "hours": round(hrs, 2)
+            })
 
         most_prod = max(hours_by_weekday, key=hours_by_weekday.get) if hours_by_weekday else None
         least_prod = min(hours_by_weekday, key=hours_by_weekday.get) if hours_by_weekday else None
@@ -252,6 +286,8 @@ class AnalyticsService:
         return {
             "late_night_sessions": late_sessions,
             "hours_by_weekday": {d: round(h, 1) for d, h in hours_by_weekday.items()},
+            "recent_hours_list": recent_hours_list,
+            "minutes_by_hour": [round(m) for m in minutes_by_hour],
             "most_productive_weekday": most_prod,
             "most_productive_date": date_by_weekday.get(most_prod) if most_prod else None,
             "least_productive_weekday": least_prod,

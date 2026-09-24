@@ -756,11 +756,16 @@ async def update_grade(subject_id: str, request: SubjectGradeRequest, user_id: s
 
 
 @app.get("/api/dashboard/student-analytics")
-async def get_student_analytics(user_id: str = Depends(get_current_user_id)):
+async def get_student_analytics(
+    days: int = 7,
+    user_id: str = Depends(get_current_user_id)
+):
     """
-    Devuelve las analíticas agregadas para el dashboard del alumno:
-    Cruza las horas dedicadas (desde Clockify) con las notas de cada asignatura.
+    Devuelve las analíticas agregadas para el dashboard del alumno.
+    `days`: 7 últimos días, 30 últimos 30 días, 0 = histórico completo.
     """
+    # Normalizar: 0 = histórico (usamos 3650 = 10 años como límite práctico)
+    effective_days = days if days > 0 else 3650
     try:
         subjects = await db_service.get_subjects_by_user(user_id)
         
@@ -790,7 +795,7 @@ async def get_student_analytics(user_id: str = Depends(get_current_user_id)):
                     )
                 else:
                     clockify_entries = await asyncio.to_thread(
-                        cs.get_time_entries, days_back=365
+                        cs.get_time_entries, days_back=effective_days
                     )
             except Exception as e:
                 # Loggear el error pero no fallar la petición completa
@@ -821,11 +826,11 @@ async def get_student_analytics(user_id: str = Depends(get_current_user_id)):
         ext_metrics = {}
         time_breakdown = {}
         try:
-            wellbeing = await analytics_service.get_wellbeing_analytics(user_id, days=7)
-            patterns = await analytics_service.get_patterns(user_id, days=7)
+            wellbeing = await analytics_service.get_wellbeing_analytics(user_id, days=effective_days)
+            patterns = await analytics_service.get_patterns(user_id, days=effective_days)
             study_plan = patterns.get("study_plan_progress", {})
             ext_metrics = await analytics_service.get_extended_subject_metrics(user_id)
-            time_breakdown = await analytics_service.get_time_breakdown(user_id, days=30)
+            time_breakdown = await analytics_service.get_time_breakdown(user_id, days=effective_days)
         except Exception as e:
             print(f"[DASHBOARD] Error al calcular analíticas complementarias: {e}")
 

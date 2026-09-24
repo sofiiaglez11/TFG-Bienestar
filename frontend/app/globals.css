@@ -7,7 +7,7 @@
   --border: #e5e7eb;
   --border-focus: #6366f1;
   --text-primary: #111827;
-  --text-secondary: #9ca3af;
+  --text-secondary: #45494f;
   --brand: #6366f1;
   --bubble-ai-bg: #f3f4f6;
   --bubble-user-text: #ffffff;
@@ -51,6 +51,7 @@ textarea {
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }

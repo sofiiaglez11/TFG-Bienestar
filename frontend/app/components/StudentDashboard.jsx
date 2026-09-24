@@ -5,27 +5,20 @@ import {
   BarChart3,
   BookOpen,
   Clock,
-  CheckCircle2,
-  AlertCircle,
-  TrendingUp,
-  TrendingDown,
-  Tag,
   Moon,
   Smile,
   Zap,
-  FileText,
   Calendar,
-  AlertTriangle,
   Award,
-  ListChecks,
   Printer,
-  ChevronRight,
-  Sparkles,
-  Layers,
-  CheckSquare,
-  Clock3,
-  RefreshCw
+  Layers
 } from "lucide-react";
+
+// Importación de los componentes modulares
+import AcademicAnalysis from "./Analysis/AcademicAnalysis";
+import TimeBreakdownAnalysis from "./Analysis/TimeBreakdownAnalysis";
+import WellbeingAnalysis from "./Analysis/WellbeingAnalysis";
+import PatternsAnalysis from "./Analysis/PatternsAnalysis";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
@@ -41,22 +34,21 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
   const [savingGradeId, setSavingGradeId] = useState(null);
   const [gradeInputs, setGradeInputs] = useState({});
   const [activeSubTab, setActiveSubTab] = useState("academic"); // "academic" | "breakdown" | "wellbeing" | "patterns"
-  const [subjectFilter, setSubjectFilter] = useState("All");
-  const [tagFilter, setTagFilter] = useState("All");
+  const [selectedDays, setSelectedDays] = useState(7); // 7, 30, 0=histórico
 
   useEffect(() => {
     if (isOpen || (isInline && isActive)) {
-      fetchAnalytics();
+      fetchAnalytics(selectedDays);
     }
-  }, [isOpen, isInline, isActive]);
+  }, [isOpen, isInline, isActive, selectedDays]);
 
-  const fetchAnalytics = async () => {
+  const fetchAnalytics = async (days = selectedDays) => {
     setLoading(true);
     const token = localStorage.getItem("token");
     if (!token) return;
     try {
-      const res = await fetch(`${BACKEND_URL}/api/dashboard/student-analytics`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await fetch(`${BACKEND_URL}/api/dashboard/student-analytics?days=${days}`, {
+        headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
         const resData = await res.json();
@@ -97,9 +89,9 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ grade: val }),
+        body: JSON.stringify({ grade: val })
       });
       if (res.ok) {
         fetchAnalytics();
@@ -117,7 +109,6 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
   const studyPlan = data.study_plan || {};
   const timeBreakdown = data.time_breakdown || {};
 
-  // Formatea "YYYY-MM-DD" -> "14 sep 2026"
   const formatDate = (isoDate) => {
     if (!isoDate) return null;
     try {
@@ -129,7 +120,6 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
     }
   };
 
-  // Formatea horas decimales -> "X h Y min"
   const formatTime = (hours) => {
     const h = Math.floor(hours);
     const m = Math.round((hours - h) * 60);
@@ -152,73 +142,62 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
 
   const avgSleep = wellbeing.avg_sleep_hours ? `${wellbeing.avg_sleep_hours} h` : "N/D";
 
+  const periodLabel = selectedDays === 0 ? "Histórico" : selectedDays === 7 ? "7 días" : "30 días";
+
   const handlePrintReport = () => {
     window.print();
   };
 
   if (!isOpen && !isInline) return null;
 
-  const WEEKDAYS_ORDER = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
-  const recentDays = wellbeing.recent_days || [];
-  const hoursByDay = patterns.hours_by_weekday || {};
-
-  const unifiedTasks = timeBreakdown.unified_tasks || [];
-
-  const availableSubjects = ["All", ...new Set(unifiedTasks.map(t => t.subject).filter(Boolean))];
-  const availableTags = ["All", ...new Set(unifiedTasks.flatMap(t => t.tags || []).filter(Boolean))];
-
-  const filteredTasks = unifiedTasks.filter(t => {
-    const matchSubject = subjectFilter === "All" || t.subject === subjectFilter;
-    const matchTag = tagFilter === "All" || (t.tags && t.tags.includes(tagFilter));
-    return matchSubject && matchTag;
-  });
-
-  const filteredTotalHoursRaw = filteredTasks.reduce((acc, t) => acc + t.hours + (t.minutes / 60), 0);
-  const filteredTotalHours = Math.floor(filteredTotalHoursRaw);
-  const filteredTotalMins = Math.round((filteredTotalHoursRaw - filteredTotalHours) * 60);
-
   return (
-    <div style={isInline ? {
-      width: "100%",
-      height: "100%",
-      display: "flex",
-      flexDirection: "column",
-      color: "var(--text-primary)"
-    } : {
-      position: "fixed",
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: "rgba(0,0,0,0.6)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 1000,
-      padding: "20px"
-    }}>
-      <div style={isInline ? {
-        backgroundColor: "var(--bg-surface)",
-        border: "1px solid var(--border)",
-        borderRadius: "16px",
-        padding: "28px",
-        width: "100%",
-        height: "100%",
-        overflowY: "auto",
-        boxShadow: "none",
-        color: "var(--text-primary)"
-      } : {
-        backgroundColor: "var(--bg-surface)",
-        borderRadius: "16px",
-        padding: "28px",
-        width: "100%",
-        maxWidth: "920px",
-        maxHeight: "90vh",
-        overflowY: "auto",
-        boxShadow: "0 20px 30px rgba(0,0,0,0.25)",
-        color: "var(--text-primary)",
-        border: "1px solid var(--border)"
-      }}>
+    <div
+      style={
+        isInline
+          ? { width: "100%", height: "100%", display: "flex", flexDirection: "column", color: "var(--text-primary)" }
+          : {
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: "20px"
+          }
+      }
+    >
+      <div
+        style={
+          isInline
+            ? {
+              backgroundColor: "var(--bg-surface)",
+              border: "1px solid var(--border)",
+              borderRadius: "16px",
+              padding: "28px",
+              width: "100%",
+              height: "100%",
+              overflowY: "auto",
+              boxShadow: "none",
+              color: "var(--text-primary)"
+            }
+            : {
+              backgroundColor: "var(--bg-surface)",
+              borderRadius: "16px",
+              padding: "28px",
+              width: "100%",
+              maxWidth: "920px",
+              maxHeight: "90vh",
+              overflowY: "auto",
+              boxShadow: "0 20px 30px rgba(0,0,0,0.25)",
+              color: "var(--text-primary)",
+              border: "1px solid var(--border)"
+            }
+        }
+      >
         {/* Header Superior */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
           <div>
@@ -231,27 +210,32 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
             </p>
           </div>
           <div style={{ display: "flex", gap: "10px" }}>
-            <button
-              onClick={fetchAnalytics}
-              disabled={loading}
-              title="Actualizar datos"
-              style={{
-                padding: "8px 14px",
-                borderRadius: "8px",
-                border: "1px solid var(--border)",
-                backgroundColor: "var(--bg-input)",
-                color: "var(--text-primary)",
-                cursor: loading ? "not-allowed" : "pointer",
-                fontWeight: "500",
-                fontSize: "13px",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                opacity: loading ? 0.7 : 1
-              }}
-            >
-              <RefreshCw size={16} style={{ animation: loading ? "spin 1s linear infinite" : "none" }} /> {loading ? "Actualizando..." : "Actualizar"}
-            </button>
+            {/* Selector de periodo */}
+            <div style={{ display: "flex", gap: "4px", backgroundColor: "var(--bg-input)", borderRadius: "8px", padding: "3px", border: "1px solid var(--border)" }}>
+              {[
+                { label: "7 días", value: 7 },
+                { label: "30 días", value: 30 },
+                { label: "Histórico", value: 0 }
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setSelectedDays(opt.value)}
+                  style={{
+                    padding: "5px 10px",
+                    borderRadius: "6px",
+                    border: "none",
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    transition: "all 0.2s",
+                    backgroundColor: selectedDays === opt.value ? "var(--brand)" : "transparent",
+                    color: selectedDays === opt.value ? "#fff" : "var(--text-secondary)"
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
             <button
               onClick={handlePrintReport}
               style={{
@@ -305,19 +289,23 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
             <div style={{ fontSize: "12px", color: "#9a3412", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
               <Zap size={16} /> Concentración
             </div>
-            <div style={{ fontSize: "1.6rem", fontWeight: "700", color: "#c2410c", marginTop: "4px" }}>{avgConc} {avgConc !== "N/A" ? "/ 5" : ""}</div>
+            <div style={{ fontSize: "1.6rem", fontWeight: "700", color: "#c2410c", marginTop: "4px" }}>
+              {avgConc} {avgConc !== "N/A" ? "/ 5" : ""}
+            </div>
           </div>
         </div>
 
         {/* Navegación por Pestañas principales */}
-        <div style={{
-          display: "flex",
-          gap: "8px",
-          borderBottom: "1px solid var(--border)",
-          paddingBottom: "8px",
-          marginBottom: "20px",
-          overflowX: "auto"
-        }}>
+        <div
+          style={{
+            display: "flex",
+            gap: "8px",
+            borderBottom: "1px solid var(--border)",
+            paddingBottom: "8px",
+            marginBottom: "20px",
+            overflowX: "auto"
+          }}
+        >
           <button
             onClick={() => setActiveSubTab("academic")}
             style={{
@@ -396,534 +384,44 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
           </button>
         </div>
 
+        {/* Renderizado Condicional de las Pestañas */}
         {loading ? (
           <p style={{ color: "var(--text-secondary)", fontStyle: "italic", textAlign: "center", padding: "40px 0" }}>
             Cargando analíticas...
           </p>
         ) : (
           <>
-            {/* PESTAÑA 1: ACADÉMICO Y ASIGNATURAS */}
             {activeSubTab === "academic" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                {/* Plan de Estudio Activo */}
-                {studyPlan.has_active_plan && (
-                  <div style={{
-                    padding: "18px",
-                    borderRadius: "12px",
-                    border: "1px solid var(--border)",
-                    background: "linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(139, 92, 246, 0.05))",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "12px"
-                  }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div>
-                        <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--brand)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                          Plan de Estudio Activo
-                        </span>
-                        <h3 style={{ margin: "2px 0 0 0", fontSize: "16px", fontWeight: "700" }}>{studyPlan.plan_title}</h3>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <span style={{ fontSize: "18px", fontWeight: "700", color: "var(--brand)" }}>
-                          {studyPlan.overall_progress_pct}%
-                        </span>
-                        <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-                          {formatTime(studyPlan.total_actual_hours || 0)} / {formatTime(studyPlan.total_planned_hours || 0)} planificadas
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{ width: "100%", backgroundColor: "var(--border)", height: "8px", borderRadius: "4px", overflow: "hidden" }}>
-                      <div style={{
-                        width: `${Math.min(100, studyPlan.overall_progress_pct || 0)}%`,
-                        backgroundColor: "var(--brand)",
-                        height: "100%",
-                        borderRadius: "4px",
-                        transition: "width 0.4s ease"
-                      }} />
-                    </div>
-                  </div>
-                )}
-
-                {/* Lista detallada de Asignaturas */}
-                <div>
-                  <h3 style={{ fontSize: "1.05rem", fontWeight: "600", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <BookOpen size={18} /> Rendimiento y Tareas por Asignatura
-                  </h3>
-
-                  {analytics.length === 0 ? (
-                    <p style={{ color: "var(--text-secondary)", backgroundColor: "var(--bg-input)", padding: "16px", borderRadius: "8px" }}>
-                      Aún no tienes asignaturas registradas. Puedes crearlas conversando con el tutor.
-                    </p>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                      {analytics.map((item) => {
-                        const wComp = item.weekly_comparison || {};
-                        const lastW = item.last_week_tasks || {};
-                        const isUp = wComp.change_pct > 0;
-                        const isDown = wComp.change_pct < 0;
-
-                        return (
-                          <div key={item.id} style={{
-                            padding: "20px",
-                            borderRadius: "14px",
-                            border: "1px solid var(--border)",
-                            backgroundColor: "var(--bg-input)",
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "14px"
-                          }}>
-                            {/* Cabecera de la asignatura */}
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
-                              <div>
-                                <h4 style={{ margin: 0, fontSize: "1.1rem", fontWeight: "700" }}>{item.name}</h4>
-                                <div style={{ display: "flex", alignItems: "center", gap: "14px", marginTop: "6px", fontSize: "13px", color: "var(--text-secondary)", flexWrap: "wrap" }}>
-                                  <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                                    <Clock size={14} /> {formatTime(item.hours)} totales
-                                  </span>
-
-                                  {/* Comparativa semanal */}
-                                  <span style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: "4px",
-                                    fontWeight: "600",
-                                    color: isUp ? "#16a34a" : isDown ? "#dc2626" : "var(--text-secondary)",
-                                    fontSize: "12px",
-                                    padding: "2px 8px",
-                                    borderRadius: "12px",
-                                    backgroundColor: isUp ? "#f0fdf4" : isDown ? "#fef2f2" : "transparent",
-                                    border: isUp ? "1px solid #bbf7d0" : isDown ? "1px solid #fecaca" : "none"
-                                  }}>
-                                    {isUp ? <TrendingUp size={14} /> : isDown ? <TrendingDown size={14} /> : null}
-                                    {formatTime(wComp.current_week_hours || 0)} esta semana ({wComp.change_pct > 0 ? `+${wComp.change_pct}%` : `${wComp.change_pct}%`} vs sem. anterior)
-                                  </span>
-                                </div>
-                              </div>
-
-                              {/* Nota asignatura */}
-                              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                <span style={{ fontSize: "13px", fontWeight: "500" }}>Nota:</span>
-                                <input
-                                  type="number"
-                                  step="0.1"
-                                  min="0"
-                                  max="10"
-                                  value={gradeInputs[item.id] !== undefined ? gradeInputs[item.id] : ""}
-                                  onChange={(e) => handleGradeChange(item.id, e.target.value)}
-                                  placeholder="0.0"
-                                  style={{
-                                    width: "60px",
-                                    padding: "4px 8px",
-                                    borderRadius: "6px",
-                                    border: "1px solid var(--border)",
-                                    backgroundColor: "var(--bg-surface)",
-                                    color: "var(--text-primary)",
-                                    textAlign: "center",
-                                    fontSize: "14px"
-                                  }}
-                                />
-                                <button
-                                  onClick={() => saveGrade(item.id)}
-                                  disabled={savingGradeId === item.id}
-                                  style={{
-                                    padding: "4px 12px",
-                                    borderRadius: "6px",
-                                    border: "none",
-                                    backgroundColor: "var(--brand)",
-                                    color: "#ffffff",
-                                    cursor: "pointer",
-                                    fontSize: "12px",
-                                    fontWeight: "500"
-                                  }}
-                                >
-                                  {savingGradeId === item.id ? "..." : "Guardar"}
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Estadísticas de Tareas por Asignatura */}
-                            <div style={{
-                              display: "grid",
-                              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                              gap: "10px",
-                              padding: "12px",
-                              borderRadius: "10px",
-                              backgroundColor: "var(--bg-surface)",
-                              border: "1px solid var(--border)"
-                            }}>
-                              <div>
-                                <span style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: "600", display: "flex", alignItems: "center", gap: "4px" }}>
-                                  <Calendar size={12} /> Última Semana (7 días)
-                                </span>
-                                <div style={{ fontSize: "13px", fontWeight: "600", marginTop: "2px" }}>
-                                  <span style={{ color: "#16a34a" }}>{lastW.completed || 0} completadas</span>
-                                  {" / "}
-                                  <span style={{ color: "var(--text-secondary)" }}>{lastW.pending || 0} pendientes</span>
-                                </div>
-                              </div>
-
-                              <div>
-                                <span style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: "600", display: "flex", alignItems: "center", gap: "4px" }}>
-                                  <CheckSquare size={12} /> Total Creadas (Histórico)
-                                </span>
-                                <div style={{ fontSize: "13px", fontWeight: "600", marginTop: "2px" }}>
-                                  {item.tasks_completed} completadas de {item.total_tasks_created || (item.tasks_completed + item.tasks_pending)}
-                                </div>
-                              </div>
-
-                              <div>
-                                <span style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: "600", display: "flex", alignItems: "center", gap: "4px" }}>
-                                  <Zap size={12} /> Concentración Media
-                                </span>
-                                <div style={{ fontSize: "13px", fontWeight: "600", marginTop: "2px", color: "#c2410c" }}>
-                                  {item.avg_concentration !== null ? `${item.avg_concentration} / 5` : "Sin informes"}
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Alertas de Tareas Pospuestas / Fuera de Plazo o Desatendidas */}
-                            {(item.overdue_tasks_count > 0 || item.neglected_tasks_count > 0) && (
-                              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                                {item.overdue_tasks_count > 0 && (
-                                  <div style={{
-                                    fontSize: "12px",
-                                    color: "#dc2626",
-                                    backgroundColor: "#fef2f2",
-                                    padding: "8px 12px",
-                                    borderRadius: "8px",
-                                    border: "1px solid #fecaca",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "6px"
-                                  }}>
-                                    <AlertTriangle size={14} />
-                                    <span>
-                                      <strong>{item.overdue_tasks_count} tareas entregadas fuera de plazo o vencidas:</strong> {item.overdue_tasks.join(", ")}
-                                    </span>
-                                  </div>
-                                )}
-
-                                {item.neglected_tasks_count > 0 && (
-                                  <div style={{
-                                    fontSize: "12px",
-                                    color: "#d97706",
-                                    backgroundColor: "#fffbe6",
-                                    padding: "8px 12px",
-                                    borderRadius: "8px",
-                                    border: "1px solid #ffe58f",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "6px"
-                                  }}>
-                                    <Clock3 size={14} />
-                                    <span>
-                                      <strong>{item.neglected_tasks_count} tareas desatendidas (&lt; 15 min tiempo registrado):</strong> {item.neglected_tasks.join(", ")}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
+              <AcademicAnalysis
+                analytics={analytics}
+                studyPlan={studyPlan}
+                gradeInputs={gradeInputs}
+                handleGradeChange={handleGradeChange}
+                saveGrade={saveGrade}
+                savingGradeId={savingGradeId}
+                formatTime={formatTime}
+              />
             )}
-
-            {/* PESTAÑA 2: DESGLOSE DE TIEMPO */}
             {activeSubTab === "breakdown" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                {/* Filtros */}
-                <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", backgroundColor: "var(--bg-input)", padding: "12px", borderRadius: "10px", border: "1px solid var(--border)" }}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    <label style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-secondary)" }}>Asignatura</label>
-                    <select
-                      value={subjectFilter}
-                      onChange={(e) => setSubjectFilter(e.target.value)}
-                      style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", backgroundColor: "var(--bg-surface)", color: "var(--text-primary)", fontSize: "13px" }}
-                    >
-                      {availableSubjects.map(s => <option key={s} value={s}>{s === "All" ? "Todas" : s}</option>)}
-                    </select>
-                  </div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    <label style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-secondary)" }}>Etiqueta</label>
-                    <select
-                      value={tagFilter}
-                      onChange={(e) => setTagFilter(e.target.value)}
-                      style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", backgroundColor: "var(--bg-surface)", color: "var(--text-primary)", fontSize: "13px" }}
-                    >
-                      {availableTags.map(t => <option key={t} value={t}>{t === "All" ? "Todas" : t}</option>)}
-                    </select>
-                  </div>
-
-                  <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                    <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "600" }}>Tiempo Total Filtrado</span>
-                    <span style={{ fontSize: "18px", fontWeight: "700", color: "var(--brand)" }}>
-                      {formatTime(filteredTotalHoursRaw)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Lista Unificada de Tareas */}
-                <div>
-                  <h4 style={{ margin: "0 0 12px 0", fontSize: "15px", fontWeight: "600", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <ListChecks size={18} /> Sesiones de Trabajo y Tareas
-                  </h4>
-                  {filteredTasks.length === 0 ? (
-                    <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>No hay registros de tareas con los filtros seleccionados.</p>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                      {filteredTasks.map((item, idx) => (
-                        <div key={idx} style={{
-                          padding: "12px 16px",
-                          borderRadius: "10px",
-                          backgroundColor: "var(--bg-input)",
-                          border: "1px solid var(--border)",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          gap: "12px"
-                        }}>
-                          <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
-                            <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--brand)", marginTop: "1px" }}>
-                              {item.subject}
-                            </span>
-                            <span style={{ fontSize: "14px", color: "var(--text-secondary)" }}>|</span>
-
-                            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                              <span style={{ fontSize: "14px", fontWeight: "600" }}>{item.title}</span>
-                              {item.tags && item.tags.length > 0 && (
-                                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                                  {item.tags.map(tag => (
-                                    <span key={tag} style={{
-                                      fontSize: "11px",
-                                      padding: "2px 8px",
-                                      borderRadius: "12px",
-                                      backgroundColor: "#f3e8ff",
-                                      color: "#7e22ce",
-                                      border: "1px solid #e9d5ff",
-                                      fontWeight: "600",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: "4px"
-                                    }}>
-                                      <Tag size={10} /> {tag}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          <div style={{ whiteSpace: "nowrap" }}>
-                            <span style={{ fontSize: "14px", color: "var(--brand)", fontWeight: "700" }}>
-                              {formatTime(item.hours)}
-
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
+              <TimeBreakdownAnalysis
+                timeBreakdown={timeBreakdown}
+                formatTime={formatTime}
+              />
             )}
-
-            {/* PESTAÑA 3: BIENESTAR Y DESCANSO */}
             {activeSubTab === "wellbeing" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                {wellbeing.worst_day && (
-                  <div style={{
-                    padding: "14px 16px",
-                    borderRadius: "10px",
-                    backgroundColor: "#fef2f2",
-                    border: "1px solid #fecaca",
-                    color: "#991b1b",
-                    fontSize: "14px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px"
-                  }}>
-                    <AlertTriangle size={20} />
-                    <div>
-                      <strong>Día crítico detectado:</strong> El <strong>{wellbeing.worst_day}</strong> registraste el menor nivel de estado de ánimo. Recuerda programar pausas de recuperación.
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <h3 style={{ fontSize: "1.05rem", fontWeight: "600", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <Moon size={18} /> Registro Semanal de Bienestar
-                  </h3>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    {recentDays.map((dayData, idx) => {
-                      const sleepVal = dayData.sleep;
-                      const moodVal = dayData.mood;
-                      const energyVal = dayData.energy;
-                      const formattedDate = formatDate(dayData.date) || dayData.date;
-
-                      return (
-                        <div key={idx} style={{
-                          padding: "12px 16px",
-                          borderRadius: "10px",
-                          backgroundColor: "var(--bg-input)",
-                          border: "1px solid var(--border)",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          gap: "12px"
-                        }}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                            <span style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)" }}>
-                              {dayData.day_name}, {formattedDate}
-                            </span>
-                          </div>
-
-                          <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "#eff6ff", color: "#2563eb", padding: "4px 10px", borderRadius: "12px", border: "1px solid #dbeafe" }}>
-                              <Moon size={14} /> 
-                              <span style={{ fontSize: "12px", fontWeight: "600" }}>
-                                {sleepVal !== null && sleepVal !== undefined ? `${sleepVal}h Sueño` : "Sin datos"}
-                              </span>
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "#fef3c7", color: "#d97706", padding: "4px 10px", borderRadius: "12px", border: "1px solid #fde68a" }}>
-                              <Smile size={14} /> 
-                              <span style={{ fontSize: "12px", fontWeight: "600" }}>
-                                {moodVal !== null && moodVal !== undefined ? `Ánimo ${moodVal}/5` : "Sin datos"}
-                              </span>
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "#dcfce7", color: "#16a34a", padding: "4px 10px", borderRadius: "12px", border: "1px solid #bbf7d0" }}>
-                              <Zap size={14} /> 
-                              <span style={{ fontSize: "12px", fontWeight: "600" }}>
-                                {energyVal !== null && energyVal !== undefined ? `Energía ${energyVal}/5` : "Sin datos"}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div style={{
-                  padding: "16px",
-                  borderRadius: "10px",
-                  border: "1px solid var(--border)",
-                  backgroundColor: "var(--bg-input)",
-                  fontSize: "13px",
-                  color: "var(--text-primary)",
-                  lineHeight: "1.5"
-                }}>
-                  <strong>Registro de Bienestar:</strong> Para guardar tus horas de descanso diarias o tu estado de ánimo, simplemente coméntaselo al tutor de bienestar en el chat (ej: <em>"Hoy he dormido 7 horas y me siento descansado"</em>).
-                </div>
-              </div>
+              <WellbeingAnalysis
+                wellbeing={wellbeing}
+                periodLabel={periodLabel}
+                formatDate={formatDate}
+              />
             )}
-
-            {/* PESTAÑA 4: HÁBITOS Y PATRONES */}
             {activeSubTab === "patterns" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px" }}>
-                  <div style={{ padding: "16px", borderRadius: "12px", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-                    <span style={{ fontSize: "12px", color: "#166534", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
-                      <TrendingUp size={16} /> Día Más Productivo
-                    </span>
-                    <div style={{ fontSize: "1.3rem", fontWeight: "700", color: "#15803d", marginTop: "4px" }}>
-                      {patterns.most_productive_weekday || "Sin datos suficientes"}
-                    </div>
-                    {formatDate(patterns.most_productive_date) && (
-                      <div style={{ fontSize: "12px", color: "#166534", marginTop: "2px", opacity: 0.8 }}>
-                        {formatDate(patterns.most_productive_date)}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ padding: "16px", borderRadius: "12px", backgroundColor: "#fff7ed", border: "1px solid #ffedd5" }}>
-                    <span style={{ fontSize: "12px", color: "#9a3412", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
-                      <TrendingDown size={16} /> Día Menos Productivo
-                    </span>
-                    <div style={{ fontSize: "1.3rem", fontWeight: "700", color: "#c2410c", marginTop: "4px" }}>
-                      {patterns.least_productive_weekday || "Sin datos suficientes"}
-                    </div>
-                    {formatDate(patterns.least_productive_date) && (
-                      <div style={{ fontSize: "12px", color: "#9a3412", marginTop: "2px", opacity: 0.8 }}>
-                        {formatDate(patterns.least_productive_date)}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Sesiones Nocturnas */}
-                <div>
-                  <h3 style={{ fontSize: "1.05rem", fontWeight: "600", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <Clock size={18} /> Higiene del Sueño y Horarios
-                  </h3>
-                  {patterns.late_night_sessions && patterns.late_night_sessions.length > 0 ? (
-                    <div style={{
-                      padding: "16px",
-                      borderRadius: "12px",
-                      backgroundColor: "#fef2f2",
-                      border: "1px solid #fecaca",
-                      color: "#991b1b",
-                      fontSize: "14px"
-                    }}>
-                      <div style={{ fontWeight: "700", marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
-                        <Moon size={16} /> Sesiones nocturnas detectadas ({patterns.late_night_sessions.length})
-                      </div>
-                      <p style={{ margin: "0 0 8px 0", fontSize: "13px" }}>
-                        Se registraron sesiones de estudio de madrugada. El estudio tardío continuado puede afectar negativamente a la retención de memoria y la salud.
-                      </p>
-                      <ul style={{ margin: 0, paddingLeft: "20px", fontSize: "12px" }}>
-                        {patterns.late_night_sessions.map((sess, idx) => (
-                          <li key={idx}>{sess}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : (
-                    <div style={{
-                      padding: "16px",
-                      borderRadius: "12px",
-                      backgroundColor: "#f0fdf4",
-                      border: "1px solid #bbf7d0",
-                      color: "#166534",
-                      fontSize: "14px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px"
-                    }}>
-                      <CheckCircle2 size={18} /> <strong>Excelente higiene horaria:</strong> No se han detectado sesiones de estudio de madrugada esta semana.
-                    </div>
-                  )}
-                </div>
-
-                {/* Distribución de Horas por Día de la Semana */}
-                <div>
-                  <h3 style={{ fontSize: "1.05rem", fontWeight: "600", marginBottom: "12px" }}>Distribución Diaria de Horas</h3>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    {WEEKDAYS_ORDER.map((day) => {
-                      const hrs = hoursByDay[day] || 0;
-                      const maxH = Math.max(...Object.values(hoursByDay).map(Number), 5);
-                      const pct = Math.min(100, Math.max(0, (hrs / maxH) * 100));
-
-                      return (
-                        <div key={day} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                          <span style={{ width: "80px", fontSize: "13px", fontWeight: "500", color: "var(--text-secondary)" }}>{day}</span>
-                          <div style={{ flex: 1, backgroundColor: "var(--border)", height: "10px", borderRadius: "5px", overflow: "hidden" }}>
-                            <div style={{
-                              width: `${pct}%`,
-                              backgroundColor: "var(--brand)",
-                              height: "100%",
-                              borderRadius: "5px",
-                              transition: "width 0.4s ease"
-                            }} />
-                          </div>
-                          <span style={{ width: "70px", fontSize: "13px", fontWeight: "600", textAlign: "right" }}>{formatTime(hrs)}</span>                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
+              <PatternsAnalysis
+                patterns={patterns}
+                periodLabel={periodLabel}
+                formatDate={formatDate}
+                formatTime={formatTime}
+              />
             )}
           </>
         )}

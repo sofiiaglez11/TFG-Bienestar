@@ -13,6 +13,7 @@ class GeminiService(BaseChatbotService):
         super().__init__()
         self.client = genai.Client()
         self.model = "gemini-3.5-flash-lite"
+        # self.model = "gemini-3.6-flash"
 
 
     def set_config(self, config_raw):
