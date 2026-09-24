@@ -120,8 +120,8 @@ ACADEMIC_PROMPT = (
 "   3. Columna 'Tarea': Escribe solo el nombre de la tarea. Si necesitas añadir una descripción aclaratoria, escríbela en la línea de abajo dentro de la misma celda usando un salto de línea normal. NUNCA uses etiquetas HTML como <br> ni <br/>. Pon la descripción entre paréntesis y en cursiva\n"    
     "4. Columna 'Fecha':\n"
     "   - Formato de fecha: usa SIEMPRE el formato DD/MM/YYYY (ej: 10/03/2026, o DD/MM/YYYY HH:MM si tiene hora).\n"
-    "   - Resaltado en rojo (!DD/MM/YYYY!): Pon la fecha entre signos de exclamación !DD/MM/YYYY! ÚNICAMENTE si la tarea NO se ha completado (estado ⚡ o ⏳) y su fecha de vencimiento ya ha pasado respecto a la fecha actual.\n"
-    "   - Tareas completadas o no vencidas: Si la tarea ya se ha completado (✅) o si su fecha límite aún no ha vencido, NO la pongas en rojo ni uses signos de exclamación; escríbela de forma normal: DD/MM/YYYY.\n"
+    "   - Resaltado en rojo (!DD/MM/YYYY!): Pon la fecha entre signos de exclamación !DD/MM/YYYY! ÚNICAMENTE si el campo `overdue` de la tarea es true. Si overdue es false, NUNCA uses exclamaciones aunque la fecha parezca pasada.\n"
+    "   - Tareas completadas o no vencidas: Si la tarea ya se ha completado (✅) o si overdue=false, NO la pongas en rojo ni uses signos de exclamación; escríbela de forma normal: DD/MM/YYYY.\n"
     "   - Si no tiene fecha de vencimiento, escribe '-'.\n"
 "   5. Columna 'Etiquetas': Escribe CADA etiqueta en su propio par de corchetes rectos independientes y separados por espacios, ej: [backend] [frontend]. NUNCA agrupes varias etiquetas en el mismo corchete separado por comas como [backend, frontend]. Si no tiene etiquetas, escribe '-'.\n"    "6. Organización: Si muestras varias asignaturas, crea un título en negrita por cada asignatura (ej: **Matemáticas**) y debajo su respectiva tabla.\n"
     "7. Cuándo mostrar completadas: Si el usuario no especifica, muéstrale las activas y pendientes; si pide ver todas o completadas, incluye también las completadas.\n\n"
@@ -132,8 +132,8 @@ ACADEMIC_PROMPT = (
     "| ⏳ | [2] | ↳ Redactar conclusiones | 20/06/2026 | [Memoria] [Teoría] |\n"
     "| ✅ | [3] | Repaso de teoría | 15/01/2026 | [Teoría] |\n\n"
 
-    "Añade si consideras necesario una pequeña leyenda explicando el significado de los emojis. Pero no pongas 'Leyenda', sino que pongas esa información entre paréntesis.\n"
-    "Tampoco menciones que las fechas vencidas están entre exclmaciones, ya que eso el usuario no lo ve (las ve de color rojo).\n"
+    "Al final de CADA tabla de tareas añade EXACTAMENTE esta leyenda, una sola vez y sin modificarla: (⚡ En progreso, ⏳ Pendiente, ✅ Completada). NUNCA la pongas dos veces ni uses un texto diferente.\n"
+    "Tampoco menciones que las fechas vencidas están entre exclamaciones, ya que eso el usuario no lo ve (las ve de color rojo).\n"
 
 
     "REGLA DE FECHAS Y ACTUALIZACIONES:\n"

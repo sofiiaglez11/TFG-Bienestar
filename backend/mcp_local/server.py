@@ -961,8 +961,11 @@ async def get_tasks(user_id: str, subject_name: Optional[str] = None, include_co
     Interpreta estos datos para presentarlos de forma clara al usuario:
     - Muestra la asignatura a la que pertenece cada tarea si se consultan todas las asignaturas
     - Muestra cada tarea principal y debajo sus subtareas con jerarquía visible
-    - Clasifica e indica su estado diferenciando claramente entre ACTIVAS ⚡, PENDIENTES ⏳ y COMPLETADAS ✅
+    - Clasifica e indica su estado diferenciando claramente entre ACTIVAS, PENDIENTES y COMPLETADAS (usando los emojis del sistema de formato de tablas)
     - Menciona la fecha de vencimiento y prioridad si existen
+    - IMPORTANTE: Cada tarea incluye el campo `overdue` (true/false) calculado por el servidor.
+      Usa ÚNICAMENTE ese campo para decidir si poner la fecha en rojo (!DD/MM/YYYY!).
+      Si overdue=false, NUNCA pongas la fecha en rojo, independientemente de la fecha que veas.
     """
     try:
         print(f"[MCP TOOL: GET_TASKS] user_id={user_id}, subject_name='{subject_name}', priorities={priorities}", file=sys.stderr, flush=True)
@@ -1007,6 +1010,31 @@ async def get_tasks(user_id: str, subject_name: Optional[str] = None, include_co
             if pid and pid in all_task_ids:
                 subtasks_by_parent.setdefault(pid, []).append(t)
 
+        try:
+            from zoneinfo import ZoneInfo
+            now_date = datetime.now(ZoneInfo("Europe/Madrid")).date()
+        except Exception:
+            now_date = datetime.now().date()
+
+        def _is_overdue(task: dict) -> bool:
+            """Devuelve True solo si la tarea no está completada y su fecha ya pasó."""
+            status = task.get("status", "")
+            if status == "COMPLETED":
+                return False
+            due = task.get("due_date")
+            if not due:
+                return False
+            try:
+                # due_date puede venir como ISO (YYYY-MM-DD...) o DD/MM/YYYY
+                due_str = str(due).strip()
+                if "/" in due_str:
+                    due_date = datetime.strptime(due_str[:10], "%d/%m/%Y").date()
+                else:
+                    due_date = datetime.fromisoformat(due_str[:10]).date()
+                return due_date < now_date
+            except Exception:
+                return False
+
         def serialize(t):
             children = subtasks_by_parent.get(t["_id"], [])
             children.sort(key=lambda st: st.get("priority") or 6)
@@ -1016,6 +1044,7 @@ async def get_tasks(user_id: str, subject_name: Optional[str] = None, include_co
                 "subject": s_name,
                 "status": t.get("status"),
                 "due_date": t.get("due_date"),
+                "overdue": _is_overdue(t),
                 "description": t.get("description") or "",
                 "priority": t.get("priority"),  # int 1-5 o null
                 "tags": t.get("tags") or [],
