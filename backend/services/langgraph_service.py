@@ -117,14 +117,24 @@ class LangGraphService:
         message = state.get("user_message", "")
         history_msgs = state.get("history_msgs", [])
 
+        domain = await self.orchestrator.route_intent(message, history_msgs)
+
+
         # Si estamos en flujo de informe de estudio para este usuario, bloquear en BIENESTAR
         in_flow = await self._get_study_flow_state(user_id)
         if in_flow:
-            print(f"[LANGGRAPH ROUTER] Estado in_study_report_flow=True para user_id={user_id}. Forzando BIENESTAR.", file=sys.stderr)
-            return {"active_domain": "BIENESTAR", "in_study_report_flow": True}
+            if  domain == "ACADEMICO":
+                print(f"[LANGGRAPH ROUTER] Usuario en flujo de informe de estudio y clasificado como ACADEMICO.", file=sys.stderr)
+                await self._set_study_flow_state(user_id, False)
+                return {"active_domain": "ACADEMICO", "in_study_report_flow": False}
+            else: 
+                print(f"[LANGGRAPH ROUTER] Usuario en flujo de informe de estudio y clasificado como BIENESTAR.", file=sys.stderr)
+                return {"active_domain": "BIENESTAR", "in_study_report_flow": True}
+            # print(f"[LANGGRAPH ROUTER] Estado in_study_report_flow=True para user_id={user_id}. Forzando BIENESTAR.", file=sys.stderr)
+            # return {"active_domain": "BIENESTAR", "in_study_report_flow": True}
 
-        # De lo contrario, clasificar intención con el orquestador
-        domain = await self.orchestrator.route_intent(message, history_msgs)
+        # # De lo contrario, clasificar intención con el orquestador
+        # domain = await self.orchestrator.route_intent(message, history_msgs)
         print(f"[LANGGRAPH ROUTER] Dominio clasificado: {domain}", file=sys.stderr)
         return {"active_domain": domain, "in_study_report_flow": False}
 
