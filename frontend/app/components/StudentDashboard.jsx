@@ -266,34 +266,52 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
         </div>
 
         {/* Tarjetas KPI de Resumen General */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px", marginBottom: "24px" }}>
-          <div style={{ padding: "16px", borderRadius: "12px", backgroundColor: "#eff6ff", border: "1px solid #bfdbfe" }}>
-            <div style={{ fontSize: "12px", color: "#1e40af", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
-              <Clock size={16} /> Total Horas
-            </div>
-            <div style={{ fontSize: "1.6rem", fontWeight: "700", color: "#1d4ed8", marginTop: "4px" }}>{formatTime(totalHours)}</div>
-          </div>
-          <div style={{ padding: "16px", borderRadius: "12px", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-            <div style={{ fontSize: "12px", color: "#166534", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
-              <Award size={16} /> Nota Media
-            </div>
-            <div style={{ fontSize: "1.6rem", fontWeight: "700", color: "#15803d", marginTop: "4px" }}>{avgGrade} / 10</div>
-          </div>
-          <div style={{ padding: "16px", borderRadius: "12px", backgroundColor: "#fdf4ff", border: "1px solid #f5d0fe" }}>
-            <div style={{ fontSize: "12px", color: "#86198f", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
-              <Moon size={16} /> Sueño Promedio
-            </div>
-            <div style={{ fontSize: "1.6rem", fontWeight: "700", color: "#a21caf", marginTop: "4px" }}>{avgSleep}</div>
-          </div>
-          <div style={{ padding: "16px", borderRadius: "12px", backgroundColor: "#fff7ed", border: "1px solid #ffedd5" }}>
-            <div style={{ fontSize: "12px", color: "#9a3412", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
-              <Zap size={16} /> Concentración
-            </div>
-            <div style={{ fontSize: "1.6rem", fontWeight: "700", color: "#c2410c", marginTop: "4px" }}>
-              {avgConc} {avgConc !== "N/A" ? "/ 5" : ""}
-            </div>
-          </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "12px",
+          backgroundColor: "var(--bg-input)",
+          padding: "10px 18px",
+          borderRadius: "10px",
+          border: "1px solid var(--border)",
+          marginBottom: "20px",
+          flexWrap: "wrap"
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <Clock size={16} style={{ color: "#1d4ed8" }} />
+          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Total:</span>
+          <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{formatTime(totalHours)}</strong>
         </div>
+
+        <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
+
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <Award size={16} style={{ color: "#15803d" }} />
+          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Nota Media:</span>
+          <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgGrade} / 10</strong>
+        </div>
+
+        <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
+
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <Moon size={16} style={{ color: "#a21caf" }} />
+          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Sueño Promedio:</span>
+          <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgSleep}</strong>
+        </div>
+
+        <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
+
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <Zap size={16} style={{ color: "#c2410c" }} />
+          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Concentración:</span>
+          <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgConc} {avgConc !== "N/A" ? "/ 5" : ""}</strong>
+        </div>
+      </div>
+
+
 
         {/* Navegación por Pestañas principales */}
         <div
