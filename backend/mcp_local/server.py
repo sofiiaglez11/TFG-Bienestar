@@ -1045,6 +1045,7 @@ async def get_tasks(user_id: str, subject_name: Optional[str] = None, include_co
                 "status": t.get("status"),
                 "due_date": t.get("due_date"),
                 "overdue": _is_overdue(t),
+                "postponed_count": t.get("postponed_count", 0),
                 "description": t.get("description") or "",
                 "priority": t.get("priority"),  # int 1-5 o null
                 "tags": t.get("tags") or [],

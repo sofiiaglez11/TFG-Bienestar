@@ -22,7 +22,7 @@ import PatternsAnalysis from "./Analysis/PatternsAnalysis";
 const RAW_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 const BACKEND_URL = RAW_BACKEND_URL.replace(/\/+$/, "");
 
-export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, isActive = true }) {
+export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, isActive = true, clockifyConnected, followKey = 0 }) {
   const [data, setData] = useState({
     analytics: [],
     wellbeing: {},
@@ -48,6 +48,13 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
       loadFollowedUsers();
     }
   }, [isOpen, isInline, isActive]);
+
+  // Recarga la lista de seguidos cuando cambia followKey (nuevo seguido desde ajustes)
+  useEffect(() => {
+    if (shouldRender && followKey > 0) {
+      loadFollowedUsers();
+    }
+  }, [followKey]);
 
   const loadFollowedUsers = async () => {
     const token = localStorage.getItem("token");
@@ -193,6 +200,9 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
   const avgSleep = wellbeing.avg_sleep_hours ? `${wellbeing.avg_sleep_hours} h` : "N/D";
   const periodLabel = selectedDays === 0 ? "Histórico" : selectedDays === 7 ? "7 días" : "30 días";
 
+  const isMe = !selectedUserId || selectedUserId === "me" || selectedUserId === "undefined" || selectedUserId === "null";
+  const isClockifyActive = clockifyConnected !== undefined ? clockifyConnected : (typeof window !== "undefined" && localStorage.getItem("clockifyConnected") === "true");
+
   if (!isOpen && !isInline) return null;
 
   return (
@@ -332,179 +342,204 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
           </div>
         </div>
 
-        {/* Tarjetas KPI de Resumen General */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "12px",
-            backgroundColor: "var(--bg-input)",
-            padding: "10px 18px",
-            borderRadius: "10px",
-            border: "1px solid var(--border)",
-            marginBottom: "20px",
-            flexWrap: "wrap"
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <Clock size={16} style={{ color: "#1d4ed8" }} />
-            <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Total:</span>
-            <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{formatTime(totalHours)}</strong>
-          </div>
-
-          <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
-
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <Award size={16} style={{ color: "#15803d" }} />
-            <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Nota Media:</span>
-            <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgGrade} / 10</strong>
-          </div>
-
-          <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
-
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <Moon size={16} style={{ color: "#a21caf" }} />
-            <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Sueño Promedio:</span>
-            <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgSleep}</strong>
-          </div>
-
-          <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
-
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <Zap size={16} style={{ color: "#c2410c" }} />
-            <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Concentración:</span>
-            <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgConc} {avgConc !== "N/A" ? "/ 5" : ""}</strong>
-          </div>
-        </div>
-
-        {/* Navegación por Pestañas principales */}
-        <div
-          style={{
-            display: "flex",
-            gap: "8px",
-            borderBottom: "1px solid var(--border)",
-            paddingBottom: "8px",
-            marginBottom: "20px",
-            overflowX: "auto"
-          }}
-        >
-          <button
-            onClick={() => setActiveSubTab("academic")}
+        {isMe && !isClockifyActive ? (
+          <div
             style={{
-              padding: "8px 16px",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: activeSubTab === "academic" ? "var(--brand)" : "transparent",
-              color: activeSubTab === "academic" ? "#ffffff" : "var(--text-secondary)",
-              fontWeight: "600",
-              fontSize: "14px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              transition: "all 0.2s"
+              padding: "36px 24px",
+              borderRadius: "12px",
+              backgroundColor: "var(--bg-input)",
+              border: "1px solid var(--border)",
+              textAlign: "center",
+              margin: "20px 0"
             }}
           >
-            <BookOpen size={16} /> Académico y Asignaturas
-          </button>
-          <button
-            onClick={() => setActiveSubTab("breakdown")}
-            style={{
-              padding: "8px 16px",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: activeSubTab === "breakdown" ? "var(--brand)" : "transparent",
-              color: activeSubTab === "breakdown" ? "#ffffff" : "var(--text-secondary)",
-              fontWeight: "600",
-              fontSize: "14px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              transition: "all 0.2s"
-            }}
-          >
-            <Layers size={16} /> Desglose de Tiempo
-          </button>
-          <button
-            onClick={() => setActiveSubTab("wellbeing")}
-            style={{
-              padding: "8px 16px",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: activeSubTab === "wellbeing" ? "var(--brand)" : "transparent",
-              color: activeSubTab === "wellbeing" ? "#ffffff" : "var(--text-secondary)",
-              fontWeight: "600",
-              fontSize: "14px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              transition: "all 0.2s"
-            }}
-          >
-            <Smile size={16} /> Bienestar y Descanso
-          </button>
-          <button
-            onClick={() => setActiveSubTab("patterns")}
-            style={{
-              padding: "8px 16px",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: activeSubTab === "patterns" ? "var(--brand)" : "transparent",
-              color: activeSubTab === "patterns" ? "#ffffff" : "var(--text-secondary)",
-              fontWeight: "600",
-              fontSize: "14px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              transition: "all 0.2s"
-            }}
-          >
-            <Calendar size={16} /> Hábitos y Patrones
-          </button>
-        </div>
-
-        {/* Renderizado Condicional de las Pestañas */}
-        {loading ? (
-          <p style={{ color: "var(--text-secondary)", fontStyle: "italic", textAlign: "center", padding: "40px 0" }}>
-            Cargando analíticas...
-          </p>
+            <div style={{ fontSize: "36px", marginBottom: "12px" }}>📊</div>
+            <h3 style={{ margin: "0 0 8px 0", fontSize: "16px", fontWeight: "600", color: "var(--text-primary)" }}>
+              Estadísticas personales no disponibles sin Clockify
+            </h3>
+            <p style={{ margin: "0 auto", fontSize: "13px", color: "var(--text-secondary)", maxWidth: "520px", lineHeight: "1.5" }}>
+              No has vinculado tu cuenta de Clockify para generar tus analíticas de estudio.
+              <br /><br />
+              Si eres <strong>profesor, tutor</strong> o deseas consultar el rendimiento de un alumno o compañero, puedes seleccionarlo en el desplegable superior (donde indica <em>"Mis estadísticas"</em>) para visualizar sus analíticas.
+            </p>
+          </div>
         ) : (
           <>
-            {activeSubTab === "academic" && (
-              <AcademicAnalysis
-                analytics={analytics}
-                studyPlan={studyPlan}
-                gradeInputs={gradeInputs}
-                handleGradeChange={handleGradeChange}
-                saveGrade={saveGrade}
-                savingGradeId={savingGradeId}
-                formatTime={formatTime}
-              />
-            )}
-            {activeSubTab === "breakdown" && (
-              <TimeBreakdownAnalysis
-                timeBreakdown={timeBreakdown}
-                formatTime={formatTime}
-              />
-            )}
-            {activeSubTab === "wellbeing" && (
-              <WellbeingAnalysis
-                wellbeing={wellbeing}
-                periodLabel={periodLabel}
-                formatDate={formatDate}
-              />
-            )}
-            {activeSubTab === "patterns" && (
-              <PatternsAnalysis
-                patterns={patterns}
-                periodLabel={periodLabel}
-                formatDate={formatDate}
-                formatTime={formatTime}
-              />
+            {/* Tarjetas KPI de Resumen General */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "12px",
+                backgroundColor: "var(--bg-input)",
+                padding: "10px 18px",
+                borderRadius: "10px",
+                border: "1px solid var(--border)",
+                marginBottom: "20px",
+                flexWrap: "wrap"
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Clock size={16} style={{ color: "#1d4ed8" }} />
+                <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Total:</span>
+                <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{formatTime(totalHours)}</strong>
+              </div>
+
+              <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
+
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Award size={16} style={{ color: "#15803d" }} />
+                <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Nota Media:</span>
+                <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgGrade} / 10</strong>
+              </div>
+
+              <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
+
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Moon size={16} style={{ color: "#a21caf" }} />
+                <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Sueño Promedio:</span>
+                <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgSleep}</strong>
+              </div>
+
+              <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
+
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Zap size={16} style={{ color: "#c2410c" }} />
+                <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Concentración:</span>
+                <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgConc} {avgConc !== "N/A" ? "/ 5" : ""}</strong>
+              </div>
+            </div>
+
+            {/* Navegación por Pestañas principales */}
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+                borderBottom: "1px solid var(--border)",
+                paddingBottom: "8px",
+                marginBottom: "20px",
+                overflowX: "auto"
+              }}
+            >
+              <button
+                onClick={() => setActiveSubTab("academic")}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  border: "none",
+                  backgroundColor: activeSubTab === "academic" ? "var(--brand)" : "transparent",
+                  color: activeSubTab === "academic" ? "#ffffff" : "var(--text-secondary)",
+                  fontWeight: "600",
+                  fontSize: "14px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  transition: "all 0.2s"
+                }}
+              >
+                <BookOpen size={16} /> Académico y Asignaturas
+              </button>
+              <button
+                onClick={() => setActiveSubTab("breakdown")}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  border: "none",
+                  backgroundColor: activeSubTab === "breakdown" ? "var(--brand)" : "transparent",
+                  color: activeSubTab === "breakdown" ? "#ffffff" : "var(--text-secondary)",
+                  fontWeight: "600",
+                  fontSize: "14px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  transition: "all 0.2s"
+                }}
+              >
+                <Layers size={16} /> Desglose de Tiempo
+              </button>
+              <button
+                onClick={() => setActiveSubTab("wellbeing")}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  border: "none",
+                  backgroundColor: activeSubTab === "wellbeing" ? "var(--brand)" : "transparent",
+                  color: activeSubTab === "wellbeing" ? "#ffffff" : "var(--text-secondary)",
+                  fontWeight: "600",
+                  fontSize: "14px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  transition: "all 0.2s"
+                }}
+              >
+                <Smile size={16} /> Bienestar y Descanso
+              </button>
+              <button
+                onClick={() => setActiveSubTab("patterns")}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  border: "none",
+                  backgroundColor: activeSubTab === "patterns" ? "var(--brand)" : "transparent",
+                  color: activeSubTab === "patterns" ? "#ffffff" : "var(--text-secondary)",
+                  fontWeight: "600",
+                  fontSize: "14px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  transition: "all 0.2s"
+                }}
+              >
+                <Calendar size={16} /> Hábitos y Patrones
+              </button>
+            </div>
+
+            {/* Renderizado Condicional de las Pestañas */}
+            {loading ? (
+              <p style={{ color: "var(--text-secondary)", fontStyle: "italic", textAlign: "center", padding: "40px 0" }}>
+                Cargando analíticas...
+              </p>
+            ) : (
+              <>
+                {activeSubTab === "academic" && (
+                  <AcademicAnalysis
+                    analytics={analytics}
+                    studyPlan={studyPlan}
+                    gradeInputs={gradeInputs}
+                    handleGradeChange={handleGradeChange}
+                    saveGrade={saveGrade}
+                    savingGradeId={savingGradeId}
+                    formatTime={formatTime}
+                  />
+                )}
+                {activeSubTab === "breakdown" && (
+                  <TimeBreakdownAnalysis
+                    timeBreakdown={timeBreakdown}
+                    formatTime={formatTime}
+                  />
+                )}
+                {activeSubTab === "wellbeing" && (
+                  <WellbeingAnalysis
+                    wellbeing={wellbeing}
+                    periodLabel={periodLabel}
+                    formatDate={formatDate}
+                  />
+                )}
+                {activeSubTab === "patterns" && (
+                  <PatternsAnalysis
+                    patterns={patterns}
+                    periodLabel={periodLabel}
+                    formatDate={formatDate}
+                    formatTime={formatTime}
+                  />
+                )}
+              </>
             )}
           </>
         )}

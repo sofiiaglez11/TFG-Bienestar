@@ -19,6 +19,8 @@ export default function ChatPage() {
   // Estados para Modal de Configuración General
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState("clockify");
+  // Clave para forzar recarga de seguidos en AnalyticsDashboard
+  const [followKey, setFollowKey] = useState(0);
 
   const [clockifyConnected, setClockifyConnected] = useState(false);
   const [activeTab, setActiveTab] = useState("chat");
@@ -337,7 +339,7 @@ export default function ChatPage() {
             </button>
 
             <button
-              onClick={() => clockifyConnected && setActiveTab("stats")}
+              onClick={() => setActiveTab("stats")}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -347,15 +349,14 @@ export default function ChatPage() {
                 borderRadius: "8px",
                 border: "none",
                 backgroundColor: activeTab === "stats" ? "var(--pressed-button-bg)" : "transparent",
-                color: clockifyConnected ? "var(--text-primary)" : "var(--text-secondary)",
+                color: "var(--text-primary)",
                 fontSize: "14px",
                 fontWeight: activeTab === "stats" ? "600" : "500",
-                cursor: clockifyConnected ? "pointer" : "not-allowed",
+                cursor: "pointer",
                 width: "100%",
-                opacity: clockifyConnected ? 1 : 0.5,
               }}
             >
-              <span style={{ fontSize: "16px" }}>{clockifyConnected ? "📊" : "🔒"}</span>
+              <span style={{ fontSize: "16px" }}>📊</span>
               {!isSidebarCollapsed && <span>Estadísticas</span>}
             </button>
           </div>
@@ -487,7 +488,7 @@ export default function ChatPage() {
         </div>
 
         <div style={{ flex: 1, display: activeTab === "stats" ? "flex" : "none", flexDirection: "column", height: "100%", padding: "24px", overflow: "hidden" }}>
-          <AnalyticsDashboard isInline={true} isActive={activeTab === "stats"} />
+          <AnalyticsDashboard isInline={true} isActive={activeTab === "stats"} clockifyConnected={clockifyConnected} followKey={followKey} />
         </div>
       </div>
 
@@ -500,6 +501,7 @@ export default function ChatPage() {
           checkClockifyStatus();
         }}
         onSuccess={() => checkClockifyStatus()}
+        onFollowChange={() => setFollowKey((k) => k + 1)}
       />
     </div>
   );

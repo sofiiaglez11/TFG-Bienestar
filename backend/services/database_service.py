@@ -277,8 +277,12 @@ class DatabaseService:
         return result
 
     async def remove_followed_user(self, user_id: str, target_user_id: str) -> None:
+        try:
+            q_id = ObjectId(user_id)
+        except Exception:
+            q_id = user_id
         await self.users.update_one(
-            {"_id": ObjectId(user_id)},
+            {"_id": q_id},
             {"$pull": {"followed_users": target_user_id}}
         )
 
@@ -295,8 +299,12 @@ class DatabaseService:
         return result
 
     async def remove_follower(self, user_id: str, follower_id: str) -> None:
+        try:
+            q_id = ObjectId(follower_id)
+        except Exception:
+            q_id = follower_id
         await self.users.update_one(
-            {"_id": ObjectId(follower_id)},
+            {"_id": q_id},
             {"$pull": {"followed_users": user_id}}
         )
 
@@ -477,6 +485,7 @@ class DatabaseService:
             "status": "PENDING", # "PENDING", "ACTIVE", "COMPLETED"
             "priority": priority,
             "tags": tags if tags is not None else [],
+            "postponed_count": 0,
             "created_at": now_iso,
             "completed_at": None
         }
@@ -544,6 +553,22 @@ class DatabaseService:
                 fields["completed_at"] = datetime.now(timezone.utc).isoformat()
             elif fields["status"] in ["PENDING", "ACTIVE", "IN_PROGRESS"] and "completed_at" not in fields:
                 fields["completed_at"] = None
+
+        # Incrementar postponed_count si la fecha de vencimiento (due_date) se ha pospuesto/atrasado
+        if "due_date" in fields and fields["due_date"]:
+            try:
+                existing_task = await self.tasks.find_one({"_id": ObjectId(task_id)})
+                if existing_task:
+                    old_due = existing_task.get("due_date")
+                    new_due = fields["due_date"]
+                    if old_due and new_due and new_due != old_due:
+                        old_date_part = str(old_due)[:10]
+                        new_date_part = str(new_due)[:10]
+                        if new_date_part > old_date_part:
+                            current_cnt = existing_task.get("postponed_count", 0)
+                            fields["postponed_count"] = current_cnt + 1
+            except Exception as e:
+                print(f"[DATABASE_SERVICE] Error calculando posposición de tarea: {e}", file=sys.stderr)
 
         await self.tasks.update_one({"_id": ObjectId(task_id)}, {"$set": fields})
 
@@ -908,3 +933,20 @@ class DatabaseService:
             return res.modified_count > 0
         except Exception:
             return False
+
+    async def update_study_plan_items(self, user_id: str, plan_id: str, items: list) -> bool:
+        """Actualiza la lista de ítems de un plan de estudio."""
+        try:
+            res = await self.study_plans.update_one(
+                {"_id": ObjectId(plan_id), "user_id": user_id},
+                {"$set": {"items": items, "updated_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            return res.modified_count > 0
+        except Exception:
+            return False
+
+    async def update_user(self, user_id: str, **fields):
+        """Actualiza información del usuario (p.ej. fecha de última revisión del plan)."""
+        if not fields:
+            return
+        await self.users.update_one({"_id": ObjectId(user_id)}, {"$set": fields})
