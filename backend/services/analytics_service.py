@@ -718,3 +718,148 @@ class AnalyticsService:
 
         return metrics_by_subject
 
+    async def get_full_dashboard_analytics(self, user_id: str, days: int = 7) -> dict:
+        """
+        Construye el payload completo del dashboard (analytics, wellbeing, patterns,
+        study_plan, time_breakdown) para `user_id`, respetando `days`
+        (7, 30 o 0 = histórico completo).
+
+        Es la misma lógica que usaba /api/dashboard/student-analytics solo para el
+        propio usuario, extraída aquí para poder reutilizarla también desde
+        /api/share/{target_user_id}/analytics al consultar las estadísticas de
+        otro usuario.
+        """
+        # Normalizar: 0 = histórico (usamos 3650 = 10 años como límite práctico)
+        effective_days = days if days > 0 else 3650
+
+        subjects = await self.db_service.get_subjects_by_user(user_id)
+
+        # Obtener periodo activo si lo hay
+        active_period = await self.db_service.get_active_period(user_id)
+        start_date = None
+        end_date = None
+        if active_period:
+            start_date = active_period.get("start_date")
+            end_date = active_period.get("end_date")
+
+        # Obtener credenciales de Clockify del usuario
+        clockify_creds = await self.db_service.get_clockify_credentials(user_id)
+
+        # Obtener entradas de tiempo de Clockify
+        clockify_entries = []
+        if clockify_creds and clockify_creds.get("api_key"):
+            try:
+                cs = ClockifyService(
+                    api_key=clockify_creds["api_key"] or clockify_creds.get("token"),
+                    workspace_id=clockify_creds.get("workspace_id")
+                )
+                if start_date or end_date:
+                    clockify_entries = await asyncio.to_thread(
+                        cs.get_time_entries, start_date=start_date, end_date=end_date
+                    )
+                else:
+                    clockify_entries = await asyncio.to_thread(
+                        cs.get_time_entries, days_back=effective_days
+                    )
+            except Exception as e:
+                # Loggear el error pero no fallar la petición completa
+                print(f"[DASHBOARD] Error fetching Clockify entries: {e}", file=sys.stderr)
+                clockify_entries = []
+
+        # Agrupar segundos de Clockify por projectId
+        project_seconds = {}
+        for entry in clockify_entries:
+            pid = entry.get("projectId")
+            if not pid:
+                continue
+            start_iso = entry.get("start")
+            end_iso = entry.get("end")
+            if start_iso and end_iso:
+                try:
+                    dt1 = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))
+                    dt2 = datetime.fromisoformat(end_iso.replace('Z', '+00:00'))
+                    seconds = (dt2 - dt1).total_seconds()
+                    project_seconds[pid] = project_seconds.get(pid, 0.0) + seconds
+                except Exception:
+                    pass
+
+        # Obtener analíticas de bienestar, patrones, métricas extendidas y desglose de tiempo
+        wellbeing = {}
+        patterns = {}
+        study_plan = {}
+        ext_metrics = {}
+        time_breakdown = {}
+        try:
+            wellbeing = await self.get_wellbeing_analytics(user_id, days=effective_days)
+            patterns = await self.get_patterns(user_id, days=effective_days)
+            study_plan = patterns.get("study_plan_progress", {})
+            ext_metrics = await self.get_extended_subject_metrics(user_id)
+            time_breakdown = await self.get_time_breakdown(user_id, days=effective_days)
+        except Exception as e:
+            print(f"[DASHBOARD] Error al calcular analíticas complementarias: {e}", file=sys.stderr)
+
+        # Obtener informes de estudio para medir concentración media por asignatura
+        study_reports = []
+        try:
+            study_reports = await self.db_service.get_study_reports_by_user(user_id, limit=100)
+        except Exception:
+            pass
+
+        analytics = []
+        for subject in subjects:
+            s_id = str(subject["_id"])
+            s_name = subject.get("name", "Asignatura")
+            clockify_project_id = subject.get("clockify_project_id")
+
+            # Obtener segundos del proyecto desde Clockify
+            seconds = 0.0
+            if clockify_project_id and clockify_project_id in project_seconds:
+                seconds = project_seconds[clockify_project_id]
+
+            total_hours = round(seconds / 3600.0, 2)
+
+            # Concentración media basada en informes de estudio
+            s_name_clean = (s_name or "").lower().strip()
+            subj_reports = [
+                r for r in study_reports
+                if (r.get("subject_name") or "").lower().strip() == s_name_clean and r.get("study_quality") is not None
+            ]
+            avg_conc = round(sum(r["study_quality"] for r in subj_reports) / len(subj_reports), 1) if subj_reports else None
+
+            # Métricas extendidas por asignatura
+            subj_ext = ext_metrics.get(s_id, {})
+            last_week_tasks = subj_ext.get("last_week_tasks", {"total": 0, "completed": 0, "pending": 0})
+            total_tasks_created = subj_ext.get("total_tasks_created", 0)
+            total_tasks_completed = subj_ext.get("total_tasks_completed", 0)
+            weekly_comp = subj_ext.get("weekly_comparison", {"current_week_hours": total_hours, "previous_week_hours": 0.0, "change_pct": 0.0})
+            overdue_count = subj_ext.get("overdue_tasks_count", 0)
+            overdue_list = subj_ext.get("overdue_tasks", [])
+            neglected_count = subj_ext.get("neglected_tasks_count", 0)
+            neglected_list = subj_ext.get("neglected_tasks", [])
+
+            analytics.append({
+                "id": s_id,
+                "name": s_name,
+                "hours": total_hours,
+                "weekly_hours_goal": subject.get("weekly_hours_goal"),
+                "grade": subject.get("grade"),
+                "avg_concentration": avg_conc,
+                "tasks_completed": total_tasks_completed,
+                "tasks_pending": max(0, total_tasks_created - total_tasks_completed),
+                "total_tasks_created": total_tasks_created,
+                "last_week_tasks": last_week_tasks,
+                "weekly_comparison": weekly_comp,
+                "overdue_tasks_count": overdue_count,
+                "overdue_tasks": overdue_list,
+                "neglected_tasks_count": neglected_count,
+                "neglected_tasks": neglected_list
+            })
+
+        return {
+            "analytics": analytics,
+            "wellbeing": wellbeing,
+            "patterns": patterns,
+            "study_plan": study_plan,
+            "time_breakdown": time_breakdown
+        }
+

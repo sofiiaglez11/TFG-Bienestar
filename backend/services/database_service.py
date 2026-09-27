@@ -6,6 +6,7 @@ from bson import ObjectId
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import sys
+import secrets
 
  
  
@@ -231,6 +232,74 @@ class DatabaseService:
             {"$set": {"grade": grade}}
         )
         return True
+    
+
+    async def generate_share_code(self, user_id: str) -> str:
+        """
+        Genera el código de compartir del usuario. Es idempotente: si el usuario
+        ya tiene un código, se devuelve el existente en lugar de sobreescribirlo,
+        para que no se pueda "regenerar" e invalidar el código que ya haya
+        compartido con otros.
+        """
+        existing = await self.users.find_one({"_id": ObjectId(user_id)})
+        if existing and existing.get("share_code"):
+            return existing["share_code"]
+
+        code = secrets.token_urlsafe(6).upper()  # ej: "A3BX9K"
+        await self.users.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"share_code": code}}
+        )
+        return code
+
+    async def get_user_by_share_code(self, code: str) -> dict | None:
+        return await self.users.find_one({"share_code": code.upper()})
+
+    async def add_followed_user(self, user_id: str, followed_user_id: str) -> None:
+        await self.users.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$addToSet": {"followed_users": followed_user_id}}
+        )
+
+    async def get_followed_users(self, user_id: str) -> list:
+        user = await self.get_user_by_id(user_id)
+        if not user:
+            return []
+        result = []
+        for fid in user.get("followed_users", []):
+            fu = await self.get_user_by_id(fid)
+            if fu:
+                result.append({
+                    "user_id": fid,
+                    "name": fu.get("name", "Estudiante"),
+                    "email": fu.get("email", "")
+                })
+        return result
+
+    async def remove_followed_user(self, user_id: str, target_user_id: str) -> None:
+        await self.users.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$pull": {"followed_users": target_user_id}}
+        )
+
+    async def get_followers(self, user_id: str) -> list:
+        cursor = self.users.find({"followed_users": user_id})
+        followers_users = await cursor.to_list(100)
+        result = []
+        for fu in followers_users:
+            result.append({
+                "user_id": str(fu["_id"]),
+                "name": fu.get("name", "Estudiante"),
+                "email": fu.get("email", "")
+            })
+        return result
+
+    async def remove_follower(self, user_id: str, follower_id: str) -> None:
+        await self.users.update_one(
+            {"_id": ObjectId(follower_id)},
+            {"$pull": {"followed_users": user_id}}
+        )
+
  
  
     ############################################################################

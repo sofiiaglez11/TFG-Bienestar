@@ -10,19 +10,19 @@ import {
   Zap,
   Calendar,
   Award,
-  Printer,
   Layers
 } from "lucide-react";
 
-// Importación de los componentes modulares
+// Importación de componentes modulares
 import AcademicAnalysis from "./Analysis/AcademicAnalysis";
 import TimeBreakdownAnalysis from "./Analysis/TimeBreakdownAnalysis";
 import WellbeingAnalysis from "./Analysis/WellbeingAnalysis";
 import PatternsAnalysis from "./Analysis/PatternsAnalysis";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+const RAW_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+const BACKEND_URL = RAW_BACKEND_URL.replace(/\/+$/, "");
 
-export default function StudentDashboard({ isOpen, onClose, isInline = false, isActive = false }) {
+export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, isActive = true }) {
   const [data, setData] = useState({
     analytics: [],
     wellbeing: {},
@@ -33,23 +33,63 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
   const [loading, setLoading] = useState(false);
   const [savingGradeId, setSavingGradeId] = useState(null);
   const [gradeInputs, setGradeInputs] = useState({});
-  const [activeSubTab, setActiveSubTab] = useState("academic"); // "academic" | "breakdown" | "wellbeing" | "patterns"
-  const [selectedDays, setSelectedDays] = useState(7); // 7, 30, 0=histórico
+  const [activeSubTab, setActiveSubTab] = useState("academic");
+  const [selectedDays, setSelectedDays] = useState(7);
+
+  // Selector de usuario (alimentado desde la API de seguidos)
+  const [selectedUserId, setSelectedUserId] = useState("me");
+  const [followedUsers, setFollowedUsers] = useState([]);
+
+  const shouldRender = isOpen || isInline;
 
   useEffect(() => {
-    if (isOpen || (isInline && isActive)) {
-      fetchAnalytics(selectedDays);
+    if (shouldRender) {
+      fetchAnalytics(selectedDays, selectedUserId);
+      loadFollowedUsers();
     }
-  }, [isOpen, isInline, isActive, selectedDays]);
+  }, [isOpen, isInline, isActive]);
 
-  const fetchAnalytics = async (days = selectedDays) => {
-    setLoading(true);
+  const loadFollowedUsers = async () => {
     const token = localStorage.getItem("token");
     if (!token) return;
     try {
-      const res = await fetch(`${BACKEND_URL}/api/dashboard/student-analytics?days=${days}`, {
+      const res = await fetch(`${BACKEND_URL}/api/share/followed`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      if (res.ok) {
+        const followedData = await res.json();
+        setFollowedUsers(followedData.followed || []);
+      }
+    } catch (err) {
+      console.error("Error al cargar usuarios seguidos:", err);
+    }
+  };
+
+  const fetchAnalytics = async (daysParam = selectedDays, userParam = selectedUserId) => {
+    setLoading(true);
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
+    let targetUser = typeof userParam === "string" ? userParam : "me";
+    const isMe = !targetUser || targetUser === "me" || targetUser === "undefined" || targetUser === "null";
+    const cleanDays = (typeof daysParam === "number" || typeof daysParam === "string") ? daysParam : 7;
+
+    const endpoint = isMe
+      ? `${BACKEND_URL}/api/dashboard/student-analytics?days=${cleanDays}`
+      : `${BACKEND_URL}/api/share/${encodeURIComponent(targetUser)}/analytics?days=${cleanDays}`;
+
+    try {
+      const res = await fetch(endpoint, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      });
+
       if (res.ok) {
         const resData = await res.json();
         setData({
@@ -66,10 +106,20 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
         setGradeInputs(initialGrades);
       }
     } catch (err) {
-      console.error("Error al cargar analíticas:", err);
+      console.error("Error de conexión:", err);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSelectDays = (days) => {
+    setSelectedDays(days);
+    fetchAnalytics(days, selectedUserId);
+  };
+
+  const handleSelectUser = (userId) => {
+    setSelectedUserId(userId);
+    fetchAnalytics(selectedDays, userId);
   };
 
   const handleGradeChange = (subjectId, val) => {
@@ -94,7 +144,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
         body: JSON.stringify({ grade: val })
       });
       if (res.ok) {
-        fetchAnalytics();
+        fetchAnalytics(selectedDays, selectedUserId);
       }
     } catch (err) {
       console.error(err);
@@ -141,12 +191,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
     : "N/A";
 
   const avgSleep = wellbeing.avg_sleep_hours ? `${wellbeing.avg_sleep_hours} h` : "N/D";
-
   const periodLabel = selectedDays === 0 ? "Histórico" : selectedDays === 7 ? "7 días" : "30 días";
-
-  const handlePrintReport = () => {
-    window.print();
-  };
 
   if (!isOpen && !isInline) return null;
 
@@ -209,7 +254,46 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
               Análisis completo de asignaturas, tareas, tiempo dedicado y descanso
             </p>
           </div>
-          <div style={{ display: "flex", gap: "10px" }}>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+            {/* Selector de usuario */}
+            <select
+              value={selectedUserId}
+              onChange={(e) => handleSelectUser(e.target.value)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "8px",
+                border: "1px solid var(--border)",
+                backgroundColor: "var(--bg-input)",
+                color: "var(--text-primary)",
+                fontSize: "13px",
+                fontWeight: "600",
+                cursor: "pointer"
+              }}
+            >
+              <option value="me">Mis estadísticas</option>
+              {followedUsers.map((u, idx) => {
+                const uId = u.followed_user_id || u.target_user_id || u.user_id || u.id || u._id;
+                const name = u.name || u.user_name || u.nombre;
+                const email = u.email || u.user_email;
+
+                let label = `Usuario ${idx + 1}`;
+                if (name && email && name !== email) {
+                  label = `${name} (${email})`;
+                } else if (email) {
+                  label = email;
+                } else if (name) {
+                  label = name;
+                }
+
+                if (!uId) return null;
+                return (
+                  <option key={uId} value={uId}>
+                    {label}
+                  </option>
+                );
+              })}
+            </select>
+
             {/* Selector de periodo */}
             <div style={{ display: "flex", gap: "4px", backgroundColor: "var(--bg-input)", borderRadius: "8px", padding: "3px", border: "1px solid var(--border)" }}>
               {[
@@ -219,7 +303,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
               ].map((opt) => (
                 <button
                   key={opt.value}
-                  onClick={() => setSelectedDays(opt.value)}
+                  onClick={() => handleSelectDays(opt.value)}
                   style={{
                     padding: "5px 10px",
                     borderRadius: "6px",
@@ -236,24 +320,7 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
                 </button>
               ))}
             </div>
-            <button
-              onClick={handlePrintReport}
-              style={{
-                padding: "8px 14px",
-                borderRadius: "8px",
-                border: "1px solid var(--border)",
-                backgroundColor: "var(--bg-input)",
-                color: "var(--text-primary)",
-                cursor: "pointer",
-                fontWeight: "500",
-                fontSize: "13px",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px"
-              }}
-            >
-              <Printer size={16} /> Exportar PDF
-            </button>
+
             {!isInline && (
               <button
                 onClick={onClose}
@@ -266,52 +333,50 @@ export default function StudentDashboard({ isOpen, onClose, isInline = false, is
         </div>
 
         {/* Tarjetas KPI de Resumen General */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "12px",
-          backgroundColor: "var(--bg-input)",
-          padding: "10px 18px",
-          borderRadius: "10px",
-          border: "1px solid var(--border)",
-          marginBottom: "20px",
-          flexWrap: "wrap"
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <Clock size={16} style={{ color: "#1d4ed8" }} />
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Total:</span>
-          <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{formatTime(totalHours)}</strong>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+            backgroundColor: "var(--bg-input)",
+            padding: "10px 18px",
+            borderRadius: "10px",
+            border: "1px solid var(--border)",
+            marginBottom: "20px",
+            flexWrap: "wrap"
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Clock size={16} style={{ color: "#1d4ed8" }} />
+            <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Total:</span>
+            <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{formatTime(totalHours)}</strong>
+          </div>
+
+          <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Award size={16} style={{ color: "#15803d" }} />
+            <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Nota Media:</span>
+            <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgGrade} / 10</strong>
+          </div>
+
+          <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Moon size={16} style={{ color: "#a21caf" }} />
+            <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Sueño Promedio:</span>
+            <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgSleep}</strong>
+          </div>
+
+          <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Zap size={16} style={{ color: "#c2410c" }} />
+            <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Concentración:</span>
+            <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgConc} {avgConc !== "N/A" ? "/ 5" : ""}</strong>
+          </div>
         </div>
-
-        <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
-
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <Award size={16} style={{ color: "#15803d" }} />
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Nota Media:</span>
-          <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgGrade} / 10</strong>
-        </div>
-
-        <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
-
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <Moon size={16} style={{ color: "#a21caf" }} />
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Sueño Promedio:</span>
-          <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgSleep}</strong>
-        </div>
-
-        <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
-
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <Zap size={16} style={{ color: "#c2410c" }} />
-          <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Concentración:</span>
-          <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgConc} {avgConc !== "N/A" ? "/ 5" : ""}</strong>
-        </div>
-      </div>
-
-
 
         {/* Navegación por Pestañas principales */}
         <div

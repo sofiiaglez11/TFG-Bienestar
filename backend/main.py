@@ -764,140 +764,8 @@ async def get_student_analytics(
     Devuelve las analíticas agregadas para el dashboard del alumno.
     `days`: 7 últimos días, 30 últimos 30 días, 0 = histórico completo.
     """
-    # Normalizar: 0 = histórico (usamos 3650 = 10 años como límite práctico)
-    effective_days = days if days > 0 else 3650
     try:
-        subjects = await db_service.get_subjects_by_user(user_id)
-        
-        # Obtener periodo activo si lo hay
-        active_period = await db_service.get_active_period(user_id)
-        start_date = None
-        end_date = None
-        if active_period:
-            start_date = active_period.get("start_date")
-            end_date = active_period.get("end_date")
-
-        # Obtener credenciales de Clockify del usuario
-        clockify_creds = await db_service.get_clockify_credentials(user_id)
-        
-        # Obtener entradas de tiempo de Clockify
-        clockify_entries = []
-        if clockify_creds and clockify_creds.get("api_key"):
-            try:
-                import asyncio
-                cs = ClockifyService(
-                    api_key=clockify_creds["api_key"] or clockify_creds.get("token"),
-                    workspace_id=clockify_creds.get("workspace_id")
-                )
-                if start_date or end_date:
-                    clockify_entries = await asyncio.to_thread(
-                        cs.get_time_entries, start_date=start_date, end_date=end_date
-                    )
-                else:
-                    clockify_entries = await asyncio.to_thread(
-                        cs.get_time_entries, days_back=effective_days
-                    )
-            except Exception as e:
-                # Loggear el error pero no fallar la petición completa
-                print(f"Error fetching Clockify entries: {e}")
-                clockify_entries = []
-
-        # Agrupar segundos de Clockify por projectId
-        project_seconds = {}
-        for entry in clockify_entries:
-            pid = entry.get("projectId")
-            if not pid:
-                continue
-            start_iso = entry.get("start")
-            end_iso = entry.get("end")
-            if start_iso and end_iso:
-                try:
-                    dt1 = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))
-                    dt2 = datetime.fromisoformat(end_iso.replace('Z', '+00:00'))
-                    seconds = (dt2 - dt1).total_seconds()
-                    project_seconds[pid] = project_seconds.get(pid, 0.0) + seconds
-                except Exception:
-                    pass
-
-        # Obtener analíticas de bienestar, patrones, métricas extendidas y desglose de tiempo
-        wellbeing = {}
-        patterns = {}
-        study_plan = {}
-        ext_metrics = {}
-        time_breakdown = {}
-        try:
-            wellbeing = await analytics_service.get_wellbeing_analytics(user_id, days=effective_days)
-            patterns = await analytics_service.get_patterns(user_id, days=effective_days)
-            study_plan = patterns.get("study_plan_progress", {})
-            ext_metrics = await analytics_service.get_extended_subject_metrics(user_id)
-            time_breakdown = await analytics_service.get_time_breakdown(user_id, days=effective_days)
-        except Exception as e:
-            print(f"[DASHBOARD] Error al calcular analíticas complementarias: {e}")
-
-        # Obtener informes de estudio para medir concentración media por asignatura
-        study_reports = []
-        try:
-            study_reports = await db_service.get_study_reports_by_user(user_id, limit=100)
-        except Exception as e:
-            pass
-
-        analytics = []
-        for subject in subjects:
-            s_id = str(subject["_id"])
-            s_name = subject.get("name", "Asignatura")
-            clockify_project_id = subject.get("clockify_project_id")
-            
-            # Obtener segundos del proyecto desde Clockify
-            seconds = 0.0
-            if clockify_project_id and clockify_project_id in project_seconds:
-                seconds = project_seconds[clockify_project_id]
-                
-            total_hours = round(seconds / 3600.0, 2)
-
-            # Concentración media basada en informes de estudio
-            s_name_clean = (s_name or "").lower().strip()
-            subj_reports = [
-                r for r in study_reports
-                if (r.get("subject_name") or "").lower().strip() == s_name_clean and r.get("study_quality") is not None
-            ]
-            avg_conc = round(sum(r["study_quality"] for r in subj_reports) / len(subj_reports), 1) if subj_reports else None
-
-            # Métricas extendidas por asignatura
-            subj_ext = ext_metrics.get(s_id, {})
-            last_week_tasks = subj_ext.get("last_week_tasks", {"total": 0, "completed": 0, "pending": 0})
-            total_tasks_created = subj_ext.get("total_tasks_created", 0)
-            total_tasks_completed = subj_ext.get("total_tasks_completed", 0)
-            weekly_comp = subj_ext.get("weekly_comparison", {"current_week_hours": total_hours, "previous_week_hours": 0.0, "change_pct": 0.0})
-            overdue_count = subj_ext.get("overdue_tasks_count", 0)
-            overdue_list = subj_ext.get("overdue_tasks", [])
-            neglected_count = subj_ext.get("neglected_tasks_count", 0)
-            neglected_list = subj_ext.get("neglected_tasks", [])
-
-            analytics.append({
-                "id": s_id,
-                "name": s_name,
-                "hours": total_hours,
-                "weekly_hours_goal": subject.get("weekly_hours_goal"),
-                "grade": subject.get("grade"),
-                "avg_concentration": avg_conc,
-                "tasks_completed": total_tasks_completed,
-                "tasks_pending": max(0, total_tasks_created - total_tasks_completed),
-                "total_tasks_created": total_tasks_created,
-                "last_week_tasks": last_week_tasks,
-                "weekly_comparison": weekly_comp,
-                "overdue_tasks_count": overdue_count,
-                "overdue_tasks": overdue_list,
-                "neglected_tasks_count": neglected_count,
-                "neglected_tasks": neglected_list
-            })
-            
-        return {
-            "analytics": analytics,
-            "wellbeing": wellbeing,
-            "patterns": patterns,
-            "study_plan": study_plan,
-            "time_breakdown": time_breakdown
-        }
+        return await analytics_service.get_full_dashboard_analytics(user_id, days)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al generar analíticas: {str(e)}")
 
@@ -911,3 +779,81 @@ async def get_analytics_summary(days: int = 7, user_id: str = Depends(get_curren
         return await analytics_service.get_user_analytics(user_id, days=days)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al generar analíticas: {str(e)}")
+
+
+@app.post("/api/share/generate")
+async def generate_share_code(user_id: str = Depends(get_current_user_id)):
+    code = await db_service.generate_share_code(user_id)
+    return {"code": code}
+
+@app.post("/api/share/follow")
+async def follow_user(body: dict, user_id: str = Depends(get_current_user_id)):
+    code = body.get("code", "").strip()
+    shared_user = await db_service.get_user_by_share_code(code)
+    if not shared_user:
+        raise HTTPException(status_code=404, detail="Código no encontrado")
+    shared_user_id = str(shared_user["_id"])
+    if shared_user_id == user_id:
+        raise HTTPException(status_code=400, detail="No puedes añadirte a ti mismo")
+    await db_service.add_followed_user(user_id, shared_user_id)
+    return {"name": shared_user.get("name"), "user_id": shared_user_id}
+
+@app.get("/api/share/followed")
+async def get_followed(user_id: str = Depends(get_current_user_id)):
+    followed = await db_service.get_followed_users(user_id)
+    return {"followed": followed}
+
+@app.get("/api/share/{target_user_id}/analytics")
+async def get_shared_analytics(
+    target_user_id: str,
+    days: int = 7,
+    user_id: str = Depends(get_current_user_id)
+):
+    # Verificar acceso: solo si lo sigues o eres tú mismo
+    if target_user_id != user_id:
+        followed = await db_service.get_followed_users(user_id)
+        ids = [f["user_id"] for f in followed]
+        if target_user_id not in ids:
+            raise HTTPException(status_code=403, detail="Sin acceso")
+    try:
+        return await analytics_service.get_full_dashboard_analytics(target_user_id, days)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al generar analíticas: {str(e)}")
+
+@app.get("/api/user/share-code")
+async def get_my_share_code(user_id: str = Depends(get_current_user_id)):
+    user = await db_service.get_user_by_id(user_id)
+    return {"code": user.get("share_code")}
+
+
+@app.delete("/api/share/followed/{target_user_id}")
+async def unfollow_user(
+    target_user_id: str, 
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Permite dejar de seguir a otro usuario.
+    """
+    await db_service.remove_followed_user(user_id, target_user_id)
+    return {"status": "ok", "message": "Has dejado de seguir al usuario."}
+
+
+@app.get("/api/share/followers")
+async def get_followers(user_id: str = Depends(get_current_user_id)):
+    """
+    Obtiene la lista de usuarios que te siguen.
+    """
+    followers = await db_service.get_followers(user_id)
+    return {"followers": followers}
+
+
+@app.delete("/api/share/followers/{follower_id}")
+async def revoke_follower(
+    follower_id: str, 
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Revoca el acceso a un usuario para que deje de ver tus estadísticas.
+    """
+    await db_service.remove_follower(user_id, follower_id)
+    return {"status": "ok", "message": "Acceso revocado correctamente."}
