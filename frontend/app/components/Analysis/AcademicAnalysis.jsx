@@ -15,9 +15,6 @@ export default function AcademicAnalysis({
   analytics = [],
   studyPlan = {},
   gradeInputs = {},
-  handleGradeChange,
-  saveGrade,
-  savingGradeId,
   formatTime
 }) {
   return (
@@ -111,7 +108,14 @@ export default function AcademicAnalysis({
               const lastW = item.last_week_tasks || {};
               const isUp = wComp.change_pct > 0;
               const isDown = wComp.change_pct < 0;
-              const isSaving = savingGradeId === item.id;
+
+              // Obtener la nota del backend o de gradeInputs
+              const currentGrade =
+                gradeInputs[item.id] !== undefined && gradeInputs[item.id] !== ""
+                  ? gradeInputs[item.id]
+                  : item.grade !== undefined && item.grade !== null
+                    ? item.grade
+                    : null;
 
               return (
                 <div
@@ -126,7 +130,7 @@ export default function AcademicAnalysis({
                     gap: "14px"
                   }}
                 >
-                  {/* Cabecera: Asignatura + Píldora de Tendencia + Nota */}
+                  {/* Cabecera: Asignatura + Píldora de Tendencia + Nota Read-Only */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                       <h4 style={{ margin: 0, fontSize: "1.05rem", fontWeight: "700", color: "var(--text-primary)" }}>
@@ -151,56 +155,30 @@ export default function AcademicAnalysis({
                       </span>
                     </div>
 
-                    {/* Input de Nota Integrado */}
+                    {/* Badge de Nota */}
                     <div
                       style={{
-                        display: "flex",
+                        display: "inline-flex",
                         alignItems: "center",
                         gap: "6px",
                         backgroundColor: "var(--bg-surface)",
-                        padding: "3px 4px 3px 10px",
+                        padding: "4px 10px",
                         borderRadius: "8px",
                         border: "1px solid var(--border)"
                       }}
                     >
-                      <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-secondary)" }}>Nota:</span>
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        max="10"
-                        value={gradeInputs[item.id] !== undefined ? gradeInputs[item.id] : ""}
-                        onChange={(e) => handleGradeChange(item.id, e.target.value)}
-                        placeholder="0.0"
+                      <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-secondary)" }}>
+                        Nota:
+                      </span>
+                      <span
                         style={{
-                          width: "45px",
-                          padding: "2px 4px",
-                          borderRadius: "4px",
-                          border: "none",
-                          backgroundColor: "transparent",
-                          color: "var(--text-primary)",
-                          textAlign: "center",
                           fontSize: "13px",
                           fontWeight: "700",
-                          outline: "none"
-                        }}
-                      />
-                      <button
-                        onClick={() => saveGrade(item.id)}
-                        disabled={isSaving}
-                        style={{
-                          padding: "4px 10px",
-                          borderRadius: "6px",
-                          border: "none",
-                          backgroundColor: "var(--brand)",
-                          color: "#ffffff",
-                          cursor: isSaving ? "wait" : "pointer",
-                          fontSize: "11px",
-                          fontWeight: "600"
+                          color: currentGrade !== null ? "var(--text-primary)" : "var(--text-secondary)"
                         }}
                       >
-                        {isSaving ? "..." : "Guardar"}
-                      </button>
+                        {currentGrade !== null ? currentGrade : "-"}
+                      </span>
                     </div>
                   </div>
 

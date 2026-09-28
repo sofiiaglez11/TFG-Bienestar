@@ -246,7 +246,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
             alignItems: "center"
           }}
         >
-          <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: "700" }}>⚙️ Configuración General</h3>
+          <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: "700" }}>⚙️ Configuración</h3>
           <button
             onClick={onClose}
             style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", padding: "4px" }}

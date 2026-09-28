@@ -2046,20 +2046,28 @@ async def wb_get_wellbeing_trends(user_id: str):
 
 
 @mcp.tool()
-async def set_subject_grade(user_id: str, subject_name: str, grade: float):
+async def set_subject_grade(user_id: str, subject_name: str, grade: Optional[float] = None):
     """
-    Registra o actualiza la nota de una asignatura (de 0 a 10).
-    Úsala cuando el usuario mencione la nota de un examen o asignatura (ej: 'saqué un 8.5 en Matemáticas').
+    Registra, actualiza o elimina la nota de una asignatura (de 0 a 10, o None para quitarla).
+    Úsala cuando el usuario mencione la nota de un examen/asignatura (ej: 'saqué un 8.5 en Mates') 
+    o cuando pida borrar o quitar la nota (pasar grade=None).
     """
     try:
+        # Validación de rango solo si no es None
+        if grade is not None and not (0 <= grade <= 10):
+            return "La nota debe estar comprendida entre 0 y 10."
+
         subject = await _find_subject_by_name(user_id, subject_name)
         if not subject:
             return f"No encontré ninguna asignatura llamada '{subject_name}'."
         
         await db_service.update_subject_grade(subject["_id"], grade)
+        
+        if grade is None:
+            return f"Se ha borrado la nota de la asignatura '{subject_name}'."
         return f"Nota de {grade} guardada para la asignatura '{subject_name}'."
     except Exception as e:
-        return f"Error al guardar la nota: {str(e)}"
+        return f"Error al actualizar la nota: {str(e)}"
 
 
 @mcp.tool()

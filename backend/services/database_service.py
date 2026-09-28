@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import sys
 import secrets
-
+from typing import Optional
  
  
 load_dotenv()
@@ -131,6 +131,16 @@ class DatabaseService:
             return user
         except Exception:
             return None
+
+    async def update_user(self, user_id: str, **fields) -> bool:
+        """Actualiza campos sueltos del usuario (p.ej. last_daily_plan_review_date)."""
+        if not fields:
+            return False
+        try:
+            res = await self.users.update_one({"_id": ObjectId(user_id)}, {"$set": fields})
+            return res.matched_count > 0
+        except Exception:
+            return False
 
     async def get_study_flow_state(self, user_id: str) -> bool:
         """Devuelve True si el usuario está en el flujo de recogida de informe de sesión."""
@@ -263,8 +273,6 @@ class DatabaseService:
 
     async def get_followed_users(self, user_id: str) -> list:
         user = await self.get_user_by_id(user_id)
-        if not user:
-            return []
         result = []
         for fid in user.get("followed_users", []):
             fu = await self.get_user_by_id(fid)
@@ -275,39 +283,6 @@ class DatabaseService:
                     "email": fu.get("email", "")
                 })
         return result
-
-    async def remove_followed_user(self, user_id: str, target_user_id: str) -> None:
-        try:
-            q_id = ObjectId(user_id)
-        except Exception:
-            q_id = user_id
-        await self.users.update_one(
-            {"_id": q_id},
-            {"$pull": {"followed_users": target_user_id}}
-        )
-
-    async def get_followers(self, user_id: str) -> list:
-        cursor = self.users.find({"followed_users": user_id})
-        followers_users = await cursor.to_list(100)
-        result = []
-        for fu in followers_users:
-            result.append({
-                "user_id": str(fu["_id"]),
-                "name": fu.get("name", "Estudiante"),
-                "email": fu.get("email", "")
-            })
-        return result
-
-    async def remove_follower(self, user_id: str, follower_id: str) -> None:
-        try:
-            q_id = ObjectId(follower_id)
-        except Exception:
-            q_id = follower_id
-        await self.users.update_one(
-            {"_id": q_id},
-            {"$pull": {"followed_users": user_id}}
-        )
-
  
  
     ############################################################################
@@ -384,17 +359,12 @@ class DatabaseService:
     ############################################################################
     # METHODS FOR SUBJECTS
  
-    async def create_subject(self, user_id: str, name: str, clockify_project_id: str,
-                              weekly_hours_goal: int = 0, period_id: str = None, grade: float = None,
-                              description: str = None, evaluation_criteria: str = None,
-                              notes: str = None) -> dict:
+    async def create_subject(self, user_id: str, name: str, clockify_project_id: str, weekly_hours_goal: int = 0, 
+        period_id: Optional[str] = None, grade: Optional[float] = None, description: Optional[str] = None, 
+        evaluation_criteria: Optional[str] = None, notes: Optional[str] = None ) -> dict:
         """
         Crea una nueva asignatura asociada a un usuario.
-        period_id es opcional: una asignatura puede no pertenecer a ningún periodo
-        si el usuario decide no organizarse por cuatrimestres/trimestres.
-        description: breve descripción de qué trata la asignatura.
-        evaluation_criteria: cómo se evalúa (ej: '60% examen, 40% prácticas').
-        notes: anotaciones libres del usuario (ej: 'me gusta mucho', 'el profe explica muy bien').
+        Por defecto, 'grade' se inicializa a None.
         """
         subject = {
             "user_id": user_id,
@@ -402,7 +372,7 @@ class DatabaseService:
             "name": name,
             "clockify_project_id": clockify_project_id,
             "weekly_hours_goal": weekly_hours_goal,
-            "grade": grade,
+            "grade": grade, 
             "description": description,
             "evaluation_criteria": evaluation_criteria,
             "notes": notes,
@@ -412,7 +382,15 @@ class DatabaseService:
         subject["_id"] = str(result.inserted_id)
         return subject
 
- 
+
+    async def update_subject_grade(self, subject_id: str, grade: Optional[float]):
+        """Actualiza o elimina (si es None) la nota/calificación de una asignatura."""
+        await self.subjects.update_one(
+            {"_id": ObjectId(subject_id)},
+            {"$set": {"grade": grade}}
+        )
+        return True
+
     async def get_subjects_by_user(self, user_id: str, include_archived: bool = False, only_archived: bool = False) -> list:
         """Devuelve todas las asignaturas de un usuario (activas, archivadas o todas)."""
         query = {"user_id": user_id}
@@ -485,7 +463,6 @@ class DatabaseService:
             "status": "PENDING", # "PENDING", "ACTIVE", "COMPLETED"
             "priority": priority,
             "tags": tags if tags is not None else [],
-            "postponed_count": 0,
             "created_at": now_iso,
             "completed_at": None
         }
@@ -553,22 +530,6 @@ class DatabaseService:
                 fields["completed_at"] = datetime.now(timezone.utc).isoformat()
             elif fields["status"] in ["PENDING", "ACTIVE", "IN_PROGRESS"] and "completed_at" not in fields:
                 fields["completed_at"] = None
-
-        # Incrementar postponed_count si la fecha de vencimiento (due_date) se ha pospuesto/atrasado
-        if "due_date" in fields and fields["due_date"]:
-            try:
-                existing_task = await self.tasks.find_one({"_id": ObjectId(task_id)})
-                if existing_task:
-                    old_due = existing_task.get("due_date")
-                    new_due = fields["due_date"]
-                    if old_due and new_due and new_due != old_due:
-                        old_date_part = str(old_due)[:10]
-                        new_date_part = str(new_due)[:10]
-                        if new_date_part > old_date_part:
-                            current_cnt = existing_task.get("postponed_count", 0)
-                            fields["postponed_count"] = current_cnt + 1
-            except Exception as e:
-                print(f"[DATABASE_SERVICE] Error calculando posposición de tarea: {e}", file=sys.stderr)
 
         await self.tasks.update_one({"_id": ObjectId(task_id)}, {"$set": fields})
 
@@ -923,6 +884,17 @@ class DatabaseService:
             plan["_id"] = str(plan["_id"])
         return plan
 
+    async def update_study_plan_items(self, user_id: str, plan_id: str, items: list) -> bool:
+        """Reemplaza la lista de actividades (items) de un plan de estudio del usuario."""
+        try:
+            res = await self.study_plans.update_one(
+                {"_id": ObjectId(plan_id), "user_id": user_id},
+                {"$set": {"items": items, "updated_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            return res.matched_count > 0
+        except Exception:
+            return False
+
     async def update_study_plan_status(self, user_id: str, plan_id: str, status: str) -> bool:
         """Actualiza el estado de un plan de estudio ('active', 'completed', 'archived', 'cancelled')."""
         try:
@@ -933,20 +905,3 @@ class DatabaseService:
             return res.modified_count > 0
         except Exception:
             return False
-
-    async def update_study_plan_items(self, user_id: str, plan_id: str, items: list) -> bool:
-        """Actualiza la lista de ítems de un plan de estudio."""
-        try:
-            res = await self.study_plans.update_one(
-                {"_id": ObjectId(plan_id), "user_id": user_id},
-                {"$set": {"items": items, "updated_at": datetime.now(timezone.utc).isoformat()}}
-            )
-            return res.modified_count > 0
-        except Exception:
-            return False
-
-    async def update_user(self, user_id: str, **fields):
-        """Actualiza información del usuario (p.ej. fecha de última revisión del plan)."""
-        if not fields:
-            return
-        await self.users.update_one({"_id": ObjectId(user_id)}, {"$set": fields})

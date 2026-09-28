@@ -31,7 +31,6 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
     time_breakdown: {}
   });
   const [loading, setLoading] = useState(false);
-  const [savingGradeId, setSavingGradeId] = useState(null);
   const [gradeInputs, setGradeInputs] = useState({});
   const [activeSubTab, setActiveSubTab] = useState("academic");
   const [selectedDays, setSelectedDays] = useState(7);
@@ -129,36 +128,6 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
     fetchAnalytics(selectedDays, userId);
   };
 
-  const handleGradeChange = (subjectId, val) => {
-    setGradeInputs((prev) => ({ ...prev, [subjectId]: val }));
-  };
-
-  const saveGrade = async (subjectId) => {
-    const token = localStorage.getItem("token");
-    const val = parseFloat(gradeInputs[subjectId]);
-    if (isNaN(val) || val < 0 || val > 10) {
-      alert("Por favor introduce una nota válida entre 0 y 10.");
-      return;
-    }
-    setSavingGradeId(subjectId);
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/subjects/${subjectId}/grades`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ grade: val })
-      });
-      if (res.ok) {
-        fetchAnalytics(selectedDays, selectedUserId);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSavingGradeId(null);
-    }
-  };
 
   const analytics = data.analytics || [];
   const wellbeing = data.wellbeing || {};
@@ -512,9 +481,6 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
                     analytics={analytics}
                     studyPlan={studyPlan}
                     gradeInputs={gradeInputs}
-                    handleGradeChange={handleGradeChange}
-                    saveGrade={saveGrade}
-                    savingGradeId={savingGradeId}
                     formatTime={formatTime}
                   />
                 )}

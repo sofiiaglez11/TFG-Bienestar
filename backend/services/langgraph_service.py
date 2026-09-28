@@ -1,6 +1,8 @@
 import sys
 import re
+import json
 import asyncio
+import unicodedata
 from datetime import datetime, timezone
 from typing import TypedDict, Optional, List, Dict, Any
 from langgraph.graph import StateGraph, START, END
@@ -23,11 +25,26 @@ class GraphState(TypedDict):
 class LangGraphService:
     ADVISOR_EVERY_N_MESSAGES = 40
 
-    def __init__(self, academic_agent, wellbeing_agent, general_agent, advisor_agent, orchestrator, mcp_client, db_service, analytics_service=None):
+    # Disparo del advisor por "señal de bienestar" (mensajes de bienestar sin informe):
+    # solo si el usuario expresa malestar Y han pasado al menos N mensajes desde la
+    # última ejecución del advisor. Los disparadores explícitos (informe añadido,
+    # turno periódico, fin de sesión) NO están sujetos a este cooldown.
+    ADVISOR_SIGNAL_COOLDOWN_MESSAGES = 8
+
+    # Raíces ya normalizadas (minúsculas, sin tildes) para buscar por substring.
+    WELLBEING_SIGNAL_KEYWORDS = (
+        "cansad", "cansanc", "agotad", "agotamient", "fatiga", "quemad", "burnout",
+        "estres", "ansied", "agobi", "nervios", "desanim", "triste", "deprim",
+        "sueno", "dormi", "durmi", "insomni", "descans", "energia",
+        "no puedo mas", "mal dia",
+    )
+
+    def __init__(self, academic_agent, wellbeing_agent, general_agent, advisor_agent, planner_agent, orchestrator, mcp_client, db_service, analytics_service=None):
         self.academic_agent = academic_agent
         self.wellbeing_agent = wellbeing_agent
         self.general_agent = general_agent
         self.advisor_agent = advisor_agent
+        self.planner_agent = planner_agent
         self.orchestrator = orchestrator
         self.mcp_client = mcp_client
         self.db_service = db_service
@@ -36,6 +53,11 @@ class LangGraphService:
         self._study_flow_cache: Dict[str, bool] = {}
         # Contador de mensajes por usuario para evaluación periódica del asesor
         self._user_message_counts: Dict[str, int] = {}
+        # Un lock por usuario para que dos mensajes simultáneos no lancen la revisión diaria dos veces
+        self._plan_review_locks: Dict[str, asyncio.Lock] = {}
+        # Nº de mensaje del usuario en el que corrió el advisor por última vez
+        # (para el cooldown de la señal de bienestar). Igual que el contador, vive en RAM.
+        self._last_advisor_run_count: Dict[str, int] = {}
 
         # Construir el grafo (sin checkpointer: el historial lo gestiona MongoDB)
         self.workflow = self._build_graph()
@@ -112,6 +134,75 @@ class LangGraphService:
         self._study_flow_cache[user_id] = state          # inmediato, sin I/O
         await self.db_service.set_study_flow_state(user_id, state, session_entry_id=session_entry_id)  # persistencia
 
+    def _has_wellbeing_signal(self, user_message: str) -> bool:
+        """True si el mensaje contiene alguna señal de malestar (cansancio, estrés, sueño...)."""
+        text = unicodedata.normalize("NFD", (user_message or "").lower())
+        text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+        return any(kw in text for kw in self.WELLBEING_SIGNAL_KEYWORDS)
+
+    def _advisor_cooldown_elapsed(self, user_id: str) -> bool:
+        """True si nunca corrió el advisor o han pasado suficientes mensajes desde la última vez."""
+        last = self._last_advisor_run_count.get(user_id)
+        if last is None:
+            return True
+        current = self._user_message_counts.get(user_id, 0)
+        return (current - last) >= self.ADVISOR_SIGNAL_COOLDOWN_MESSAGES
+
+    async def _flush_study_report(self, user_id: str, history_msgs: list, tools_raw: list) -> bool:
+        """
+        Guarda el informe de sesión pendiente con lo que el usuario haya dicho hasta ahora.
+
+        Se usa cuando el usuario abandona el flujo del informe (cambia de tema) antes de que
+        el agente de bienestar lo haya guardado. Sin esto, al soltar el flujo se perdían tanto
+        los datos parciales como el clockify_time_entry_id de la sesión.
+
+        Devuelve True si se llamó a wb_add_study_report. Nunca lanza: si algo falla, se
+        registra y el llamador sigue con normalidad (no debe bloquear la respuesta al usuario).
+        """
+        session_entry_id = await self.db_service.get_pending_session_entry_id(user_id)
+        if not session_entry_id:
+            return False
+
+        wb_tools = [t for t in tools_raw if t["name"].startswith("wb_")]
+        saved = False
+
+        async def flush_tool_executor(name: str, arguments: dict):
+            nonlocal saved
+            arguments["user_id"] = user_id
+            res = await self.mcp_client.call_tool(name, arguments)
+            if name == "wb_add_study_report":
+                saved = True
+            return res
+
+        instruction = (
+            "[SISTEMA — CIERRE DEL INFORME DE SESIÓN] El usuario ha cambiado de tema y no va a "
+            "continuar con el informe de la sesión de estudio; equivale a que no quiere añadir más. "
+            "Aplica AHORA la regla de cierre: llama UNA sola vez a wb_add_study_report con "
+            f"clockify_time_entry_id={session_entry_id} y el subject_name de esa sesión (búscalo en la "
+            "conversación). Incluye ÚNICAMENTE los datos que el usuario haya dicho de forma explícita "
+            "en los mensajes anteriores sobre esa sesión (calidad, objetivos, distracciones, descansos, "
+            "estado de ánimo) y deja vacío todo lo demás. Lo que haya contado con sus palabras y no "
+            "encaje en otro campo, guárdalo en las observaciones libres. NO inventes ningún dato. "
+            "Ignora cualquier otro tema. No hagas preguntas ni escribas texto para el usuario: "
+            "esta respuesta no se le mostrará."
+        )
+
+        try:
+            self.wellbeing_agent.set_config(wb_tools)
+            self.wellbeing_agent.load_history(history_msgs)
+            await self.wellbeing_agent.run_agentic_conversation(
+                user_message=instruction,
+                tool_executor=flush_tool_executor
+            )
+        except Exception as e:
+            print(f"[LANGGRAPH ROUTER] Error guardando el informe pendiente al cambiar de tema: {e}", file=sys.stderr)
+
+        if saved:
+            print(f"[LANGGRAPH ROUTER] Informe de sesión guardado al cambiar de tema (sesión {session_entry_id}).", file=sys.stderr)
+        else:
+            print(f"[LANGGRAPH ROUTER] AVISO: el informe de la sesión {session_entry_id} NO se guardó al cambiar de tema.", file=sys.stderr)
+        return saved
+
     async def _router_node(self, state: GraphState) -> Dict[str, Any]:
         user_id = state.get("user_id", "")
         message = state.get("user_message", "")
@@ -125,6 +216,8 @@ class LangGraphService:
         if in_flow:
             if  domain == "ACADEMICO":
                 print(f"[LANGGRAPH ROUTER] Usuario en flujo de informe de estudio y clasificado como ACADEMICO.", file=sys.stderr)
+                # El usuario cambia de tema: guardar lo que haya contado antes de soltar el flujo
+                await self._flush_study_report(user_id, history_msgs, state.get("tools_raw", []))
                 await self._set_study_flow_state(user_id, False)
                 return {"active_domain": "ACADEMICO", "in_study_report_flow": False}
             else: 
@@ -195,6 +288,7 @@ class LangGraphService:
 
     async def _bienestar_node(self, state: GraphState) -> Dict[str, Any]:
         user_id = state.get("user_id", "")
+        user_message = state.get("user_message", "")
         message_with_context = state.get("message_with_context", "")
         history_msgs = state.get("history_msgs", [])
         in_study_report_flow = state.get("in_study_report_flow", False)
@@ -239,7 +333,13 @@ class LangGraphService:
             run_adv = True
             trigger_reason = "periodic_counter"
         else:
-            run_adv = not in_study_report_flow
+            # Señal de bienestar: nunca durante el flujo forzado de informe post-sesión,
+            # y solo si el mensaje expresa malestar y no se ha ejecutado el advisor hace poco.
+            run_adv = (
+                not in_study_report_flow
+                and self._has_wellbeing_signal(user_message)
+                and self._advisor_cooldown_elapsed(user_id)
+            )
             trigger_reason = "wellbeing_signal" if run_adv else ""
 
         return {
@@ -311,6 +411,9 @@ class LangGraphService:
         response_text = state.get("response_text", "")
         history_msgs = state.get("history_msgs", [])
         advisor_trigger = state.get("advisor_trigger", "")
+
+        # Registrar esta ejecución (aunque acabe en NO_ADVICE, ya se pagó el coste)
+        self._last_advisor_run_count[user_id] = self._user_message_counts.get(user_id, 0)
 
         self.advisor_agent.set_config([])
         self.advisor_agent.load_history(history_msgs)
@@ -529,12 +632,300 @@ class LangGraphService:
             "proactive_prompt": None
         }
 
+        # Ejecutar revisión diaria del plan de estudio si es la primera interacción del día
+        try:
+            await self.run_daily_plan_review(user_id)
+        except Exception as e:
+            print(f"[LANGGRAPH REVIEW] Error en revisión diaria de plan: {e}", file=sys.stderr)
+
         final_state = await self.app.ainvoke(inputs)
 
         return {
             "response": final_state.get("response_text", ""),
             "agent_used": final_state.get("active_domain", "ACADEMICO")
         }
+
+    async def run_daily_plan_review(self, user_id: str, force: bool = False) -> Dict[str, Any]:
+        """
+        Punto de entrada de la revisión diaria del plan. Serializa las ejecuciones por
+        usuario: si otra petición ya la está haciendo, espera y, al entrar, la comprobación
+        de `last_daily_plan_review_date` hace que no se repita el trabajo (ni la llamada al LLM).
+        """
+        lock = self._plan_review_locks.setdefault(user_id, asyncio.Lock())
+        async with lock:
+            return await self._daily_plan_review_impl(user_id, force=force)
+
+    async def _daily_plan_review_impl(self, user_id: str, force: bool = False) -> Dict[str, Any]:
+        """
+        Agente de Planificación Diaria (planner_agent):
+        Al inicio de cada día, revisa el plan de estudio activo y propone reajustes
+        basándose no solo en fechas vencidas/tareas pospuestas, sino también en las
+        tendencias reales de estudio del usuario (mejor/peor día de la semana,
+        horas reales vs. planificadas, sesiones nocturnas...).
+
+        El LLM SOLO PROPONE cambios en JSON estructurado; este método valida cada
+        propuesta (índices válidos, fechas no retroactivas, límites razonables en
+        el ajuste de horas) antes de aplicar nada en base de datos. Si el LLM falla,
+        devuelve un JSON inválido, o no hay agente configurado, se cae a la
+        reprogramación determinista simple (vencidas o pospuestas -> hoy) como red
+        de seguridad, para no dejar nunca el plan sin revisar por un fallo del LLM.
+        """
+        try:
+            from zoneinfo import ZoneInfo
+            from datetime import timedelta
+            today_str = datetime.now(ZoneInfo("Europe/Madrid")).strftime("%Y-%m-%d")
+        except Exception:
+            from datetime import timedelta
+            today_str = datetime.now().strftime("%Y-%m-%d")
+
+        user = await self.db_service.get_user_by_id(user_id)
+        if not user:
+            return {"reviewed": False, "reason": "Usuario no encontrado"}
+
+        last_review = user.get("last_daily_plan_review_date")
+        if last_review == today_str and not force:
+            return {"reviewed": False, "already_done_today": True, "message": "La revisión diaria ya fue realizada hoy."}
+
+        active_plan = await self.db_service.get_active_study_plan(user_id)
+        if not active_plan:
+            await self.db_service.update_user(user_id, last_daily_plan_review_date=today_str)
+            return {"reviewed": False, "reason": "No hay ningún plan de estudio activo."}
+
+        plan_items = active_plan.get("items", [])
+        if not plan_items:
+            await self.db_service.update_user(user_id, last_daily_plan_review_date=today_str)
+            return {"reviewed": False, "reason": "El plan activo no contiene actividades."}
+
+        tasks = await self.db_service.get_tasks_by_subject(user_id=user_id, include_completed=True)
+        task_map = {str(t["_id"]): t for t in tasks if "_id" in t}
+
+        try:
+            today_dt = datetime.strptime(today_str, "%Y-%m-%d").date()
+        except Exception:
+            today_dt = datetime.now().date()
+
+        # --- 1. Construir el resumen del plan (con estado derivado de cada item) ---
+        items_info = []
+        for idx, item in enumerate(plan_items):
+            linked_ids = item.get("linked_task_ids", [])
+            is_completed = False
+            max_postponed = 0
+            for tid in linked_ids:
+                t_obj = task_map.get(str(tid))
+                if t_obj:
+                    if t_obj.get("status") == "COMPLETED":
+                        is_completed = True
+                    max_postponed = max(max_postponed, t_obj.get("postponed_count", 0))
+
+            item_due = item.get("due_date")
+            is_overdue = bool(item_due and item_due < today_str and not is_completed)
+
+            items_info.append({
+                "index": idx,
+                "subject_name": item.get("subject_name") or "Estudio",
+                "description": item.get("description") or item.get("task") or "",
+                "day": item.get("day"),
+                "due_date": item_due,
+                "planned_hours": item.get("planned_hours", 0),
+                "is_completed": is_completed,
+                "is_overdue": is_overdue,
+                "postponed_count": max_postponed,
+            })
+
+        # Si no hay ninguna actividad pendiente/vencida/pospuesta, no hay nada que revisar.
+        needs_review = any(
+            (i["is_overdue"] or i["postponed_count"] >= 1) and not i["is_completed"]
+            for i in items_info
+        )
+        if not needs_review:
+            await self.db_service.update_user(user_id, last_daily_plan_review_date=today_str)
+            return {"reviewed": True, "plan_modified": False, "adjustments": [], "summary": "", "today_date": today_str}
+
+        # --- 2. Recopilar tendencias reales del usuario (lo que antes faltaba) ---
+        patterns_text = "Sin datos de tendencias disponibles."
+        academic_text = "Sin datos académicos disponibles."
+        if self.analytics_service:
+            try:
+                patterns_data = await self.analytics_service.get_patterns(user_id, days=14)
+                academic_data = await self.analytics_service.get_academic_analytics(user_id, days=14)
+                patterns_text = self._format_patterns(patterns_data)
+                academic_text = self._format_academic(academic_data)
+            except Exception as e:
+                print(f"[PLAN REVIEW] Error obteniendo tendencias: {e}", file=sys.stderr)
+
+        items_summary_lines = []
+        for i in items_info:
+            flags = []
+            if i["is_overdue"]:
+                flags.append(f"VENCIDA (vencía {i['due_date']})")
+            if i["postponed_count"] >= 1:
+                flags.append(f"pospuesta {i['postponed_count']} vez/veces")
+            if i["is_completed"]:
+                flags.append("completada")
+            flags_str = f" [{', '.join(flags)}]" if flags else ""
+            items_summary_lines.append(
+                f"- índice {i['index']}: {i['subject_name']} — {i['description'] or 'sin descripción'} "
+                f"(día: {i['day']}, vence: {i['due_date']}, {i['planned_hours']}h planificadas){flags_str}"
+            )
+        items_summary_text = "\n".join(items_summary_lines)
+
+        plan_modified = False
+        adjustments_made = []
+        summary_text = ""
+        used_fallback = False
+
+        if self.planner_agent:
+            prompt_planner = (
+                "Eres el Agente de Planificación Diaria de estudio. Revisa el plan de estudio activo del "
+                "usuario y decide qué actividades reprogramar, basándote tanto en su estado (vencidas o "
+                "pospuestas) como en sus TENDENCIAS REALES de estudio, no solo en las fechas.\n\n"
+                f"=== PLAN DE ESTUDIO ACTIVO (hoy es {today_str}) ===\n"
+                f"{items_summary_text}\n\n"
+                f"=== TENDENCIAS DEL USUARIO (últimos 14 días) ===\n"
+                f"{patterns_text}\n\n"
+                f"=== RENDIMIENTO ACADÉMICO POR ASIGNATURA (últimos 14 días) ===\n"
+                f"{academic_text}\n\n"
+                "INSTRUCCIONES:\n"
+                "1. Solo propón cambios para actividades marcadas VENCIDA o pospuesta al menos 1 vez, y que "
+                "NO estén completadas. No toques el resto.\n"
+                "2. Elige la nueva fecha evitando, si es posible, el día de la semana con peor rendimiento "
+                "histórico del usuario (mira 'Día menos productivo'), y evitando acumular varias actividades "
+                "reprogramadas en el mismo día si se puede repartir.\n"
+                "3. La nueva fecha NUNCA puede ser anterior a hoy.\n"
+                "4. Si una actividad ha sido pospuesta 2 o más veces, o si sus horas reales/semana en esa "
+                "asignatura están muy por debajo de las planificadas, considera reducir sus horas planificadas "
+                "a un valor más realista (nunca subirlas, y no más de un 50% de recorte).\n"
+                "5. Redacta un resumen breve, empático y en español de los cambios para mostrárselo al "
+                "usuario (o cadena vacía si al final no propones ningún cambio).\n\n"
+                "Responde ÚNICAMENTE con un JSON válido, sin texto adicional ni bloques de markdown, con "
+                "este formato exacto:\n"
+                '{"adjustments": [{"item_index": <int>, "new_due_date": "YYYY-MM-DD", '
+                '"new_planned_hours": <float o null>, "reason": "<breve>"}], "summary": "<string>"}'
+            )
+
+            try:
+                self.planner_agent.set_config([])
+                result = await self.planner_agent.run_agentic_conversation(
+                    user_message=prompt_planner,
+                    tool_executor=None
+                )
+                raw = (result.text or "").strip()
+                raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.MULTILINE).strip()
+                parsed = json.loads(raw)
+                proposed_adjustments = parsed.get("adjustments", [])
+                if not isinstance(proposed_adjustments, list):
+                    raise ValueError("`adjustments` no es una lista")
+            except Exception as e:
+                print(f"[PLAN REVIEW] Respuesta del planner_agent inválida, usando fallback determinista: {e}", file=sys.stderr)
+                proposed_adjustments = None
+                summary_text = ""
+        else:
+            proposed_adjustments = None
+
+        updated_items = [dict(it) for it in plan_items]
+
+        if proposed_adjustments is not None:
+            # --- 3. Validar y aplicar SOLO lo que pase los controles ---
+            for adj in proposed_adjustments:
+                if not isinstance(adj, dict):
+                    continue
+                idx = adj.get("item_index")
+                if not isinstance(idx, int) or idx < 0 or idx >= len(items_info):
+                    continue
+                info = items_info[idx]
+                if info["is_completed"] or not (info["is_overdue"] or info["postponed_count"] >= 1):
+                    continue  # nunca tocar algo que el propio análisis marcó como no elegible
+
+                item = updated_items[idx]
+                changed = False
+
+                new_due = adj.get("new_due_date")
+                if isinstance(new_due, str):
+                    try:
+                        new_due_dt = datetime.strptime(new_due, "%Y-%m-%d").date()
+                        if new_due_dt >= today_dt:
+                            item["due_date"] = new_due
+                            item["day"] = f"Reagendado ({new_due})"
+                            changed = True
+                    except ValueError:
+                        pass
+
+                new_hours = adj.get("new_planned_hours")
+                if new_hours is not None:
+                    try:
+                        new_hours = float(new_hours)
+                        current_hrs = float(item.get("planned_hours", 1.5))
+                        # Nunca subir horas desde aquí, y como mucho un 50% de recorte
+                        if 0.5 <= new_hours <= current_hrs:
+                            item["planned_hours"] = round(new_hours, 1)
+                            changed = True
+                    except (TypeError, ValueError):
+                        pass
+
+                if changed:
+                    for tid in plan_items[idx].get("linked_task_ids", []):
+                        if item.get("due_date"):
+                            await self.db_service.update_task(str(tid), due_date=item["due_date"])
+                    adjustments_made.append({
+                        "description": item.get("description") or item.get("subject_name") or "Actividad",
+                        "old_due": info["due_date"],
+                        "new_due": item.get("due_date"),
+                        "postponed_count": info["postponed_count"],
+                        "reason": adj.get("reason", "") or "",
+                    })
+
+            summary_text = (parsed.get("summary") or "").strip() if adjustments_made else ""
+            plan_modified = bool(adjustments_made)
+
+        if proposed_adjustments is None:
+            # --- Red de seguridad: misma lógica determinista simple de antes ---
+            used_fallback = True
+            base_dt = today_dt
+            for idx, info in enumerate(items_info):
+                if info["is_completed"] or not (info["is_overdue"] or info["postponed_count"] >= 1):
+                    continue
+                item = updated_items[idx]
+                shift_days = len(adjustments_made)
+                new_due_dt = base_dt + timedelta(days=shift_days)
+                new_due_str = new_due_dt.strftime("%Y-%m-%d")
+                item["due_date"] = new_due_str
+                item["day"] = f"Reagendado ({new_due_str})"
+                if info["postponed_count"] >= 2:
+                    current_hrs = float(item.get("planned_hours", 1.5))
+                    item["planned_hours"] = max(0.5, round(current_hrs * 0.8, 1))
+                reason = f"Atrasada (vencía {info['due_date']})" if info["is_overdue"] else f"Pospuesta {info['postponed_count']} vez/veces"
+                adjustments_made.append({
+                    "description": item.get("description") or item.get("subject_name") or "Actividad",
+                    "old_due": info["due_date"],
+                    "new_due": new_due_str,
+                    "postponed_count": info["postponed_count"],
+                    "reason": reason
+                })
+                for tid in plan_items[idx].get("linked_task_ids", []):
+                    await self.db_service.update_task(str(tid), due_date=new_due_str)
+
+            plan_modified = bool(adjustments_made)
+            if plan_modified:
+                changes_lines = [f"• **{adj['description']}**: reprogramada para el {adj['new_due']} ({adj['reason']})" for adj in adjustments_made]
+                summary_text = (
+                    f"Se han reajustado {len(adjustments_made)} actividades del plan de estudio activo:\n"
+                    + "\n".join(changes_lines)
+                )
+
+        if plan_modified:
+            await self.db_service.update_study_plan_items(user_id, str(active_plan["_id"]), updated_items)
+
+        await self.db_service.update_user(user_id, last_daily_plan_review_date=today_str)
+
+        return {
+            "reviewed": True,
+            "plan_modified": plan_modified,
+            "adjustments": adjustments_made,
+            "summary": summary_text,
+            "today_date": today_str,
+            "used_fallback": used_fallback,
+        }
+
 
     async def run_proactive_greeting(self, user_id: str, is_force_onboarding: bool = False) -> dict:
         """
@@ -543,6 +934,13 @@ class LangGraphService:
         - Si es usuario recurrente: ejecuta login_greeting_node (BIENESTAR) con repaso breve de sesión,
           plan de estudio activo y chequeo de horas de sueño diario.
         """
+        # Ejecutar la revisión diaria del plan de estudio
+        daily_review_res = {}
+        try:
+            daily_review_res = await self.run_daily_plan_review(user_id)
+        except Exception as e:
+            print(f"[LANGGRAPH GREETING] Error en revisión diaria del plan: {e}", file=sys.stderr)
+
         user = await self.db_service.get_user_by_id(user_id)
         user_name = (user.get("name") if user else None) or "estudiante"
 
@@ -692,6 +1090,14 @@ class LangGraphService:
                     "Pregúntale amigablemente qué le gustaría avanzar hoy.\n"
                 )
 
+            if daily_review_res.get("plan_modified") and daily_review_res.get("summary"):
+                login_prompt += (
+                    f"\n5. REAJUSTE DE PLAN REALIZADO HOY POR EL AGENTE ASESOR:\n"
+                    f"Se ha detectado retraso/posposición y se ha ajustado la planificación con el siguiente resumen:\n"
+                    f"{daily_review_res['summary']}\n"
+                    "Coméntale al usuario de forma comprensiva, empática y clara que el Agente Asesor ha reprogramado esas tareas para adaptar la carga a su ritmo real sin agobios.\n"
+                )
+
             login_prompt += "\nSé conciso, empático y natural. No uses listas innecesariamente largas."
             proactive_prompt = login_prompt
 
@@ -715,4 +1121,3 @@ class LangGraphService:
             "response": final_state.get("response_text", ""),
             "agent_used": final_state.get("active_domain", "GENERAL" if is_new_user else "BIENESTAR")
         }
-

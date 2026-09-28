@@ -16,9 +16,7 @@ class OpenAIService(BaseChatbotService):
             base_url="https://integrate.api.nvidia.com/v1"
         )
 
-        # self.model = "gpt-4o-mini"
-        self.model = "meta/llama-3.1-70b-instruct"
-        # self.model = "nvidia/nemotron-3-super"
+        self.model = "nvidia/nemotron-3.5-lightning-30b-a3b"
 
 
     def translate_tools_to_specific_format(self, tools: list):

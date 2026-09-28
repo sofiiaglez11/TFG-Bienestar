@@ -49,11 +49,13 @@ if ACTIVE_MODEL == "gemini":
     wellbeing_agent = GeminiService()
     general_agent = GeminiService()
     advisor_agent = GeminiService()
+    planner_agent = GeminiService()
 elif ACTIVE_MODEL == "openai":
     academic_agent = OpenAIService()
     wellbeing_agent = OpenAIService()
     general_agent = OpenAIService()
     advisor_agent = OpenAIService()
+    planner_agent = OpenAIService()
 
 ACADEMIC_PROMPT = (
     "Eres una IA experta en gestión del tiempo y ámbito académico. "
@@ -277,6 +279,25 @@ ADVISOR_PROMPT = (
 )
 
 
+PLANNER_PROMPT = (
+    "Eres el Agente de Planificación Diaria de una plataforma de estudio.\n"
+    "Tu única función es analizar el plan de estudio activo de un usuario junto con sus tendencias reales "
+    "de rendimiento (mejor/peor día de la semana, horas reales vs. planificadas por asignatura, sesiones "
+    "nocturnas...) y decidir qué actividades vencidas o pospuestas conviene reprogramar y, si procede, "
+    "recortar en horas planificadas.\n"
+    "NO hablas directamente con el usuario: tu salida se procesa de forma automática y, cuando corresponda, "
+    "otro agente conversacional se la explica al usuario en lenguaje natural. Por eso NUNCA debes dirigirte "
+    "al usuario en segunda persona ni redactar nada fuera del JSON pedido.\n"
+    "REGLAS ESTRICTAS:\n"
+    "1. Responde SIEMPRE con el JSON exacto que se te pida en cada petición: sin texto antes ni después, "
+    "sin explicaciones adicionales y sin bloques de código markdown (nada de ```).\n"
+    "2. No inventes índices de actividades, asignaturas ni cifras que no aparezcan en el contexto que se "
+    "te proporciona en cada petición.\n"
+    "3. Sé conservador: ante la duda de si reprogramar o recortar horas, no propongas el cambio.\n"
+    "4. Nunca adelantes una fecha a antes de hoy, y nunca aumentes las horas planificadas de una actividad."
+)
+
+
 COMMON_RULES = (
     "\nREGLA OBLIGATORIA DE FORMATO — PROHIBICIÓN DE USAR IDs TÉCNICOS EN TUS RESPUESTAS:\n"
     "NUNCA muestres ni le leas al usuario IDs técnicos internos de la base de datos o de Clockify "
@@ -296,6 +317,11 @@ wellbeing_agent.set_system_instruction(WELLBEING_PROMPT + COMMON_RULES)
 general_agent.set_system_instruction(GENERAL_PROMPT + COMMON_RULES)
 if hasattr(advisor_agent, "set_system_instruction"):
     advisor_agent.set_system_instruction(ADVISOR_PROMPT + COMMON_RULES)
+# El planner_agent no conversa con el usuario (solo devuelve JSON interno), así que
+# NO lleva COMMON_RULES: esas reglas están redactadas para respuestas cara al usuario
+# (ocultar IDs, tono, etc.) y no aplican a una salida estructurada no conversacional.
+if hasattr(planner_agent, "set_system_instruction"):
+    planner_agent.set_system_instruction(PLANNER_PROMPT)
 
 
 langgraph_service = LangGraphService(
@@ -303,6 +329,7 @@ langgraph_service = LangGraphService(
     wellbeing_agent=wellbeing_agent,
     general_agent=general_agent,
     advisor_agent=advisor_agent,
+    planner_agent=planner_agent,
     orchestrator=orchestrator,
     mcp_client=mcp_client,
     db_service=db_service,
@@ -616,6 +643,17 @@ async def get_proactive_greeting(
         "timestamp": greeting_msg.get("timestamp")
     }
 
+@app.post("/api/study-plan/daily-review")
+async def trigger_daily_study_plan_review(
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Endpoint para invocar bajo demanda la revisión y reajuste del plan de estudio
+    realizada por el Agente Asesor de Planificación.
+    """
+    result = await langgraph_service.run_daily_plan_review(user_id, force=True)
+    return result
+
 @app.post("/api/login")
 async def login(request: LoginRequest):
     user = await db_service.get_user_by_email(request.email)
@@ -796,7 +834,7 @@ async def follow_user(body: dict, user_id: str = Depends(get_current_user_id)):
     if shared_user_id == user_id:
         raise HTTPException(status_code=400, detail="No puedes añadirte a ti mismo")
     await db_service.add_followed_user(user_id, shared_user_id)
-    return {"name": shared_user.get("name"), "user_id": shared_user_id}
+    return {"name": shared_user.get("name"), "user_id": shared_user_id, "email": shared_user.get("email", "")}
 
 @app.get("/api/share/followed")
 async def get_followed(user_id: str = Depends(get_current_user_id)):

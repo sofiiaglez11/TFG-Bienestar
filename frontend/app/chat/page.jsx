@@ -16,7 +16,7 @@ export default function ChatPage() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState(null);
 
-  // Estados para Modal de Configuración General
+  // Estados para Modal de Configuración
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState("clockify");
   // Clave para forzar recarga de seguidos en AnalyticsDashboard
@@ -427,7 +427,7 @@ export default function ChatPage() {
                   onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "var(--bg-page)")}
                   onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                 >
-                  ⚙️ Configuración general
+                  ⚙️ Configuración
                 </button>
 
                 <button
