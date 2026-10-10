@@ -57,10 +57,12 @@ class GeminiService(BaseChatbotService):
         self.history.append({"role": "model", "parts": [{"text": content}]})
 
     async def call_model(self):
+        base = self.config if self.config is not None else types.GenerateContentConfig()
+        config = base.model_copy(update={"system_instruction": self.system_instruction})
         return await self.client.aio.models.generate_content(
             model=self.model,
             contents=self.history,
-            config=self.config
+            config=config
         )
 
     

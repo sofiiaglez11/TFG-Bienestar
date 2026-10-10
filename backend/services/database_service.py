@@ -28,6 +28,7 @@ class DatabaseService:
         self.wellbeing_entries = self.db["wellbeing_entries"]
         self.study_reports = self.db["study_reports"]
         self.study_plans = self.db["study_plans"]
+        self.courses = self.db["courses"]
 
 
 
@@ -37,6 +38,7 @@ class DatabaseService:
         lifespan de main.py), es idempotente: si el índice ya existe, Mongo no hace nada.
         """
         await self.subjects.create_index([("user_id", 1), ("period_id", 1)])
+        await self.subjects.create_index([("course_id", 1), ("user_id", 1)])
         await self.tasks.create_index([("subject_id", 1)])
         await self.tasks.create_index([("parent_task_id", 1)])
         
@@ -48,6 +50,9 @@ class DatabaseService:
         await self.study_reports.create_index([("user_id", 1), ("timestamp", -1)])
         await self.study_reports.create_index("clockify_time_entry_id")
         await self.study_plans.create_index([("user_id", 1), ("status", 1)])
+        await self.courses.create_index("enrollment_code", unique=True)
+        await self.courses.create_index("teacher_ids")
+        await self.courses.create_index("student_ids")
  
 
     ############################################################################
@@ -361,7 +366,8 @@ class DatabaseService:
  
     async def create_subject(self, user_id: str, name: str, clockify_project_id: str, weekly_hours_goal: int = 0, 
         period_id: Optional[str] = None, grade: Optional[float] = None, description: Optional[str] = None, 
-        evaluation_criteria: Optional[str] = None, notes: Optional[str] = None ) -> dict:
+        evaluation_criteria: Optional[str] = None, notes: Optional[str] = None,
+        course_id: Optional[str] = None) -> dict:
         """
         Crea una nueva asignatura asociada a un usuario.
         Por defecto, 'grade' se inicializa a None.
@@ -377,6 +383,7 @@ class DatabaseService:
             "evaluation_criteria": evaluation_criteria,
             "notes": notes,
             "is_archived": False,
+            "course_id": course_id,  # None = asignatura propia; string ObjectId = creada al matricularse en un curso
         }
         result = await self.subjects.insert_one(subject)
         subject["_id"] = str(result.inserted_id)
@@ -905,3 +912,148 @@ class DatabaseService:
             return res.modified_count > 0
         except Exception:
             return False
+
+
+    ############################################################################
+    # METHODS FOR COURSES
+
+    async def create_course(self, teacher_id: str, name: str, description: Optional[str] = None,
+                            academic_year: Optional[str] = None) -> dict:
+        """
+        Crea un nuevo curso. Genera un código de matriculación único.
+        academic_year: ej. '2025/26', '2026/27'
+        """
+        # Generar un código único (6 chars, mayúsculas)
+        for _ in range(10):
+            code = secrets.token_urlsafe(6).upper()[:8]
+            existing = await self.courses.find_one({"enrollment_code": code})
+            if not existing:
+                break
+
+        course = {
+            "name": name,
+            "description": description,
+            "academic_year": academic_year,  # ej. '2025/26'
+            "teacher_ids": [teacher_id],
+            "student_ids": [],
+            "enrollment_code": code,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "is_active": True,
+            "student_summaries": {}  # { student_id: { text, generated_at } }
+        }
+        result = await self.courses.insert_one(course)
+        course["_id"] = str(result.inserted_id)
+        return course
+
+    async def get_course_by_id(self, course_id: str) -> dict | None:
+        """Devuelve un curso por su ID."""
+        try:
+            course = await self.courses.find_one({"_id": ObjectId(course_id)})
+            if course:
+                course["_id"] = str(course["_id"])
+            return course
+        except Exception:
+            return None
+
+    async def get_courses_by_teacher(self, teacher_id: str) -> list:
+        """Devuelve todos los cursos donde el usuario es profesor."""
+        cursor = self.courses.find({"teacher_ids": teacher_id})
+        courses = await cursor.to_list(100)
+        for c in courses:
+            c["_id"] = str(c["_id"])
+        return courses
+
+    async def get_enrolled_courses(self, student_id: str) -> list:
+        """
+        Devuelve los cursos en los que el usuario está matriculado como alumno.
+        Busca subjects con course_id != null y user_id == student_id,
+        luego obtiene esos cursos.
+        """
+        # Buscar subjects que tienen course_id (matriculaciones)
+        cursor = self.subjects.find(
+            {"user_id": student_id, "course_id": {"$ne": None}},
+            {"course_id": 1}
+        )
+        subj_docs = await cursor.to_list(200)
+        course_ids = list({s["course_id"] for s in subj_docs if s.get("course_id")})
+
+        if not course_ids:
+            return []
+
+        oid_list = []
+        for cid in course_ids:
+            try:
+                oid_list.append(ObjectId(cid))
+            except Exception:
+                pass
+
+        cursor2 = self.courses.find({"_id": {"$in": oid_list}})
+        courses = await cursor2.to_list(200)
+        for c in courses:
+            c["_id"] = str(c["_id"])
+        return courses
+
+    async def get_course_by_enrollment_code(self, code: str) -> dict | None:
+        """Busca un curso por su código de matriculación."""
+        course = await self.courses.find_one({"enrollment_code": code.upper()})
+        if course:
+            course["_id"] = str(course["_id"])
+        return course
+
+    async def add_student_to_course(self, course_id: str, student_id: str) -> None:
+        """Añade un alumno al array student_ids del curso (idempotente)."""
+        try:
+            await self.courses.update_one(
+                {"_id": ObjectId(course_id)},
+                {"$addToSet": {"student_ids": student_id}}
+            )
+        except Exception:
+            pass
+
+    async def remove_student_from_course(self, course_id: str, student_id: str) -> None:
+        """Quita un alumno del array student_ids del curso y desvincula sus asignaturas."""
+        try:
+            await self.courses.update_one(
+                {"_id": ObjectId(course_id)},
+                {"$pull": {"student_ids": student_id}}
+            )
+            await self.subjects.update_many(
+                {"course_id": course_id, "user_id": student_id},
+                {"$set": {"course_id": None}}
+            )
+        except Exception:
+            pass
+
+    async def get_subjects_by_course_and_user(self, course_id: str, student_id: str) -> list:
+        """Devuelve las subjects del alumno para un curso concreto."""
+        cursor = self.subjects.find({"course_id": course_id, "user_id": student_id})
+        subjects = await cursor.to_list(10)
+        for s in subjects:
+            s["_id"] = str(s["_id"])
+        return subjects
+
+
+
+    async def update_course(self, course_id: str, **fields) -> None:
+        """Actualiza campos sueltos de un curso (name, description, academic_year, is_active...)."""
+        if not fields:
+            return
+        try:
+            await self.courses.update_one(
+                {"_id": ObjectId(course_id)},
+                {"$set": fields}
+            )
+        except Exception:
+            pass
+
+    async def delete_course(self, course_id: str) -> None:
+        """Elimina un curso y desvincula sus subjects (pone course_id a None en todos los alumnos)."""
+        try:
+            # Desvincular subjects asociadas
+            await self.subjects.update_many(
+                {"course_id": course_id},
+                {"$set": {"course_id": None}}
+            )
+            await self.courses.delete_one({"_id": ObjectId(course_id)})
+        except Exception:
+            pass

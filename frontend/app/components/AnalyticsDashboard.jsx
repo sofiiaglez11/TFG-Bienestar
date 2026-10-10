@@ -2,15 +2,7 @@
 
 import { useState, useEffect } from "react";
 import {
-  BarChart3,
-  BookOpen,
-  Clock,
-  Moon,
-  Smile,
-  Zap,
-  Calendar,
-  Award,
-  Layers
+  BarChart3, BookOpen, Clock, Moon, Smile, Zap, Calendar, Award, Layers
 } from "lucide-react";
 
 // Importación de componentes modulares
@@ -226,8 +218,8 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
           <div>
             <h2 style={{ margin: 0, fontSize: "1.4rem", fontWeight: "700", display: "flex", alignItems: "center", gap: "10px" }}>
-              <BarChart3 size={24} color="var(--brand)" />
-              Dashboard de Rendimiento y Bienestar
+              {/* <BarChart3 size={24} color="var(--brand)" /> */}
+              Estadísticas de estudio y bienestar
             </h2>
             <p style={{ margin: "4px 0 0 0", color: "var(--text-secondary)", fontSize: "14px" }}>
               Análisis completo de asignaturas, tareas, tiempo dedicado y descanso
@@ -322,14 +314,16 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
               margin: "20px 0"
             }}
           >
-            <div style={{ fontSize: "36px", marginBottom: "12px" }}>📊</div>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: "12px", color: "var(--text-secondary)" }}>
+              <BarChart3 size={40} strokeWidth={1.5} />
+            </div>
             <h3 style={{ margin: "0 0 8px 0", fontSize: "16px", fontWeight: "600", color: "var(--text-primary)" }}>
               Estadísticas personales no disponibles sin Clockify
             </h3>
             <p style={{ margin: "0 auto", fontSize: "13px", color: "var(--text-secondary)", maxWidth: "520px", lineHeight: "1.5" }}>
               No has vinculado tu cuenta de Clockify para generar tus analíticas de estudio.
               <br /><br />
-              Si eres <strong>profesor, tutor</strong> o deseas consultar el rendimiento de un alumno o compañero, puedes seleccionarlo en el desplegable superior (donde indica <em>"Mis estadísticas"</em>) para visualizar sus analíticas.
+
             </p>
           </div>
         ) : (

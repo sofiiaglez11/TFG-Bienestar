@@ -6,6 +6,8 @@ import unicodedata
 from datetime import datetime, timezone
 from typing import TypedDict, Optional, List, Dict, Any
 from langgraph.graph import StateGraph, START, END
+from zoneinfo import ZoneInfo
+from datetime import timedelta
 
 class GraphState(TypedDict):
     user_id: str
@@ -671,11 +673,9 @@ class LangGraphService:
         de seguridad, para no dejar nunca el plan sin revisar por un fallo del LLM.
         """
         try:
-            from zoneinfo import ZoneInfo
-            from datetime import timedelta
+            
             today_str = datetime.now(ZoneInfo("Europe/Madrid")).strftime("%Y-%m-%d")
         except Exception:
-            from datetime import timedelta
             today_str = datetime.now().strftime("%Y-%m-%d")
 
         user = await self.db_service.get_user_by_id(user_id)
@@ -741,7 +741,7 @@ class LangGraphService:
             await self.db_service.update_user(user_id, last_daily_plan_review_date=today_str)
             return {"reviewed": True, "plan_modified": False, "adjustments": [], "summary": "", "today_date": today_str}
 
-        # --- 2. Recopilar tendencias reales del usuario (lo que antes faltaba) ---
+        # --- 2. Recopilar tendencias reales del usuario  ---
         patterns_text = "Sin datos de tendencias disponibles."
         academic_text = "Sin datos académicos disponibles."
         if self.analytics_service:
@@ -969,7 +969,6 @@ class LangGraphService:
             event_type = "LOGIN_GREETING"
             
             try:
-                from zoneinfo import ZoneInfo
                 today_str = datetime.now(ZoneInfo("Europe/Madrid")).strftime("%Y-%m-%d")
             except Exception:
                 today_str = datetime.now().strftime("%Y-%m-%d")
@@ -982,62 +981,22 @@ class LangGraphService:
             except Exception as e:
                 print(f"[LANGGRAPH GREETING] Error comprobando bienestar: {e}", file=sys.stderr)
 
-            session_parts = []
-            try:
-                study_reports = await self.db_service.get_study_reports_by_user(user_id, limit=1)
-                if study_reports and len(study_reports) > 0:
-                    sr = study_reports[0]
-                    subj = sr.get("subject_name") or "una sesión de estudio"
-                    quality = sr.get("study_quality")
-                    goals = sr.get("goals_achieved")
-                    quality_str = f"calidad {quality}/5" if quality else ""
-                    goals_str = "habiendo cumplido tus objetivos" if goals is True else ("con objetivos pendientes" if goals is False else "")
-                    details = [p for p in [quality_str, goals_str] if p]
-                    details_text = f" ({', '.join(details)})" if details else ""
-                    session_parts.append(f"Última sesión de estudio registrada: en {subj}{details_text}.")
-            except Exception as e:
-                print(f"[LANGGRAPH GREETING] Error obteniendo study_reports: {e}", file=sys.stderr)
-
-            if not session_parts and self.analytics_service:
-                try:
-                    cs = await self.analytics_service._get_user_clockify_service(user_id)
-                    if cs:
-                        latest_entry = await asyncio.to_thread(cs.get_latest_time_entry)
-                        if latest_entry:
-                            desc = latest_entry.get("description") or "Estudio"
-                            dur_str = latest_entry.get("timeInterval", {}).get("duration", "")
-                            dur_mins = self.analytics_service._parse_iso_duration_minutes(dur_str) if dur_str else 0
-                            dur_text = f"{int(dur_mins // 60)}h {int(dur_mins % 60)}m" if dur_mins >= 60 else f"{int(dur_mins)} minutos"
-                            session_parts.append(f"Última sesión registrada en Clockify: '{desc}' ({dur_text}).")
-                except Exception as e:
-                    print(f"[LANGGRAPH GREETING] Error Clockify latest entry: {e}", file=sys.stderr)
-
-            session_summary = " ".join(session_parts)
-
             login_prompt = (
                 f"El usuario {user_name} acaba de iniciar sesión en la plataforma.\n"
                 "Instrucciones para el saludo:\n"
                 "1. Salúdale de forma cálida, cercana y motivadora por su nombre.\n"
             )
 
-            if session_summary:
-                login_prompt += (
-                    f"2. Haz un repaso MUY BREVE (máximo 1 o 2 frases) de su última sesión o actividad reciente:\n"
-                    f"   {session_summary}\n"
-                )
-            else:
-                login_prompt += "2. Dale la bienvenida de vuelta a su espacio de estudio.\n"
-
             if not has_today_sleep:
                 login_prompt += (
-                    f"3. Hoy ({today_str}) AÚN NO ha registrado sus horas de sueño ni su reporte de bienestar diario. "
+                    f"2. Hoy ({today_str}) AÚN NO ha registrado sus horas de sueño ni su reporte de bienestar diario. "
                     "Aprovecha este saludo para preguntarle de forma natural y empática cómo ha descansado esta noche, "
                     "cuántas horas ha dormido y cómo se siente de ánimos para empezar el día, para así dejar listo su informe de bienestar.\n"
                 )
             else:
                 sleep_hrs = latest_wellbeing.get('sleep_hours', 'N/A') if latest_wellbeing else 'N/A'
                 login_prompt += (
-                    f"3. Hoy ({today_str}) YA ha registrado sus horas de sueño ({sleep_hrs}h). "
+                    f"2. Hoy ({today_str}) YA ha registrado sus horas de sueño ({sleep_hrs}h). "
                     "NO le vuelvas a preguntar por el sueño. En su lugar, pregúntale qué tiene planificado estudiar hoy o cómo le gustaría enfocar la jornada.\n"
                 )
 
@@ -1077,7 +1036,7 @@ class LangGraphService:
 
             if today_plan_tasks:
                 login_prompt += (
-                    f"\n4. SEGUIMIENTO DEL PLAN DE ESTUDIO PARA HOY ('{plan_title}'):\n"
+                    f"\n3. SEGUIMIENTO DEL PLAN DE ESTUDIO PARA HOY ('{plan_title}'):\n"
                     f"Hoy el usuario tiene programadas en su planificación:\n"
                     f"{chr(10).join(today_plan_tasks)}\n"
                     "Menciónale de forma concreta y motivadora lo que tiene previsto estudiar hoy y "
@@ -1085,17 +1044,17 @@ class LangGraphService:
                 )
             elif plan_title:
                 login_prompt += (
-                    f"\n4. PLAN DE ESTUDIO ACTIVO ('{plan_title}'):\n"
+                    f"\n3. PLAN DE ESTUDIO ACTIVO ('{plan_title}'):\n"
                     "Tiene un plan activo, aunque hoy no tiene tareas específicas marcadas. "
                     "Pregúntale amigablemente qué le gustaría avanzar hoy.\n"
                 )
 
             if daily_review_res.get("plan_modified") and daily_review_res.get("summary"):
                 login_prompt += (
-                    f"\n5. REAJUSTE DE PLAN REALIZADO HOY POR EL AGENTE ASESOR:\n"
+                    f"\n5. REAJUSTE DE PLAN REALIZADO:\n"
                     f"Se ha detectado retraso/posposición y se ha ajustado la planificación con el siguiente resumen:\n"
                     f"{daily_review_res['summary']}\n"
-                    "Coméntale al usuario de forma comprensiva, empática y clara que el Agente Asesor ha reprogramado esas tareas para adaptar la carga a su ritmo real sin agobios.\n"
+                    "Coméntale al usuario de forma comprensiva, empática y clara que has reprogramado esas tareas para adaptar la carga a su ritmo real sin agobios.\n"
                 )
 
             login_prompt += "\nSé conciso, empático y natural. No uses listas innecesariamente largas."

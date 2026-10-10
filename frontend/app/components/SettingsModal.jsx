@@ -1,15 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import {
-  X,
-  Copy,
-  Check,
-  Trash2,
-  UserX,
-  Shield,
-  Clock
-} from "lucide-react";
+import { X, Copy, Check, Trash2, UserX, Shield, Clock, Settings } from "lucide-react";
 import ClockifyConfigPanel from "./ClockifyConfigPanel";
 
 const RAW_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -246,7 +238,10 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
             alignItems: "center"
           }}
         >
-          <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: "700" }}>⚙️ Configuración</h3>
+          <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: "700", display: "flex", alignItems: "center", gap: "8px" }}>
+            <Settings size={18} />
+            Configuración
+          </h3>
           <button
             onClick={onClose}
             style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", padding: "4px" }}
@@ -338,7 +333,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
               <div style={{ display: "flex", flexDirection: "column", gap: "22px" }}>
                 {/* 1. Mi Código */}
                 <div style={{ borderBottom: "1px solid var(--border)", paddingBottom: "18px" }}>
-                  <h4 style={{ margin: "0 0 6px 0", fontSize: "14px", fontWeight: "600" }}>Tu código de compartir</h4>
+                  <h4 style={{ margin: "0 0 6px 0", fontSize: "14px", fontWeight: "600" }}>Código para compartir mis estadísticas</h4>
                   <p style={{ margin: "0 0 10px 0", fontSize: "12px", color: "var(--text-secondary)" }}>
                     Comparte este código con compañeros para que puedan seguir tus estadísticas de estudio.
                   </p>

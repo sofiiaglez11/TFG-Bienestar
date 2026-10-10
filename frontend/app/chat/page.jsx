@@ -6,6 +6,11 @@ import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
 import SettingsModal from "../components/SettingsModal";
 import AnalyticsDashboard from "../components/AnalyticsDashboard";
+// import CoursesDashboard from "../components/CoursesDashboard";
+import CoursesDashboard from "../components/courses/CoursesDashboard";
+
+
+import { MessageSquare, BarChart2, GraduationCap, User, Settings, LogOut } from "lucide-react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
@@ -25,7 +30,7 @@ export default function ChatPage() {
   const [clockifyConnected, setClockifyConnected] = useState(false);
   const [activeTab, setActiveTab] = useState("chat");
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [userName, setUserName] = useState("Estudiante");
   const [userEmail, setUserEmail] = useState("Cargando...");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -335,6 +340,7 @@ export default function ChatPage() {
                 width: "100%",
               }}
             >
+              <MessageSquare size={18} style={{ flexShrink: 0 }} />
               {!isSidebarCollapsed && <span>Chat</span>}
             </button>
 
@@ -356,8 +362,30 @@ export default function ChatPage() {
                 width: "100%",
               }}
             >
-              <span style={{ fontSize: "16px" }}>📊</span>
+              <BarChart2 size={18} style={{ flexShrink: 0 }} />
               {!isSidebarCollapsed && <span>Estadísticas</span>}
+            </button>
+
+            <button
+              onClick={() => setActiveTab("courses")}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: isSidebarCollapsed ? "center" : "flex-start",
+                gap: isSidebarCollapsed ? "0" : "10px",
+                padding: isSidebarCollapsed ? "12px" : "10px 14px",
+                borderRadius: "8px",
+                border: "none",
+                backgroundColor: activeTab === "courses" ? "var(--pressed-button-bg)" : "transparent",
+                color: "var(--text-primary)",
+                fontSize: "14px",
+                fontWeight: activeTab === "courses" ? "600" : "500",
+                cursor: "pointer",
+                width: "100%",
+              }}
+            >
+              <GraduationCap size={18} style={{ flexShrink: 0 }} />
+              {!isSidebarCollapsed && <span>Cursos</span>}
             </button>
           </div>
         </div>
@@ -379,7 +407,9 @@ export default function ChatPage() {
               cursor: "pointer",
             }}
           >
-            <div style={{ width: "36px", height: "36px", borderRadius: "50%", backgroundColor: "#cbd5e1", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "600", color: "#475569", fontSize: "14px", flexShrink: 0 }}>👤</div>
+            <div style={{ width: "36px", height: "36px", borderRadius: "50%", backgroundColor: "#cbd5e1", display: "flex", alignItems: "center", justifyContent: "center", color: "#475569", flexShrink: 0 }}>
+              <User size={18} />
+            </div>
             {!isSidebarCollapsed && (
               <div style={{ flex: 1, textAlign: "left", overflow: "hidden" }}>
                 <div style={{ fontWeight: 600, fontSize: "13px", color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{userName}</div>
@@ -414,20 +444,12 @@ export default function ChatPage() {
                     setSettingsInitialTab("clockify");
                     setShowSettingsModal(true);
                   }}
-                  style={{
-                    padding: "10px 14px",
-                    border: "none",
-                    background: "none",
-                    color: "var(--text-primary)",
-                    fontSize: "13px",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    width: "100%"
-                  }}
                   onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "var(--bg-page)")}
                   onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                  style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 14px", border: "none", background: "none", color: "var(--text-primary)", fontSize: "13px", cursor: "pointer", textAlign: "left", width: "100%" }}
                 >
-                  ⚙️ Configuración
+                  <Settings size={15} />
+                  Configuración
                 </button>
 
                 <button
@@ -435,20 +457,12 @@ export default function ChatPage() {
                     setShowProfileMenu(false);
                     handleLogout();
                   }}
-                  style={{
-                    padding: "10px 14px",
-                    border: "none",
-                    borderTop: "1px solid var(--border)",
-                    background: "none",
-                    color: "#ef4444",
-                    fontSize: "13px",
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
                   onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "var(--bg-page)")}
                   onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                  style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 14px", border: "none", borderTop: "1px solid var(--border)", background: "none", color: "#ef4444", fontSize: "13px", cursor: "pointer", textAlign: "left" }}
                 >
-                  🚪 Cerrar sesión
+                  <LogOut size={15} />
+                  Cerrar sesión
                 </button>
               </div>
             </>
@@ -462,7 +476,9 @@ export default function ChatPage() {
           {!clockifyConnected ? (
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
               <div style={{ maxWidth: "480px", width: "100%", padding: "32px", borderRadius: "20px", background: "var(--bg-surface)", border: "1px solid var(--border)", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "18px" }}>
-                <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: "linear-gradient(135deg, #6366f1, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>🎓</div>
+                <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: "linear-gradient(135deg, #6366f1, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
+                  <GraduationCap size={28} />
+                </div>
                 <div>
                   <h2 style={{ margin: "0 0 6px 0", fontSize: "20px", color: "var(--text-primary)" }}>¡Bienvenido/a, {userName}!</h2>
                   <p style={{ margin: 0, fontSize: "14px", color: "var(--text-secondary)", lineHeight: "1.5" }}>Conecta tu cuenta de Clockify para comenzar.</p>
@@ -489,6 +505,10 @@ export default function ChatPage() {
 
         <div style={{ flex: 1, display: activeTab === "stats" ? "flex" : "none", flexDirection: "column", height: "100%", padding: "24px", overflow: "hidden" }}>
           <AnalyticsDashboard isInline={true} isActive={activeTab === "stats"} clockifyConnected={clockifyConnected} followKey={followKey} />
+        </div>
+
+        <div style={{ flex: 1, display: activeTab === "courses" ? "flex" : "none", flexDirection: "column", height: "100%", padding: "24px", overflow: "hidden" }}>
+          {activeTab === "courses" && <CoursesDashboard onClose={() => setActiveTab("chat")} />}
         </div>
       </div>
 

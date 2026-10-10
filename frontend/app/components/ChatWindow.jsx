@@ -89,7 +89,9 @@ export default function ChatWindow({
             color: "var(--text-secondary)",
           }}
         >
-          <div style={{ fontSize: "40px", marginBottom: "12px" }}>💬</div>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: "12px", color: "var(--text-secondary)" }}>
+            <MessageSquare size={40} strokeWidth={1.5} />
+          </div>
           <p style={{ fontSize: "15px" }}>
             Escríbeme algo para empezar. Puedo ayudarte a gestionar tu tiempo de estudio con Clockify.
           </p>

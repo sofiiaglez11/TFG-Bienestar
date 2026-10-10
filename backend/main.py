@@ -1,8 +1,11 @@
 from asyncio import queues
 import asyncio
 import os
+import json
 from datetime import datetime, timezone
+from bson import ObjectId
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from google.genai import types
@@ -114,10 +117,12 @@ ACADEMIC_PROMPT = (
     "Al responder al usuario para mostrar sus tareas, usa SIEMPRE tablas Markdown con EXACTAMENTE estas 5 columnas y en este orden estricto:\n"
     "| Estado | Prioridad | Tarea | Fecha | Etiquetas |\n"
     "Reglas estrictas de formato para cada columna:\n"
-    "1. Columna 'Estado': Usa ÚNICAMENTE el emoji correspondiente, NUNCA agregues texto de la palabra del estado:\n"
-    "   - ⚡ (para tareas activas o en progreso)\n"
-    "   - ⏳ (para tareas pendientes)\n"
-    "   - ✅ (para tareas completadas)\n"
+    # "1. Columna 'Estado': Usa ÚNICAMENTE el emoji correspondiente, NUNCA agregues texto de la palabra del estado:\n"
+    # "   - ⚡ (para tareas activas o en progreso)\n"
+    # "   - ⏳ (para tareas pendientes)\n"
+    # "   - ✅ (para tareas completadas)\n"
+
+    "1. Columna 'Estado': Usa ÚNICAMENTE una palabra para determinar el estado de una tarea, indicandolas como: 'PENDIENTE', 'ACTIVA' o 'COMPLETADA'. Por defecto, si el usuario no indica nada, pon PENDIENTE."
     "2. Columna 'Prioridad': Escribe el número entre corchetes rectos, ej: [1], [2], [3]. Si no tiene prioridad, escribe '-'.\n"
 "   3. Columna 'Tarea': Escribe solo el nombre de la tarea. Si necesitas añadir una descripción aclaratoria, escríbela en la línea de abajo dentro de la misma celda usando un salto de línea normal. NUNCA uses etiquetas HTML como <br> ni <br/>. Pon la descripción entre paréntesis y en cursiva\n"    
     "4. Columna 'Fecha':\n"
@@ -130,12 +135,12 @@ ACADEMIC_PROMPT = (
     "Ejemplo de formato requerido:\n"
     "| Estado | Prioridad | Tarea | Fecha | Etiquetas |\n"
     "| :---: | :---: | :--- | :---: | :--- |\n"
-    "| ⚡ | [1] | Entrega Proyecto Final | !10/03/2026! | [Práctica]  |\n"
-    "| ⏳ | [2] | ↳ Redactar conclusiones | 20/06/2026 | [Memoria] [Teoría] |\n"
-    "| ✅ | [3] | Repaso de teoría | 15/01/2026 | [Teoría] |\n\n"
+    "| ACTIVA | [1] | Entrega Proyecto Final | !10/03/2026! | [Práctica]  |\n"
+    "| PENDIENTE | [2] | ↳ Redactar conclusiones | 20/06/2026 | [Memoria] [Teoría] |\n"
+    "| COMPLETADA | [3] | Repaso de teoría | 15/01/2026 | [Teoría] |\n\n"
 
-    "Al final de CADA tabla de tareas añade EXACTAMENTE esta leyenda, una sola vez y sin modificarla: (⚡ En progreso, ⏳ Pendiente, ✅ Completada). NUNCA la pongas dos veces ni uses un texto diferente.\n"
-    "Tampoco menciones que las fechas vencidas están entre exclamaciones, ya que eso el usuario no lo ve (las ve de color rojo).\n"
+    # "Al final de CADA tabla de tareas añade EXACTAMENTE esta leyenda, una sola vez y sin modificarla: (⚡ En progreso, ⏳ Pendiente, ✅ Completada). NUNCA la pongas dos veces ni uses un texto diferente.\n"
+    # "Tampoco menciones que las fechas vencidas están entre exclamaciones, ya que eso el usuario no lo ve (las ve de color rojo).\n"
 
 
     "REGLA DE FECHAS Y ACTUALIZACIONES:\n"
@@ -260,15 +265,22 @@ GENERAL_PROMPT = (
 ADVISOR_PROMPT = (
     "Eres un asesor experto y empático en hábitos de estudio, rendimiento académico y bienestar estudiantil.\n"
     "Tu tarea es analizar la respuesta propuesta por el agente principal y la información en la base de datos del usuario (asignaturas, tiempos de estudio, hábitos, informes de bienestar y estudio) para determinar si es oportuno añadir una recomendación proactiva y personalizada al final de la respuesta.\n"
-    "PATRONES CLAVE A ANALIZAR CON TUS HERRAMIENTAS DE CONSULTA:\n"
+    "REGLA DE SILENCIO OBLIGATORIA — CUÁNDO RESPONDER SOLO 'NO_ADVICE':\n"
+    "Responde ÚNICAMENTE 'NO_ADVICE' (sin texto adicional) en CUALQUIERA de estos casos:\n"
+    "   - El usuario acaba de marcar/completar/crear/modificar/eliminar una tarea.\n"
+    "   - El usuario ha hecho una acción puntual y simple (registrar tiempo, cambiar estado, actualizar datos).\n"
+    "   - El usuario ha saludado o ha hecho una pregunta informativa concreta.\n"
+    "   - Ya se ha dado algún consejo en los últimos 5 intercambios del chat.\n"
+    "   - No detectas un patrón problemático claro y significativo en los datos.\n"
+    "Solo actúa (añade consejo) cuando el contexto sea una conversación larga o reflexiva Y detectes un patrón real y urgente.\n"
+    "PATRONES CLAVE A ANALIZAR (solo cuando NO aplique la regla de silencio):\n"
     "1. DESEQUILIBRIO ENTRE ASIGNATURAS: Usa 'list_subjects' y 'get_time_summary' para comparar el tiempo dedicado a cada asignatura. Si notas que una asignatura acumula casi todo el tiempo mientras otra asignatura activa tiene 0 horas o está desatendida, aconseja redistribuir el tiempo.\n"
-    "2. SEGUIMIENTO PROACTIVO DE TAREAS PENDIENTES / NO TRATADAS EN EL DÍA: Si en la conversación actual del día NO se ha hablado de tareas y el estudiante tiene tareas pendientes (PENDING) o activas (ACTIVE) o próximas a vencer, pregúntale amigablemente cómo las lleva, si ha podido avanzar en alguna o si necesita ayuda para ponerse a trabajar en ellas.\n"
-    "3. HORARIOS NOCIVOS (ESTUDIO EN MADRUGADA): Usa 'get_time_entries' para revisar los horarios de inicio de las sesiones de estudio. Si detectas sesiones entre las 00:00 y las 06:00 AM, advierte con empatía sobre los riesgos para el descanso, la retención y la salud mental.\n"
-    "4. SESIONES DISPERSAS O FRAGMENTADAS: Si ves múltiples entradas cortas e intermitentes sin bloques de trabajo enfocado, sugiere la técnica Pomodoro o definir bloques claros de estudio.\n"
-    "5. TENDENCIA DE AGOTAMIENTO Y FATIGA: Correlaciona 'wb_get_study_reports' (fatiga, baja concentración) con 'wb_get_wellbeing_trends' / 'wb_get_wellbeing_report' (pocas horas de sueño, bajo estado de ánimo). Si detectas fatiga acumulada o mal descanso, aconseja pausas de recuperación activa.\n"
+    "2. HORARIOS NOCIVOS (ESTUDIO EN MADRUGADA): Usa 'get_time_entries' para revisar los horarios de inicio de las sesiones de estudio. Si detectas sesiones entre las 00:00 y las 06:00 AM, advierte con empatía sobre los riesgos para el descanso, la retención y la salud mental.\n"
+    "3. SESIONES DISPERSAS O FRAGMENTADAS: Si ves múltiples entradas cortas e intermitentes sin bloques de trabajo enfocado, sugiere la técnica Pomodoro o definir bloques claros de estudio.\n"
+    "4. TENDENCIA DE AGOTAMIENTO Y FATIGA: Correlaciona 'wb_get_study_reports' (fatiga, baja concentración) con 'wb_get_wellbeing_trends' / 'wb_get_wellbeing_report' (pocas horas de sueño, bajo estado de ánimo). Si detectas fatiga acumulada o mal descanso, aconseja pausas de recuperación activa.\n"
     "REGLAS DE ACTUACIÓN:\n"
     "1. SOLO LECTURA: Tienes acceso a herramientas de consulta para revisar datos del usuario. NUNCA intentes modificar, crear ni eliminar datos.\n"
-    "2. SELECCIÓN DE CONSEJOS: Sé breve, conciso, oportuno y muy valioso. Da recomendaciones basadas en patrones reales observados en sus datos.\n"
+    "2. SELECCIÓN DE CONSEJOS: Sé breve, conciso, oportuno y muy valioso. Da recomendaciones basadas en patrones reales observados en sus datos. NUNCA hables de tareas pendientes de forma proactiva si el usuario no lo ha pedido.\n"
     "3. CONTROL DE REPETICIONES DE CONSEJOS:\n"
     "   - NUNCA repitas el mismo consejo que ya se le haya dado al usuario previamente en la misma sesión o conversación reciente.\n"
     "   - Si el patrón que detectas es equivalente a uno recién comentado, responde únicamente 'NO_ADVICE' para no agobiar ni resultar repetitivo.\n"
@@ -470,6 +482,24 @@ class SubjectGradeRequest(BaseModel):
     grade: float
 
 
+class CreateCourseRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    academic_year: Optional[str] = None  # ej. '2025/26'
+
+
+class UpdateCourseRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    academic_year: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class EnrollCourseRequest(BaseModel):
+    code: str
+    subject_id: Optional[str] = None
+
+
 ##################################################################
 def get_datetime_context() -> str:
     """Devuelve la fecha y hora actual formateada en español como contexto para el agente."""
@@ -649,7 +679,7 @@ async def trigger_daily_study_plan_review(
 ):
     """
     Endpoint para invocar bajo demanda la revisión y reajuste del plan de estudio
-    realizada por el Agente Asesor de Planificación.
+    realizada por el Agente de Planificación.
     """
     result = await langgraph_service.run_daily_plan_review(user_id, force=True)
     return result
@@ -895,3 +925,304 @@ async def revoke_follower(
     """
     await db_service.remove_follower(user_id, follower_id)
     return {"status": "ok", "message": "Acceso revocado correctamente."}
+
+
+
+##################################################################
+# COURSES ENDPOINTS
+##################################################################
+
+@app.post("/api/courses")
+async def create_course(
+    request: CreateCourseRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Crea un nuevo curso (el usuario pasa a ser profesor del mismo)."""
+    course = await db_service.create_course(
+        teacher_id=user_id,
+        name=request.name,
+        description=request.description,
+        academic_year=request.academic_year
+    )
+    return course
+
+
+@app.get("/api/courses/teaching")
+async def get_teaching_courses(user_id: str = Depends(get_current_user_id)):
+    """Devuelve los cursos en los que el usuario es profesor."""
+    return {"courses": await db_service.get_courses_by_teacher(user_id)}
+
+
+@app.get("/api/courses/enrolled")
+async def get_enrolled_courses(user_id: str = Depends(get_current_user_id)):
+    """Devuelve los cursos en los que el usuario está matriculado como alumno."""
+    return {"courses": await db_service.get_enrolled_courses(user_id)}
+
+
+@app.get("/api/courses/{course_id}")
+async def get_course(
+    course_id: str,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Detalle de un curso concreto. Sólo accesible por profesores o alumnos matriculados."""
+    course = await db_service.get_course_by_id(course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
+    # Verificar acceso
+    if user_id not in course.get("teacher_ids", []) and user_id not in course.get("student_ids", []):
+        raise HTTPException(status_code=403, detail="Sin acceso a este curso")
+    return course
+
+
+@app.patch("/api/courses/{course_id}")
+async def update_course(
+    course_id: str,
+    request: UpdateCourseRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Edita nombre, descripción, año académico o estado del curso. Solo el profesor."""
+    course = await db_service.get_course_by_id(course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
+    if user_id not in course.get("teacher_ids", []):
+        raise HTTPException(status_code=403, detail="Solo el profesor puede editar el curso")
+    fields = {k: v for k, v in request.model_dump().items() if v is not None}
+    if fields:
+        await db_service.update_course(course_id, **fields)
+    return {"message": "Curso actualizado"}
+
+
+@app.delete("/api/courses/{course_id}")
+async def delete_course(
+    course_id: str,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Elimina un curso. Solo el profesor principal puede eliminarlo."""
+    course = await db_service.get_course_by_id(course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
+    if user_id not in course.get("teacher_ids", []):
+        raise HTTPException(status_code=403, detail="Solo el profesor puede eliminar el curso")
+    await db_service.delete_course(course_id)
+    return {"message": "Curso eliminado"}
+
+
+@app.get("/api/subjects/unlinked")
+async def get_unlinked_subjects(user_id: str = Depends(get_current_user_id)):
+    """Devuelve asignaturas del alumno que no están vinculadas a ningún curso."""
+    subjects = await db_service.get_subjects_by_user(user_id)
+    return {"subjects": [{"id": str(s["_id"]), "name": s["name"]} for s in subjects if not s.get("course_id")]}
+
+
+@app.get("/api/courses/check/{code}")
+async def check_course_code(code: str, user_id: str = Depends(get_current_user_id)):
+    """Verifica si un código de curso es válido y devuelve su info básica sin matricular."""
+    course = await db_service.get_course_by_enrollment_code(code.strip())
+    if not course:
+        raise HTTPException(status_code=404, detail="Código de curso no válido")
+    if user_id in course.get("student_ids", []):
+        raise HTTPException(status_code=400, detail="Ya estás matriculado en este curso")
+    return {"id": str(course["_id"]), "name": course["name"], "academic_year": course.get("academic_year", "")}
+
+
+
+@app.post("/api/courses/enroll")
+async def enroll_in_course(
+    request: EnrollCourseRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Matricularse en un curso mediante código de inscripción."""
+    code = request.code.strip()
+
+    # 1. Encontrar el curso
+    course = await db_service.get_course_by_enrollment_code(code)
+    if not course:
+        raise HTTPException(status_code=404, detail="Código de curso no válido")
+
+    course_id = str(course["_id"])
+
+    # 3. Verificar que no esté ya matriculado
+    if user_id in course.get("student_ids", []):
+        raise HTTPException(status_code=400, detail="Ya estás matriculado en este curso")
+
+    subject = None
+    if request.subject_id:
+        subject = await db_service.get_subject_by_id(request.subject_id)
+        if subject and str(subject.get("user_id")) == user_id:
+            await db_service.update_subject(request.subject_id, course_id=course_id)
+        else:
+            subject = None
+
+    if not subject:
+        # 4. Crear proyecto en Clockify si el alumno lo tiene vinculado
+        clockify_project_id = ""
+        try:
+            clockify_creds = await db_service.get_clockify_credentials(user_id)
+            if clockify_creds and clockify_creds.get("api_key"):
+                cs = ClockifyService(
+                    api_key=clockify_creds["api_key"],
+                    workspace_id=clockify_creds.get("workspace_id")
+                )
+                project = await asyncio.to_thread(cs.add_new_project, course["name"])
+                clockify_project_id = project.get("id", "")
+        except Exception as e:
+            print(f"[ENROLL] No se pudo crear proyecto Clockify: {e}")
+
+        # 5. Crear subject vinculada al curso
+        subject = await db_service.create_subject(
+            user_id=user_id,
+            name=course["name"],
+            clockify_project_id=clockify_project_id,
+            course_id=course_id
+        )
+
+    # 6. Añadir al curso
+    await db_service.add_student_to_course(course_id, user_id)
+
+    return {"subject": subject, "course_name": course["name"]}
+
+
+@app.delete("/api/courses/{course_id}/leave")
+async def leave_course(
+    course_id: str,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Desmatricularse de un curso."""
+    course = await db_service.get_course_by_id(course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
+    if user_id not in course.get("student_ids", []):
+        raise HTTPException(status_code=400, detail="No estás matriculado en este curso")
+    await db_service.remove_student_from_course(course_id, user_id)
+    return {"message": "Desmatriculado correctamente"}
+
+
+@app.get("/api/courses/{course_id}/students")
+async def get_course_students(
+    course_id: str,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Lista de estudiantes del curso con nombre y email 
+    Solo accesible por el profesor.
+    """
+    course = await db_service.get_course_by_id(course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
+    if user_id not in course.get("teacher_ids", []):
+        raise HTTPException(status_code=403, detail="Solo el profesor puede ver esta lista")
+
+    students = []
+    for sid in course.get("student_ids", []):
+        u = await db_service.get_user_by_id(sid)
+        students.append({
+            "user_id": sid,
+            "name": u.get("name", "Estudiante") if u else "Estudiante",
+            "email": u.get("email", "") if u else "",
+        })
+
+    return {"students": students, "course": course}
+
+
+
+##################################################################
+# GLOBAL ANALYTICS ENDPOINTS
+##################################################################
+
+GLOBAL_SUMMARY_PROMPT = (
+    "Eres un sistema automático de análisis de datos educativos. "
+    "Tu única función es generar, de forma INMEDIATA y DIRECTA, un párrafo analítico de 4 a 5 frases sobre las estadísticas de una clase. "
+    "INSTRUCCIONES DE FORMATO — OBLIGATORIAS: "
+    "Tu respuesta debe comenzar DIRECTAMENTE con el análisis, sin saludos, sin introducción, sin Hola, sin !Claro!. "
+    "NO hagas preguntas al usuario. NO ofrezcas opciones ni listes lo que puedes hacer. "
+    "NO uses listas con viñetas ni bullet points: solo texto en prosa continua. "
+    "NO menciones a ningún alumno individual ni uses nombres propios de alumnos. "
+    "Habla siempre del conjunto: la clase, el grupo, los alumnos en general. "
+    "Usa un tono profesional, objetivo y conciso. Responde siempre en español. "
+    "CONTENIDO que debe incluir el análisis: "
+    "La media de horas de estudio y su relación con la nota media. "
+    "Qué porcentaje de alumnos aprueba y si se correlaciona con las horas dedicadas. "
+    "Observaciones sobre concentración y sueño del grupo. "
+    "Una conclusión general útil para el profesor. "
+    "EJEMPLO DE RESPUESTA VALIDA (sigue exactamente este estilo sin saludos ni preguntas): "
+    "La clase dedica de media X horas al estudio, lo que se traduce en una nota media de Y. "
+    "El Z porciento de los alumnos supera el aprobado, cifra que coincide con el porcentaje que estudia más de W horas. "
+    "La concentración media del grupo es de C sobre 5, y las horas de sueño promedio son S. "
+    "En general, existe una correlación positiva entre el tiempo de estudio y el rendimiento académico."
+)
+
+@app.get("/api/courses/{course_id}/global-analytics")
+async def get_course_global_analytics(
+    course_id: str,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Obtiene la lista con los datos resumidos de todos los alumnos de un curso."""
+    course = await db_service.get_course_by_id(course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
+    if user_id not in course.get("teacher_ids", []):
+        raise HTTPException(status_code=403, detail="Solo el profesor puede acceder a las estadísticas globales")
+        
+    return {
+        "stats": await analytics_service.get_course_global_analytics(course_id),
+        "global_summary": course.get("global_summary"),
+        "global_summary_generated_at": course.get("global_summary_generated_at")
+    }
+
+
+@app.post("/api/courses/{course_id}/global-summary")
+async def generate_global_course_summary(
+    course_id: str,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Genera un resumen global de la clase y lo guarda en el curso."""
+    course = await db_service.get_course_by_id(course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
+    if user_id not in course.get("teacher_ids", []):
+        raise HTTPException(status_code=403, detail="Solo el profesor puede generar resúmenes globales")
+        
+    global_stats = await analytics_service.get_course_global_analytics(course_id)
+    if not global_stats:
+        raise HTTPException(status_code=400, detail="No hay datos suficientes para generar un resumen")
+
+    # Datos agregados para el LLM
+    n = len(global_stats)
+    hours_list = [s['hours'] for s in global_stats if s.get('hours') is not None]
+    conc_list  = [s['avg_concentration'] for s in global_stats if s.get('avg_concentration') is not None]
+    sleep_list = [s['avg_sleep'] for s in global_stats if s.get('avg_sleep') is not None]
+    grade_list = [s['grade'] for s in global_stats if s.get('grade') is not None]
+
+    def _avg(lst): return round(sum(lst) / len(lst), 2) if lst else None
+    def _mn(lst):  return round(min(lst), 2) if lst else None
+    def _mx(lst):  return round(max(lst), 2) if lst else None
+    def _pct_above(lst, threshold): return round(100 * sum(1 for v in lst if v >= threshold) / len(lst)) if lst else None
+
+    lines = [
+        f"Total de alumnos: {n}",
+        f"Horas de estudio → media: {_avg(hours_list)} h | mín: {_mn(hours_list)} h | máx: {_mx(hours_list)} h",
+        f"Concentración   → media: {_avg(conc_list)}/5 | mín: {_mn(conc_list)}/5 | máx: {_mx(conc_list)}/5",
+        f"Horas de sueño  → media: {_avg(sleep_list)} h | mín: {_mn(sleep_list)} h | máx: {_mx(sleep_list)} h",
+        f"Nota            → media: {_avg(grade_list)} | mín: {_mn(grade_list)} | máx: {_mx(grade_list)}",
+        f"Alumnos que dedican ≥5 h de estudio: {_pct_above(hours_list, 5)}%",
+        f"Alumnos con nota aprobatoria (≥5): {_pct_above(grade_list, 5)}%",
+        f"Alumnos con concentración ≥3/5: {_pct_above(conc_list, 3)}%",
+        f"Alumnos con ≥7 h de sueño: {_pct_above(sleep_list, 7)}%",
+    ]
+    formatted_text = "ESTADÍSTICAS AGREGADAS DE LA CLASE (no se incluyen datos individuales):\n" + "\n".join(lines)
+    
+    try:
+        if ACTIVE_MODEL == "gemini":
+            agent = GeminiService()
+        else:
+            agent = OpenAIService()
+        agent.set_system_instruction(GLOBAL_SUMMARY_PROMPT)
+        result = await agent.chat_with_mcp_async(formatted_text)
+        summary_text = result.text if hasattr(result, "text") else str(result)
+        
+        generated_at = datetime.now(timezone.utc).isoformat()
+        await db_service.update_course(course_id, global_summary=summary_text, global_summary_generated_at=generated_at)
+        
+        return {"summary": summary_text, "generated_at": generated_at}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generando resumen: {str(e)}")

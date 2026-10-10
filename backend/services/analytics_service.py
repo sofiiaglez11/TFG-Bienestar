@@ -863,3 +863,191 @@ class AnalyticsService:
             "time_breakdown": time_breakdown
         }
 
+
+    async def get_course_student_analytics(self, student_id: str, subject_id: str, days: int = 0) -> dict:
+        """
+        Versión recortada de las analytics, filtrada a UNA sola asignatura (la del curso).
+        Pensada para que el profesor vea las stats del alumno para esa asignatura concreta.
+        days=0 → desde el principio (histórico completo).
+        No incluye bienestar ni patrones globales.
+        """
+        WEEKDAYS = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves",
+                    4: "Viernes", 5: "Sábado", 6: "Domingo"}
+
+        subject = await self.db_service.get_subject_by_id(subject_id)
+        if not subject:
+            return {}
+
+        s_name = subject.get("name", "Asignatura")
+        clockify_proj_id = subject.get("clockify_project_id")
+
+        clockify_entries = []
+        cs = await self._get_user_clockify_service(student_id)
+        if cs:
+            try:
+                if days and days > 0:
+                    clockify_entries = await asyncio.to_thread(cs.get_time_entries, days_back=days)
+                else:
+                    clockify_entries = await asyncio.to_thread(cs.get_time_entries, days_back=3650)
+            except Exception as e:
+                print(f"[ANALYTICS COURSE] Error Clockify: {e}", file=sys.stderr)
+
+        subj_entries = [
+            e for e in clockify_entries
+            if clockify_proj_id and e.get("projectId") == clockify_proj_id
+        ]
+
+        study_reports = []
+        try:
+            study_reports = await self.db_service.get_study_reports_by_user(student_id, limit=200)
+        except Exception:
+            pass
+        s_name_clean = s_name.lower().strip()
+        subj_reports = [
+            r for r in study_reports
+            if (r.get("subject_name") or "").lower().strip() == s_name_clean
+        ]
+
+        sessions = []
+        for e in subj_entries:
+            start_str = e.get("start") or e.get("timeInterval", {}).get("start")
+            end_str = e.get("end") or e.get("timeInterval", {}).get("end")
+            if start_str and end_str:
+                try:
+                    start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                    end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                    duration = max(0.0, (end_dt - start_dt).total_seconds() / 60.0)
+                    entry_id = e.get("id")
+                    matched_report = next(
+                        (r for r in subj_reports if r.get("clockify_time_entry_id") == entry_id), None
+                    )
+                    conc = matched_report.get("study_quality") if matched_report else None
+                    sessions.append({
+                        "date": start_dt.strftime("%Y-%m-%d"),
+                        "weekday": WEEKDAYS.get(start_dt.weekday(), ""),
+                        "duration_minutes": round(duration),
+                        "concentration": conc,
+                        "start_hour": start_dt.hour
+                    })
+                except Exception:
+                    pass
+
+        total_hours = round(sum(s["duration_minutes"] for s in sessions) / 60.0, 2)
+
+        quality_list = [s["concentration"] for s in sessions if s.get("concentration") is not None]
+        if not quality_list:
+            quality_list = [r.get("study_quality") for r in subj_reports if r.get("study_quality") is not None]
+        avg_concentration = round(sum(quality_list) / len(quality_list), 1) if quality_list else None
+
+        tasks = []
+        try:
+            tasks = await self.db_service.get_tasks_by_subject(subject_id)
+        except Exception:
+            pass
+
+        now_utc = datetime.now(timezone.utc)
+        seven_days_ago = now_utc - timedelta(days=7)
+        fourteen_days_ago = now_utc - timedelta(days=14)
+        today_str = now_utc.strftime("%Y-%m-%d")
+
+        tasks_completed = sum(1 for t in tasks if str(t.get("status", "")).upper() == "COMPLETED")
+        tasks_pending = sum(1 for t in tasks if str(t.get("status", "")).upper() not in ["COMPLETED"])
+        overdue = [t for t in tasks if t.get("due_date") and t["due_date"][:10] < today_str
+                   and str(t.get("status", "")).upper() != "COMPLETED"]
+
+        current_week_mins = 0.0
+        prev_week_mins = 0.0
+        for s in sessions:
+            try:
+                s_dt = datetime.fromisoformat(s["date"] + "T00:00:00+00:00")
+                dur = s["duration_minutes"]
+                if s_dt >= seven_days_ago:
+                    current_week_mins += dur
+                elif s_dt >= fourteen_days_ago:
+                    prev_week_mins += dur
+            except Exception:
+                pass
+
+        curr_week_hrs = round(current_week_mins / 60.0, 1)
+        prev_week_hrs = round(prev_week_mins / 60.0, 1)
+        if prev_week_hrs > 0:
+            change_pct = round(((curr_week_hrs - prev_week_hrs) / prev_week_hrs) * 100, 1)
+        else:
+            change_pct = 100.0 if curr_week_hrs > 0 else 0.0
+
+        lines = [f"ASIGNATURA: {s_name}"]
+        lines.append(f"  - Horas totales registradas: {total_hours}h")
+        lines.append(f"  - Horas esta semana: {curr_week_hrs}h | Semana anterior: {prev_week_hrs}h | Cambio: {change_pct:+.1f}%")
+        if avg_concentration is not None:
+            lines.append(f"  - Concentración media: {avg_concentration}/5")
+        lines.append(f"  - Tareas: {tasks_completed} completadas, {tasks_pending} pendientes")
+        if overdue:
+            lines.append(f"  - Tareas vencidas sin completar: {len(overdue)} ({', '.join(t.get('title','') for t in overdue[:3])})")
+        lines.append(f"  - Número total de sesiones de estudio: {len(sessions)}")
+        formatted_text = "\n".join(lines)
+
+        return {
+            "subject_name": s_name,
+            "hours": total_hours,
+            "avg_concentration": avg_concentration,
+            "tasks_completed": tasks_completed,
+            "tasks_pending": tasks_pending,
+            "overdue_tasks_count": len(overdue),
+            "overdue_tasks": [t.get("title", "") for t in overdue],
+            "weekly_comparison": {
+                "current_week_hours": curr_week_hrs,
+                "previous_week_hours": prev_week_hrs,
+                "change_pct": change_pct
+            },
+            "sessions": sessions[-20:],
+            "formatted_text": formatted_text
+        }
+
+    async def get_course_global_analytics(self, course_id: str) -> list:
+        """
+        Calcula una lista con las estadísticas de todos los estudiantes matriculados en un curso.
+        Incluye: tiempo dedicado (horas), concentración media, nota (grade) y sueño promedio.
+        """
+        course = await self.db_service.get_course_by_id(course_id)
+        if not course:
+            return []
+            
+        students = course.get("student_ids", [])
+        if not students:
+            return []
+            
+        global_stats = []
+        for student_id in students:
+            try:
+                # 1. Información del estudiante
+                user = await self.db_service.get_user_by_id(student_id)
+                name = user.get("name", "Estudiante") if user else "Estudiante"
+                
+                # 2. Subject de este curso
+                subjects = await self.db_service.get_subjects_by_course_and_user(course_id, student_id)
+                if not subjects:
+                    continue
+                subject = subjects[0]
+                grade = subject.get("grade")
+                
+                # 3. Analíticas de la asignatura (horas, concentración)
+                student_analytics = await self.get_course_student_analytics(student_id, str(subject["_id"]), days=0)
+                hours = student_analytics.get("hours", 0)
+                concentration = student_analytics.get("avg_concentration")
+                
+                # 4. Promedio de sueño (Wellbeing)
+                wellbeing = await self.get_wellbeing_analytics(student_id, days=30)
+                sleep = wellbeing.get("avg_sleep_hours")
+                
+                global_stats.append({
+                    "student_id": student_id,
+                    "name": name,
+                    "hours": hours,
+                    "grade": grade,
+                    "avg_concentration": concentration,
+                    "avg_sleep": sleep
+                })
+            except Exception as e:
+                print(f"[ANALYTICS] Error obteniendo global stats para {student_id}: {e}")
+                
+        return global_stats
