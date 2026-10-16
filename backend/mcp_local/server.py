@@ -1,4 +1,3 @@
- 
 import os
 import sys
 import json
@@ -964,8 +963,8 @@ async def get_tasks(user_id: str, subject_name: Optional[str] = None, include_co
     - Clasifica e indica su estado diferenciando claramente entre ACTIVAS, PENDIENTES y COMPLETADAS (usando los emojis del sistema de formato de tablas)
     - Menciona la fecha de vencimiento y prioridad si existen
     - IMPORTANTE: Cada tarea incluye el campo `overdue` (true/false) calculado por el servidor.
-      Usa ÚNICAMENTE ese campo para decidir si poner la fecha en rojo (!DD/MM/YYYY!).
-      Si overdue=false, NUNCA pongas la fecha en rojo, independientemente de la fecha que veas.
+      Usa ÚNICAMENTE ese campo para decidir si marcar la fecha como vencida ({{expired:DD/MM/YYYY}}).
+      Si overdue=false, NUNCA uses {{expired:...}}, independientemente de la fecha que veas.
     """
     try:
         print(f"[MCP TOOL: GET_TASKS] user_id={user_id}, subject_name='{subject_name}', priorities={priorities}", file=sys.stderr, flush=True)
@@ -1184,8 +1183,8 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
             # Permitir borrar la prioridad pasando 0
             updates["priority"] = None if priority == 0 else priority
         if tags is not None:
-            # Normalizar: sin duplicados, sin espacios en los extremos
-            updates["tags"] = list(dict.fromkeys(t.strip() for t in tags if t.strip()))
+            # Normalizar: minúsculas, sin duplicados, sin espacios en los extremos
+            updates["tags"] = await db_service.canonicalize_tags(user_id, tags)
 
         if not updates:
             return "No me has indicado qué quieres cambiar de la tarea."

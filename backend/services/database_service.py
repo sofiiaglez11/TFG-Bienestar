@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import sys
 import secrets
+import unicodedata
 from typing import Optional
  
  
@@ -29,8 +30,7 @@ class DatabaseService:
         self.study_reports = self.db["study_reports"]
         self.study_plans = self.db["study_plans"]
         self.courses = self.db["courses"]
-
-
+        self.user_tags = self.db["user_tags"]
 
     async def ensure_indexes(self):
         """
@@ -43,13 +43,14 @@ class DatabaseService:
         await self.tasks.create_index([("parent_task_id", 1)])
         
         await self.tasks.create_index("tags")
+        await self.user_tags.create_index([("user_id", 1), ("name", 1)], unique=True)
         # await self.deadlines.create_index([("user_id", 1), ("date", 1)])
         await self.periods.create_index([("user_id", 1)])
         await self.history.create_index([("user_id", 1), ("timestamp", -1)])
         await self.wellbeing_entries.create_index([("user_id", 1), ("date", -1)])
         await self.study_reports.create_index([("user_id", 1), ("timestamp", -1)])
-        await self.study_reports.create_index("clockify_time_entry_id")
         await self.study_plans.create_index([("user_id", 1), ("status", 1)])
+        await self.users.create_index("share_code", unique=True, sparse=True)
         await self.courses.create_index("enrollment_code", unique=True)
         await self.courses.create_index("teacher_ids")
         await self.courses.create_index("student_ids")
@@ -260,12 +261,25 @@ class DatabaseService:
         if existing and existing.get("share_code"):
             return existing["share_code"]
 
-        code = secrets.token_urlsafe(6).upper()  # ej: "A3BX9K"
+        for _ in range(10):
+            code = secrets.token_urlsafe(6).upper()
+            # Asegurar que ningún otro usuario tiene ya este código asignado
+            in_use = await self.users.find_one({"share_code": code})
+            if not in_use:
+                await self.users.update_one(
+                    {"_id": ObjectId(user_id)},
+                    {"$set": {"share_code": code}}
+                )
+                return code
+
+        # Respaldo con mayor entropía en caso extremo de colisiones
+        code = secrets.token_hex(4).upper()
         await self.users.update_one(
             {"_id": ObjectId(user_id)},
             {"$set": {"share_code": code}}
         )
         return code
+
 
     async def get_user_by_share_code(self, code: str) -> dict | None:
         return await self.users.find_one({"share_code": code.upper()})
@@ -274,6 +288,12 @@ class DatabaseService:
         await self.users.update_one(
             {"_id": ObjectId(user_id)},
             {"$addToSet": {"followed_users": followed_user_id}}
+        )
+
+    async def remove_followed_user(self, user_id: str, followed_user_id: str) -> None:
+        await self.users.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$pull": {"followed_users": followed_user_id}}
         )
 
     async def get_followed_users(self, user_id: str) -> list:
@@ -288,6 +308,26 @@ class DatabaseService:
                     "email": fu.get("email", "")
                 })
         return result
+
+    async def get_followers(self, user_id: str) -> list:
+        """Obtiene la lista de usuarios que tienen a user_id en su lista de followed_users."""
+        cursor = self.users.find({"followed_users": user_id})
+        followers = []
+        async for u in cursor:
+            followers.append({
+                "user_id": str(u["_id"]),
+                "name": u.get("name", "Estudiante"),
+                "email": u.get("email", "")
+            })
+        return followers
+
+    async def remove_follower(self, user_id: str, follower_user_id: str) -> None:
+        """Revoca el acceso quitando user_id de la lista followed_users del seguidor."""
+        await self.users.update_one(
+            {"_id": ObjectId(follower_user_id)},
+            {"$pull": {"followed_users": user_id}}
+        )
+
  
  
     ############################################################################
@@ -469,7 +509,7 @@ class DatabaseService:
             "type": type,
             "status": "PENDING", # "PENDING", "ACTIVE", "COMPLETED"
             "priority": priority,
-            "tags": tags if tags is not None else [],
+            "tags": await self.canonicalize_tags(user_id, tags),
             "created_at": now_iso,
             "completed_at": None
         }
@@ -573,16 +613,86 @@ class DatabaseService:
 
 
 
+    @staticmethod
+    def _norm_tag(name: str) -> str:
+        """Normaliza el nombre de una etiqueta: sin espacios en los extremos y en minúsculas."""
+        return (name or "").strip().lower()
+
+    @staticmethod
+    def _fold_tag(name: str) -> str:
+        """Clave de comparación: minúsculas y sin tildes (conserva la ñ). 'Estadísticas' -> 'estadisticas'."""
+        out = []
+        for c in unicodedata.normalize("NFD", (name or "").strip().lower()):
+            if unicodedata.category(c) == "Mn" and not (c == "\u0303" and out and out[-1] == "n"):
+                continue
+            out.append(c)
+        return unicodedata.normalize("NFC", "".join(out))
+
+    @classmethod
+    def _pick_canonical(cls, names: list) -> str:
+        """Entre variantes de la misma etiqueta, prefiere la que lleva tildes (la ortográficamente correcta)."""
+        cands = sorted({cls._norm_tag(n) for n in names})
+        with_accents = [c for c in cands if c != cls._fold_tag(c)]
+        return (with_accents or cands)[0]
+
+    async def canonicalize_tags(self, user_id: str, tags: list | None) -> list:
+        """
+        Normaliza una lista de etiquetas y, si ya existe una variante equivalente (misma etiqueta
+        sin tildes / con otras mayúsculas) entre las del usuario, reutiliza el nombre existente.
+        """
+        incoming = self.normalize_tags(tags)
+        if not incoming:
+            return []
+        existing = [t["name"] for t in await self.get_all_tags(user_id)]
+        groups = {}
+        for n in existing:
+            groups.setdefault(self._fold_tag(n), []).append(n)
+        canon = {k: self._pick_canonical(v) for k, v in groups.items()}
+        return list(dict.fromkeys(canon.get(self._fold_tag(t), t) for t in incoming))
+
+    async def merge_duplicate_tags(self, user_id: str) -> list:
+        """
+        Fusiona etiquetas duplicadas del usuario (distintas solo en mayúsculas o tildes) en una sola,
+        actualizando tareas y colores. Devuelve [{'from': ..., 'to': ...}].
+        """
+        names = [t["name"] for t in await self.get_all_tags(user_id)]
+        groups = {}
+        for n in names:
+            groups.setdefault(self._fold_tag(n), []).append(n)
+        merged = []
+        for group in groups.values():
+            if len(group) < 2:
+                continue
+            canonical = self._pick_canonical(group)
+            for n in group:
+                if n != canonical:
+                    await self.rename_tag(user_id, n, canonical)
+                    merged.append({"from": n, "to": canonical})
+        return merged
+
+    @classmethod
+    def normalize_tags(cls, tags: list | None) -> list:
+        """Normaliza una lista de etiquetas: minúsculas, sin vacías y sin duplicados (conserva el orden)."""
+        if not tags:
+            return []
+        return list(dict.fromkeys(n for n in (cls._norm_tag(t) for t in tags) if n))
+
     async def get_tasks_by_tag(self, user_id: str, tag: str) -> list:
         """Devuelve todas las tareas del usuario que contengan el tag indicado."""
-        cursor = self.tasks.find({"user_id": user_id, "tags": tag})
+        cursor = self.tasks.find({"user_id": user_id, "tags": self._norm_tag(tag)})
         tasks = await cursor.to_list(200)
         for t in tasks:
             t["_id"] = str(t["_id"])
         return tasks
 
     async def get_all_tags(self, user_id: str) -> list:
-        """Devuelve la lista de tags únicos usados por el usuario en sus tareas."""
+        """Devuelve la lista de tags (objetos dict con 'name' y 'color') del usuario."""
+        # 1. Obtener tags configurados por el usuario
+        cursor = self.user_tags.find({"user_id": user_id})
+        saved_tags = await cursor.to_list(500)
+        tag_dict = {t["name"]: t.get("color") for t in saved_tags if "name" in t}
+
+        # 2. Buscar tags usados en tareas que aún no estén registrados explícitamente
         pipeline = [
             {"$match": {"user_id": user_id, "tags": {"$exists": True, "$ne": []}}},
             {"$unwind": "$tags"},
@@ -590,7 +700,66 @@ class DatabaseService:
             {"$sort": {"_id": 1}}
         ]
         result = await self.tasks.aggregate(pipeline).to_list(200)
-        return [doc["_id"] for doc in result]
+        task_tags = [doc["_id"] for doc in result]
+
+        # Combinar
+        all_tag_names = list(set(list(tag_dict.keys()) + task_tags))
+        all_tag_names.sort()
+
+        return [
+            {
+                "name": name,
+                "color": tag_dict.get(name) # None si no tiene color asignado explícitamente
+            }
+            for name in all_tag_names
+        ]
+
+    async def upsert_user_tag(self, user_id: str, name: str, color: str) -> dict:
+        """Guarda o actualiza la configuración de color de una etiqueta para el usuario."""
+        clean_name = self._norm_tag(name)
+        if not clean_name:
+            raise ValueError("El nombre de la etiqueta no puede estar vacío")
+            
+        doc = {
+            "user_id": user_id,
+            "name": clean_name,
+            "color": color
+        }
+        await self.user_tags.update_one(
+            {"user_id": user_id, "name": clean_name},
+            {"$set": doc},
+            upsert=True
+        )
+        return doc
+
+    async def delete_user_tag(self, user_id: str, name: str):
+        """Elimina el color guardado de una etiqueta del usuario."""
+        await self.user_tags.delete_one({"user_id": user_id, "name": self._norm_tag(name)})
+
+    async def rename_tag(self, user_id: str, old_name: str, new_name: str) -> str:
+        """
+        Renombra una etiqueta en todas las tareas del usuario y mueve su color.
+        Si ya existía una etiqueta con el nombre nuevo, se fusionan (se conserva el color de la nueva).
+        Devuelve el nombre normalizado final.
+        """
+        old = (old_name or "").strip()   # sin lower(): puede haber etiquetas antiguas con mayúsculas
+        new = self._norm_tag(new_name)
+        if not old or not new:
+            raise ValueError("El nombre de la etiqueta no puede estar vacío")
+        if old == new:
+            return new
+
+        # addToSet + pull en dos pasos para no duplicar si la tarea ya tenía la etiqueta nueva
+        await self.tasks.update_many({"user_id": user_id, "tags": old}, {"$addToSet": {"tags": new}})
+        await self.tasks.update_many({"user_id": user_id, "tags": old}, {"$pull": {"tags": old}})
+
+        old_doc = await self.user_tags.find_one({"user_id": user_id, "name": old})
+        if old_doc:
+            if await self.user_tags.find_one({"user_id": user_id, "name": new}):
+                await self.user_tags.delete_one({"_id": old_doc["_id"]})
+            else:
+                await self.user_tags.update_one({"_id": old_doc["_id"]}, {"$set": {"name": new}})
+        return new
 
 
     async def get_chronological_events(self, user_id: str, subject_id: str = None) -> list:

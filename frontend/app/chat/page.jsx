@@ -8,10 +8,10 @@ import SettingsModal from "../components/SettingsModal";
 import AnalyticsDashboard from "../components/AnalyticsDashboard";
 // import CoursesDashboard from "../components/CoursesDashboard";
 import CoursesDashboard from "../components/courses/CoursesDashboard";
+import { clearTagColors } from "../utils/tagColorStore";
 
 
-import { MessageSquare, BarChart2, GraduationCap, User, Settings, LogOut } from "lucide-react";
-
+import { MessageSquare, BarChart2, GraduationCap, User, Settings, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 export default function ChatPage() {
@@ -42,6 +42,7 @@ export default function ChatPage() {
     localStorage.removeItem("token");
     localStorage.removeItem("userName");
     localStorage.removeItem("userEmail");
+    clearTagColors(); // evita que el siguiente usuario vea los colores del anterior
     setIsAuthenticated(false);
     router.push("/login");
   };
@@ -271,6 +272,7 @@ export default function ChatPage() {
     localStorage.removeItem("token");
     localStorage.removeItem("userName");
     localStorage.removeItem("userEmail");
+    clearTagColors(); // evita que el siguiente usuario vea los colores del anterior
     setIsAuthenticated(false);
     router.push("/login");
   };
@@ -313,11 +315,19 @@ export default function ChatPage() {
                     <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>Académico & Personal</div>
                   </div>
                 </div>
-                <button onClick={() => setIsSidebarCollapsed(true)} style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", fontSize: "18px", padding: "6px" }}>◀</button>
-              </>
+                <button
+                  onClick={() => setIsSidebarCollapsed(true)}
+                  style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", padding: "6px", display: "flex", alignItems: "center" }}
+                >
+                  <ChevronLeft size={18} strokeWidth={2.5} />
+                </button>              </>
             ) : (
-              <button onClick={() => setIsSidebarCollapsed(false)} style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", fontSize: "18px", padding: "6px", width: "100%" }}>▶</button>
-            )}
+              <button
+                onClick={() => setIsSidebarCollapsed(false)}
+                style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", padding: "6px", width: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}
+              >
+                <ChevronRight size={18} strokeWidth={2.5} />
+              </button>)}
           </div>
 
           {/* Menú Superior */}

@@ -1,18 +1,19 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Copy, Check, Trash2, UserX, Shield, Clock, Settings } from "lucide-react";
+import { X, Copy, Check, Trash2, UserX, Shield, Clock, Settings, Tag as TagIcon, Palette } from "lucide-react";
 import ClockifyConfigPanel from "./ClockifyConfigPanel";
+import TagBadge from "./TagBadge";
+import TagColorPickerModal from "./TagColorPickerModal";
+import { setTagColorLocal, refreshTagColors } from "../utils/tagColorStore";
 
 const RAW_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 const BACKEND_URL = RAW_BACKEND_URL.replace(/\/+$/, "");
 
 export default function SettingsModal({ isOpen, onClose, initialTab = "clockify", onSuccess, onFollowChange }) {
-  const [activeTab, setActiveTab] = useState(initialTab); // "clockify" | "privacy"
+  const [activeTab, setActiveTab] = useState(initialTab); // "clockify" | "privacy" | "tags"
 
-  // Reflejo del estado de Clockify, reportado por ClockifyConfigPanel (que es
-  // quien realmente lo consulta) para poder condicionar la pestaña de
-  // Permisos sin duplicar el fetch aquí.
+  // Reflejo del estado de Clockify, reportado por ClockifyConfigPanel
   const [clockifyStatus, setClockifyStatus] = useState(null);
 
   // Estado Permisos y Compartir
@@ -24,12 +25,84 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
   const [followers, setFollowers] = useState([]);
   const [privacyLoading, setPrivacyLoading] = useState(false);
 
+  // Estado Etiquetas / Tags
+  const [tags, setTags] = useState([]);
+  const [tagsLoading, setTagsLoading] = useState(false);
+  const [selectedTagForColor, setSelectedTagForColor] = useState(null);
+  const [mergeMessage, setMergeMessage] = useState("");
+
   useEffect(() => {
     if (isOpen) {
       setActiveTab(initialTab);
       loadPrivacyData();
+      loadTagsData();
     }
   }, [isOpen, initialTab]);
+
+  const loadTagsData = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    setTagsLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/tags`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTags(data.tags || []);
+      }
+    } catch (err) {
+      console.error("Error al cargar etiquetas:", err);
+    } finally {
+      setTagsLoading(false);
+    }
+  };
+
+  const handleUpdateTagColor = async (tagName, colorHex) => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/tags`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ name: tagName, color: colorHex })
+      });
+      if (!res.ok) throw new Error(`No se pudo guardar el color (HTTP ${res.status})`);
+      setTags((prev) =>
+        prev.map((t) => (t.name.toLowerCase() === tagName.trim().toLowerCase() ? { ...t, color: colorHex } : t))
+      );
+      setTagColorLocal(tagName, colorHex); // actualiza chat y demás vistas al instante
+    } catch (err) {
+      console.error("Error al actualizar color de la etiqueta:", err);
+      throw err; // el modal de color no se cierra si falla
+    }
+  };
+
+  const handleMergeDuplicateTags = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/tags/merge-duplicates`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMergeMessage(
+          data.merged?.length
+            ? `Se han fusionado ${data.merged.length} etiqueta(s) duplicada(s).`
+            : "No hay etiquetas duplicadas."
+        );
+        await loadTagsData();
+        await refreshTagColors();
+      }
+    } catch (err) {
+      console.error("Error al fusionar etiquetas duplicadas:", err);
+    }
+  };
 
   // --- MÉTODOS PRIVACIDAD Y PERMISOS ---
   const loadPrivacyData = async () => {
@@ -303,6 +376,26 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
             >
               <Shield size={16} /> Permisos y Accesos
             </button>
+
+            <button
+              onClick={() => setActiveTab("tags")}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                padding: "10px 12px",
+                borderRadius: "8px",
+                border: "none",
+                backgroundColor: activeTab === "tags" ? "var(--pressed-button-bg)" : "transparent",
+                color: "var(--text-primary)",
+                fontWeight: activeTab === "tags" ? "600" : "500",
+                fontSize: "13px",
+                cursor: "pointer",
+                textAlign: "left"
+              }}
+            >
+              <TagIcon size={16} /> Etiquetas y Colores
+            </button>
           </div>
 
           {/* Área de Contenido */}
@@ -354,7 +447,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
                           letterSpacing: "2px"
                         }}
                       >
-                        {myShareCode || "—"}
+                        {myShareCode || (privacyLoading ? "Cargando..." : "—")}
                       </code>
                       <button
                         onClick={handleCopyCode}
@@ -374,23 +467,6 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
                         {copied ? <Check size={14} color="#16a34a" /> : <Copy size={14} />}
                         {copied ? "Copiado" : "Copiar"}
                       </button>
-                      {!myShareCode && (
-                        <button
-                          onClick={handleGenerateCode}
-                          style={{
-                            padding: "6px 12px",
-                            borderRadius: "6px",
-                            border: "none",
-                            backgroundColor: "var(--brand)",
-                            color: "#fff",
-                            cursor: "pointer",
-                            fontSize: "12px",
-                            fontWeight: "600"
-                          }}
-                        >
-                          Generar código
-                        </button>
-                      )}
                     </div>
                   )}
                 </div>
@@ -568,12 +644,88 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
                     </div>
                   )}
                 </div>
+              </div>
+            )}
 
+            {/* PESTAÑA ETIQUETAS Y COLORES */}
+            {activeTab === "tags" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                <div>
+                  <h4 style={{ margin: "0 0 6px 0", fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <Palette size={18} /> Personalización de Etiquetas
+                  </h4>
+                  <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary)" }}>
+                    Haz clic sobre cualquier etiqueta para elegir su color de la paleta. Si no seleccionas ninguno, se asignará un color armónico por defecto.
+                  </p>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "10px" }}>
+                    <button
+                      onClick={handleMergeDuplicateTags}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border)",
+                        background: "transparent",
+                        color: "var(--text-primary)",
+                        fontSize: "12px",
+                        fontWeight: "600",
+                        cursor: "pointer"
+                      }}
+                    >
+                      Fusionar duplicadas
+                    </button>
+                    {mergeMessage && (
+                      <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>{mergeMessage}</span>
+                    )}
+                  </div>
+                </div>
+
+                {tagsLoading ? (
+                  <div style={{ fontSize: "13px", color: "var(--text-secondary)" }}>Cargando etiquetas...</div>
+                ) : tags.length === 0 ? (
+                  <div style={{
+                    padding: "24px",
+                    textAlign: "center",
+                    backgroundColor: "var(--bg-page)",
+                    borderRadius: "12px",
+                    border: "1px dashed var(--border)",
+                    color: "var(--text-secondary)",
+                    fontSize: "13px"
+                  }}>
+                    No se han encontrado etiquetas. Se irán registrando automáticamente conforme añadas tags en tus tareas o en las respuestas de la IA.
+                  </div>
+                ) : (
+                  <div style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                    padding: "18px",
+                    backgroundColor: "var(--bg-page)",
+                    borderRadius: "12px",
+                    border: "1px solid var(--border)"
+                  }}>
+                    {tags.map((t) => (
+                      <TagBadge
+                        key={t.name}
+                        name={t.name}
+                        color={t.color}
+                        onClick={() => setSelectedTagForColor(t)}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
       </div>
+
+      <TagColorPickerModal
+        isOpen={Boolean(selectedTagForColor)}
+        tag={selectedTagForColor?.name}
+        currentColor={selectedTagForColor?.color}
+        onClose={() => setSelectedTagForColor(null)}
+        onSelectColor={handleUpdateTagColor}
+      />
     </div>
   );
 }

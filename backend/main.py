@@ -2,6 +2,7 @@ from asyncio import queues
 import asyncio
 import os
 import json
+import re
 from datetime import datetime, timezone
 from bson import ObjectId
 from fastapi import FastAPI, HTTPException
@@ -113,6 +114,13 @@ ACADEMIC_PROMPT = (
     " usa get_tasks omitiendo subject_name (o subject_name=None) y pasando la lista de prioridades deseada (ej: priorities=[1, 2]). "
     "NUNCA hagas múltiples llamadas individuales a get_tasks por cada asignatura cuando el usuario haga una pregunta global.\n"
 
+    "FORMATO DE ETIQUETAS Y FECHAS VENCIDAS (APLICA EN CUALQUIER PARTE DE LA RESPUESTA):\n"
+    "Siempre que menciones una etiqueta de una tarea, ya sea en una tabla, una lista, un párrafo o al confirmar una acción, escríbela como {{tag:nombre}} "
+    "(un marcador por etiqueta, con el nombre exacto que devuelve el sistema y sin '#'). "
+    "Siempre que menciones la fecha de vencimiento de una tarea cuyo campo `overdue` sea true, escríbela como {{expired:DD/MM/YYYY}}. "
+    "NUNCA uses corchetes ni signos de exclamación para esto. Estos marcadores se muestran al usuario como etiquetas de color y fechas en rojo, "
+    "así que no los expliques ni los menciones.\n\n"
+
     "FORMATO OBLIGATORIO DE TABLAS DE TAREAS:\n"
     "Al responder al usuario para mostrar sus tareas, usa SIEMPRE tablas Markdown con EXACTAMENTE estas 5 columnas y en este orden estricto:\n"
     "| Estado | Prioridad | Tarea | Fecha | Etiquetas |\n"
@@ -123,21 +131,21 @@ ACADEMIC_PROMPT = (
     # "   - ✅ (para tareas completadas)\n"
 
     "1. Columna 'Estado': Usa ÚNICAMENTE una palabra para determinar el estado de una tarea, indicandolas como: 'PENDIENTE', 'ACTIVA' o 'COMPLETADA'. Por defecto, si el usuario no indica nada, pon PENDIENTE."
-    "2. Columna 'Prioridad': Escribe el número entre corchetes rectos, ej: [1], [2], [3]. Si no tiene prioridad, escribe '-'.\n"
+    "2. Columna 'Prioridad': Escribe solo el número (1 a 5), sin corchetes ni ningún otro símbolo, ej: 1, 2, 3. Si no tiene prioridad, escribe '-'.\n"
 "   3. Columna 'Tarea': Escribe solo el nombre de la tarea. Si necesitas añadir una descripción aclaratoria, escríbela en la línea de abajo dentro de la misma celda usando un salto de línea normal. NUNCA uses etiquetas HTML como <br> ni <br/>. Pon la descripción entre paréntesis y en cursiva\n"    
     "4. Columna 'Fecha':\n"
     "   - Formato de fecha: usa SIEMPRE el formato DD/MM/YYYY (ej: 10/03/2026, o DD/MM/YYYY HH:MM si tiene hora).\n"
-    "   - Resaltado en rojo (!DD/MM/YYYY!): Pon la fecha entre signos de exclamación !DD/MM/YYYY! ÚNICAMENTE si el campo `overdue` de la tarea es true. Si overdue es false, NUNCA uses exclamaciones aunque la fecha parezca pasada.\n"
-    "   - Tareas completadas o no vencidas: Si la tarea ya se ha completado (✅) o si overdue=false, NO la pongas en rojo ni uses signos de exclamación; escríbela de forma normal: DD/MM/YYYY.\n"
+    "   - Fecha vencida: escribe la fecha como {{expired:DD/MM/YYYY}} ÚNICAMENTE si el campo `overdue` de la tarea es true. Si overdue es false, NUNCA uses ese formato aunque la fecha parezca pasada.\n"
+    "   - Tareas completadas o no vencidas: Si la tarea ya se ha completado (✅) o si overdue=false, NO uses {{expired:...}}; escríbela de forma normal: DD/MM/YYYY.\n"
     "   - Si no tiene fecha de vencimiento, escribe '-'.\n"
-"   5. Columna 'Etiquetas': Escribe CADA etiqueta en su propio par de corchetes rectos independientes y separados por espacios, ej: [backend] [frontend]. NUNCA agrupes varias etiquetas en el mismo corchete separado por comas como [backend, frontend]. Si no tiene etiquetas, escribe '-'.\n"    "6. Organización: Si muestras varias asignaturas, crea un título en negrita por cada asignatura (ej: **Matemáticas**) y debajo su respectiva tabla.\n"
+"   5. Columna 'Etiquetas': Escribe CADA etiqueta con su propio marcador {{tag:nombre}}, separados por espacios, ej: {{tag:backend}} {{tag:frontend}}. NUNCA agrupes varias etiquetas en un mismo marcador. Si no tiene etiquetas, escribe '-'.\n"    "6. Organización: Si muestras varias asignaturas, crea un título en negrita por cada asignatura (ej: **Matemáticas**) y debajo su respectiva tabla.\n"
     "7. Cuándo mostrar completadas: Si el usuario no especifica, muéstrale las activas y pendientes; si pide ver todas o completadas, incluye también las completadas.\n\n"
     "Ejemplo de formato requerido:\n"
     "| Estado | Prioridad | Tarea | Fecha | Etiquetas |\n"
     "| :---: | :---: | :--- | :---: | :--- |\n"
-    "| ACTIVA | [1] | Entrega Proyecto Final | !10/03/2026! | [Práctica]  |\n"
-    "| PENDIENTE | [2] | ↳ Redactar conclusiones | 20/06/2026 | [Memoria] [Teoría] |\n"
-    "| COMPLETADA | [3] | Repaso de teoría | 15/01/2026 | [Teoría] |\n\n"
+    "| ACTIVA | 1 | Entrega Proyecto Final | {{expired:10/03/2026}} | {{tag:práctica}} |\n"
+    "| PENDIENTE | 2 | ↳ Redactar conclusiones | 20/06/2026 | {{tag:memoria}} {{tag:teoría}} |\n"
+    "| COMPLETADA | 3 | Repaso de teoría | 15/01/2026 | {{tag:teoría}} |\n\n"
 
     # "Al final de CADA tabla de tareas añade EXACTAMENTE esta leyenda, una sola vez y sin modificarla: (⚡ En progreso, ⏳ Pendiente, ✅ Completada). NUNCA la pongas dos veces ni uses un texto diferente.\n"
     # "Tampoco menciones que las fechas vencidas están entre exclamaciones, ya que eso el usuario no lo ve (las ve de color rojo).\n"
@@ -163,9 +171,11 @@ ACADEMIC_PROMPT = (
     "IMPORTANTE: Guarda proactivamente estos datos si el usuario los menciona de pasada, aunque no lo haya pedido explícitamente. Por ejemplo, si dice 'Tengo Matemáticas, me encanta', crea la asignatura y guarda 'me encanta' como anotación directamente.\n"
     
     "REGLA DE ESTADOS DE TAREAS Y CRONÓMETROS:\n"
-    "Las tareas pueden estar en 3 estados: ACTIVE (representada en tabla con ⚡), PENDING (con ⏳) y COMPLETED (con ✅).\n"
+    "Las tareas pueden estar en 3 estados: ACTIVE (ACTIVA), PENDING (PENTIENTE)  y COMPLETED (COMPLETADA).\n"
+
+    # "Las tareas pueden estar en 3 estados: ACTIVE (representada en tabla con ⚡), PENDING (con ⏳) y COMPLETED (con ✅).\n"
     "Cuando el usuario indique que va a ponerse a trabajar o estudiar en una tarea (ej: 'estoy trabajando en la tarea X', 'voy a hacer X ahora', 'empieza a contar tiempo para X'): "
-    "debes usar start_timer especificando la asignatura (subject_name) y el título de la tarea (task_title). Esto iniciará el cronómetro en tiempo real y marcará automáticamente la tarea como ACTIVE ⚡.\n"
+    "debes usar start_timer especificando la asignatura (subject_name) y el título de la tarea (task_title). Esto iniciará el cronómetro en tiempo real y marcará automáticamente la tarea como ACTIVE .\n"
     "Además, para guardar un registro de tiempo, primero tienes que revisar"
     "REGLA DE INFORME DE SESIÓN (STUDY REPORT):\n"
     "Cuando registres una sesión de estudio mediante cualquiera de estas acciones:\n"
@@ -584,6 +594,9 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
 
         date_context = get_datetime_context()
         timer_context = await get_timer_context(user_id, db_service)
+        # Limpiar la caché de Clockify al inicio de cada petición de chat
+        # para no mezclar datos de usuarios distintos ni peticiones consecutivas.
+        analytics_service.clear_clockify_cache()
         daily_context = await get_daily_check_context(user_id, db_service, analytics_service)
         message_with_context = request.message + date_context + timer_context + daily_context
 
@@ -891,7 +904,10 @@ async def get_shared_analytics(
 @app.get("/api/user/share-code")
 async def get_my_share_code(user_id: str = Depends(get_current_user_id)):
     user = await db_service.get_user_by_id(user_id)
-    return {"code": user.get("share_code")}
+    code = user.get("share_code") if user else None
+    if not code:
+        code = await db_service.generate_share_code(user_id)
+    return {"code": code}
 
 
 @app.delete("/api/share/followed/{target_user_id}")
@@ -925,6 +941,64 @@ async def revoke_follower(
     """
     await db_service.remove_follower(user_id, follower_id)
     return {"status": "ok", "message": "Acceso revocado correctamente."}
+
+
+
+##################################################################
+# TAGS ENDPOINTS
+##################################################################
+
+HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+class TagColorRequest(BaseModel):
+    name: str
+    color: Optional[str] = None
+
+class TagRenameRequest(BaseModel):
+    old_name: str
+    new_name: str
+
+
+@app.get("/api/tags")
+async def get_tags(user_id: str = Depends(get_current_user_id)):
+    """Lista de etiquetas del usuario: [{name, color|None}], unión de user_tags y tags usados en tareas."""
+    return {"tags": await db_service.get_all_tags(user_id)}
+
+
+@app.post("/api/tags")
+async def set_tag_color(req: TagColorRequest, user_id: str = Depends(get_current_user_id)):
+    """Crea o actualiza el color de una etiqueta."""
+    if req.color is not None and not HEX_COLOR_RE.match(req.color):
+        raise HTTPException(status_code=400, detail="Color inválido (se espera formato #RRGGBB)")
+    try:
+        doc = await db_service.upsert_user_tag(user_id, req.name, req.color)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "tag": {"name": doc["name"], "color": doc["color"]}}
+
+
+@app.delete("/api/tags")
+async def delete_tag_color(name: str, user_id: str = Depends(get_current_user_id)):
+    """Quita el color guardado de una etiqueta (la etiqueta sigue existiendo en las tareas que la usen)."""
+    await db_service.delete_user_tag(user_id, name)
+    return {"status": "ok"}
+
+
+@app.post("/api/tags/merge-duplicates")
+async def merge_duplicate_tags(user_id: str = Depends(get_current_user_id)):
+    """Fusiona etiquetas duplicadas (mayúsculas/tildes) del usuario en tareas y colores."""
+    merged = await db_service.merge_duplicate_tags(user_id)
+    return {"status": "ok", "merged": merged}
+
+
+@app.put("/api/tags/rename")
+async def rename_tag(req: TagRenameRequest, user_id: str = Depends(get_current_user_id)):
+    """Renombra una etiqueta en todas las tareas del usuario y conserva su color."""
+    try:
+        new_name = await db_service.rename_tag(user_id, req.old_name, req.new_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "name": new_name}
 
 
 

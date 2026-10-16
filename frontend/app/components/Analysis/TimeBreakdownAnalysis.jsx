@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ListChecks, Tag } from "lucide-react";
+import { ListChecks } from "lucide-react";
+import TagBadge from "../TagBadge";
 
 export default function TimeBreakdownAnalysis({ timeBreakdown = {}, formatTime }) {
     const [subjectFilter, setSubjectFilter] = useState("All");
@@ -92,23 +93,7 @@ export default function TimeBreakdownAnalysis({ timeBreakdown = {}, formatTime }
                                         {item.tags && item.tags.length > 0 && (
                                             <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                                                 {item.tags.map((tag) => (
-                                                    <span
-                                                        key={tag}
-                                                        style={{
-                                                            fontSize: "11px",
-                                                            padding: "2px 8px",
-                                                            borderRadius: "12px",
-                                                            backgroundColor: "#f3e8ff",
-                                                            color: "#7e22ce",
-                                                            border: "1px solid #e9d5ff",
-                                                            fontWeight: "600",
-                                                            display: "flex",
-                                                            alignItems: "center",
-                                                            gap: "4px"
-                                                        }}
-                                                    >
-                                                        <Tag size={10} /> {tag}
-                                                    </span>
+                                                    <TagBadge key={tag} name={tag} size="sm" />
                                                 ))}
                                             </div>
                                         )}

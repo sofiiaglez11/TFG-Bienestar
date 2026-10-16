@@ -1,4 +1,5 @@
 import { useEffect, useRef, useLayoutEffect } from "react";
+import { MessageSquare } from "lucide-react";
 import MessageBubble from "./MessageBubble";
 
 export default function ChatWindow({

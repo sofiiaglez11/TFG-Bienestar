@@ -10,6 +10,16 @@ from services.clockify_service import ClockifyService
 class AnalyticsService:
     def __init__(self, db_service):
         self.db_service = db_service
+        # Caché temporal de entradas de Clockify por (user_id, days_key)
+        # Se rellena la primera vez y se reutiliza durante la misma petición.
+        self._clockify_cache: dict = {}
+
+    def _clockify_cache_key(self, user_id: str, days: int) -> str:
+        return f"{user_id}:{days}"
+
+    def clear_clockify_cache(self):
+        """Limpia la caché de entradas (llamar entre peticiones si reutilizas la instancia)."""
+        self._clockify_cache.clear()
 
     async def _get_user_clockify_service(self, user_id: str) -> Optional[ClockifyService]:
         user = await self.db_service.get_user_by_id(user_id)
@@ -22,6 +32,27 @@ class AnalyticsService:
                     workspace_id=cdata.get("workspace_id")
                 )
         return None
+
+    async def _get_clockify_entries(self, user_id: str, days: int) -> list:
+        """
+        Devuelve las entradas de Clockify para `user_id` en los últimos `days` días.
+        Guarda el resultado en caché para no repetir la llamada a la API dentro
+        de la misma petición HTTP (evita el error 429 Too Many Requests).
+        """
+        key = self._clockify_cache_key(user_id, days)
+        if key in self._clockify_cache:
+            return self._clockify_cache[key]
+
+        cs = await self._get_user_clockify_service(user_id)
+        entries = []
+        if cs:
+            try:
+                entries = await asyncio.to_thread(cs.get_time_entries, days_back=days)
+            except Exception as e:
+                print(f"[ANALYTICS] Error al consultar Clockify ({days}d): {e}", file=sys.stderr)
+
+        self._clockify_cache[key] = entries
+        return entries
 
     def _parse_iso_duration_minutes(self, duration_str: str) -> float:
         """Convierte una cadena de duración ISO 8601 (ej. PT1H30M15S) a minutos usando re nativo (sin dependencias externas)."""
@@ -45,14 +76,8 @@ class AnalyticsService:
         WEEKDAYS = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
         subjects = await self.db_service.get_subjects_by_user(user_id)
         
-        # Obtener entradas de tiempo desde Clockify
-        cs = await self._get_user_clockify_service(user_id)
-        clockify_entries = []
-        if cs:
-            try:
-                clockify_entries = await asyncio.to_thread(cs.get_time_entries, days_back=days)
-            except Exception as e:
-                print(f"[ANALYTICS] Error al consultar Clockify: {e}", file=sys.stderr)
+        # Obtener entradas de tiempo desde Clockify (con caché)
+        clockify_entries = await self._get_clockify_entries(user_id, days)
 
         # Obtener informes de estudio de MongoDB para asociar la nota de concentración/calidad
         study_reports = []
@@ -210,14 +235,8 @@ class AnalyticsService:
     async def get_patterns(self, user_id: str, days: int = 7) -> dict:
         """Detecta patrones: sesiones nocturnas, días más productivos, etc."""
         WEEKDAYS = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
-        cs = await self._get_user_clockify_service(user_id)
-        clockify_entries = []
-        if cs:
-            try:
-                # Usar el periodo seleccionado por el usuario para la gráfica y los patrones
-                clockify_entries = await asyncio.to_thread(cs.get_time_entries, days_back=days)
-            except Exception as e:
-                print(f"[ANALYTICS] Error al consultar Clockify para patrones: {e}", file=sys.stderr)
+        # Usar el periodo seleccionado por el usuario para la gráfica y los patrones (con caché)
+        clockify_entries = await self._get_clockify_entries(user_id, days)
 
         late_sessions = []
         hours_by_weekday = {}
@@ -468,13 +487,8 @@ class AnalyticsService:
         subjects = await self.db_service.get_subjects_by_user(user_id, include_archived=True)
         proj_to_subj = {s.get("clockify_project_id"): s.get("name") for s in subjects if s.get("clockify_project_id")}
 
-        cs = await self._get_user_clockify_service(user_id)
-        clockify_entries = []
-        if cs:
-            try:
-                clockify_entries = await asyncio.to_thread(cs.get_time_entries, days_back=days)
-            except Exception as e:
-                print(f"[ANALYTICS] Error al obtener entradas para breakdown: {e}", file=sys.stderr)
+        cs = None  # no necesario: usamos la caché interna
+        clockify_entries = await self._get_clockify_entries(user_id, days)
 
         total_tracked_seconds = 0.0
         unified_tasks_map = {}
@@ -574,15 +588,9 @@ class AnalyticsService:
         - Tareas desatendidas (sin tiempo o < 15 min).
         """
         subjects = await self.db_service.get_subjects_by_user(user_id, include_archived=True)
-        cs = await self._get_user_clockify_service(user_id)
 
-        # Entradas de tiempo de los últimos 14 días para comparar 0-7d vs 7-14d
-        clockify_entries_14d = []
-        if cs:
-            try:
-                clockify_entries_14d = await asyncio.to_thread(cs.get_time_entries, days_back=14)
-            except Exception as e:
-                print(f"[ANALYTICS] Error al obtener 14d clockify entries: {e}", file=sys.stderr)
+        # Entradas de tiempo de los últimos 14 días para comparar 0-7d vs 7-14d (con caché)
+        clockify_entries_14d = await self._get_clockify_entries(user_id, 14)
 
         now_utc = datetime.now(timezone.utc)
         seven_days_ago = now_utc - timedelta(days=7)
@@ -729,6 +737,9 @@ class AnalyticsService:
         /api/share/{target_user_id}/analytics al consultar las estadísticas de
         otro usuario.
         """
+        # Limpiar la caché antes de cada petición para no mezclar datos entre usuarios o llamadas
+        self.clear_clockify_cache()
+
         # Normalizar: 0 = histórico (usamos 3650 = 10 años como límite práctico)
         effective_days = days if days > 0 else 3650
 
@@ -745,7 +756,7 @@ class AnalyticsService:
         # Obtener credenciales de Clockify del usuario
         clockify_creds = await self.db_service.get_clockify_credentials(user_id)
 
-        # Obtener entradas de tiempo de Clockify
+        # Obtener entradas de tiempo de Clockify (y primar la caché para los submétodos)
         clockify_entries = []
         if clockify_creds and clockify_creds.get("api_key"):
             try:
@@ -761,6 +772,18 @@ class AnalyticsService:
                     clockify_entries = await asyncio.to_thread(
                         cs.get_time_entries, days_back=effective_days
                     )
+                # Primar la caché con las entries recién obtenidas para que los submétodos
+                # (get_patterns, get_time_breakdown, get_extended_subject_metrics) no
+                # repitan la llamada a Clockify para el mismo rango.
+                self._clockify_cache[self._clockify_cache_key(user_id, effective_days)] = clockify_entries
+                # get_extended_subject_metrics usa siempre days=14; si effective_days==14 ya
+                # está cubierto, si no, precargar también ese rango para evitar una llamada extra.
+                if effective_days != 14:
+                    try:
+                        entries_14 = await asyncio.to_thread(cs.get_time_entries, days_back=14)
+                        self._clockify_cache[self._clockify_cache_key(user_id, 14)] = entries_14
+                    except Exception:
+                        self._clockify_cache[self._clockify_cache_key(user_id, 14)] = []
             except Exception as e:
                 # Loggear el error pero no fallar la petición completa
                 print(f"[DASHBOARD] Error fetching Clockify entries: {e}", file=sys.stderr)

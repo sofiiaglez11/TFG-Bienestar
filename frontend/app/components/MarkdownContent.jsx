@@ -1,6 +1,10 @@
 import React, { Children } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { getTagStyle } from "../utils/tagUtils";
+import { useTagColors } from "../utils/tagColorStore";
+import remarkChatTokens from "../utils/remarkChatTokens";
+import TagBadge from "./TagBadge";
 
 /**
  * Renderizado markdown común para todo lo que escribe la IA
@@ -10,37 +14,16 @@ import remarkGfm from "remark-gfm";
  * Uso: <MarkdownContent>{texto}</MarkdownContent>
  */
 
-// Función para asignar colores consistentes según el texto
-const getTagStyle = (tagText) => {
-    const lower = tagText.toLowerCase().trim();
-
-    // Paleta dinámica para cualquier etiqueta (el mismo texto = el mismo color)
-    const palette = [
-        { bg: "rgba(14, 165, 233, 0.15)", text: "#0284c7", border: "rgba(14, 165, 233, 0.4)" },  // Celeste
-        { bg: "rgba(236, 72, 153, 0.15)", text: "#db2777", border: "rgba(236, 72, 153, 0.4)" },  // Rosa
-        { bg: "rgba(20, 184, 166, 0.15)", text: "#0d9488", border: "rgba(20, 184, 166, 0.4)" },  // Turquesa
-        { bg: "rgba(249, 115, 22, 0.15)", text: "#ea580c", border: "rgba(249, 115, 22, 0.4)" },  // Naranja Intenso
-        { bg: "rgba(99, 102, 241, 0.15)", text: "#4f46e5", border: "rgba(99, 102, 241, 0.4)" },  // Índigo
-        { bg: "rgba(107, 114, 128, 0.15)", text: "#4b5563", border: "rgba(107, 114, 128, 0.4)" } // Gris
-    ];
-
-    let hash = 0;
-    for (let i = 0; i < lower.length; i++) {
-        hash = lower.charCodeAt(i) + ((hash << 5) - hash);
-    }
-
-    return palette[Math.abs(hash) % palette.length];
-};
-
-const renderBadges = (text) => {
+// FORMATO ANTIGUO ([etiqueta] y !fecha!): solo se mantiene en tablas para mensajes ya guardados en el historial.
+const renderBadges = (text, colorMap = {}) => {
     if (typeof text !== "string") return text;
 
     // 1. Interpretar <br> o <br/> como saltos de línea reales de React
     if (text.includes("<br")) {
         const parts = text.split(/<br\s*\/?>/gi);
         return parts.reduce((acc, part, i) => {
-            if (i === 0) return [renderBadges(part)];
-            return [...acc, <br key={`br-${i}`} />, renderBadges(part)];
+            if (i === 0) return [renderBadges(part, colorMap)];
+            return [...acc, <br key={`br-${i}`} />, renderBadges(part, colorMap)];
         }, []);
     }
 
@@ -65,12 +48,15 @@ const renderBadges = (text) => {
                     {match[1].trim()}
                 </span>
             );
+        } else if (match[2] !== undefined && /^\d+$/.test(match[2].trim())) {
+            // [1], [2]... (prioridad en mensajes antiguos): se muestra el número sin píldora
+            parts.push(match[2].trim());
         } else if (match[2] !== undefined) {
             // Píldoras ([texto]) -> Si la IA manda [backend, prompt], lo dividimos por comas
             const subTags = match[2].trim().split(",").map((t) => t.trim()).filter(Boolean);
 
             subTags.forEach((tagText, subIdx) => {
-                const style = getTagStyle(tagText);
+                const style = getTagStyle(tagText, colorMap);
                 parts.push(
                     <span
                         key={`${match.index}-${subIdx}`}
@@ -154,7 +140,36 @@ const renderBadges = (text) => {
 //   );
 // }
 
+// Celda de tabla: convierte [etiquetas] y !fechas! en badges usando los colores guardados del usuario
+function TableCell({ children }) {
+    const colorMap = useTagColors();
+    return (
+        <td style={{ border: "1px solid var(--border)", padding: "6px 8px", verticalAlign: "middle" }}>
+            {Children.map(children, (child) =>
+                typeof child === "string" ? renderBadges(child, colorMap) : child
+            )}
+        </td>
+    );
+}
+
+// Marcadores universales {{tag:nombre}} y {{expired:fecha}} (ver utils/remarkChatTokens.js)
+function TagToken({ children }) {
+    const name = Children.toArray(children).join("").trim();
+    return <TagBadge name={name} size="sm" showIcon={false} />;
+}
+
+function ExpiredDateToken({ children }) {
+    return (
+        <span style={{ color: "#dc2626", fontWeight: "700", whiteSpace: "nowrap" }}>
+            {children}
+        </span>
+    );
+}
+
 const markdownComponents = {
+    "tag-badge": TagToken,
+    "expired-date": ExpiredDateToken,
+
     // Párrafos
     p: ({ children }) => <p style={{ margin: "0 0 8px 0" }}>{children}</p>,
 
@@ -237,13 +252,7 @@ const markdownComponents = {
             {children}
         </th>
     ),
-    td: ({ children }) => (
-        <td style={{ border: "1px solid var(--border)", padding: "6px 8px", verticalAlign: "middle" }}>
-            {Children.map(children, (child) =>
-                typeof child === "string" ? renderBadges(child) : child
-            )}
-        </td>
-    ),
+    td: TableCell,
 
     blockquote: ({ children }) => (
         <blockquote
@@ -261,8 +270,14 @@ const markdownComponents = {
 
 export default function MarkdownContent({ children }) {
     return (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkChatTokens]} components={markdownComponents}>
             {children || ""}
         </ReactMarkdown>
     );
 }
+
+
+
+
+
+
