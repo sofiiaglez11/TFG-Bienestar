@@ -24,15 +24,16 @@ analytics_service = AnalyticsService(db_service)
 
 
 async def _get_user_clockify_service(user_id: str) -> ClockifyService:
-    """Devuelve una instancia de ClockifyService inicializada con la API Key del usuario."""
-    user = await db_service.get_user_by_id(user_id)
-    if user and user.get("clockify"):
-        cdata = user["clockify"]
-        # Soporta tanto el campo nuevo "api_key" como "token" por retrocompatibilidad
-        api_key = cdata.get("api_key") or cdata.get("token")
+    """Devuelve una instancia de ClockifyService inicializada con la API Key del usuario.
+    
+    Usa get_clockify_credentials() para que la clave cifrada con Fernet se descifre
+    correctamente antes de pasársela a Clockify.
+    """
+    creds = await db_service.get_clockify_credentials(user_id)
+    if creds:
         return ClockifyService(
-            api_key=api_key,
-            workspace_id=cdata.get("workspace_id")
+            api_key=creds.get("api_key"),
+            workspace_id=creds.get("workspace_id")
         )
     return ClockifyService()
 

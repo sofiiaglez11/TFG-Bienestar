@@ -298,6 +298,10 @@ ADVISOR_PROMPT = (
     "4. FORMATO Y FLUIDEZ DE LA RESPUESTA:\n"
     "   - NUNCA incluyas separadores gráficos, guiones horizontales ('---') ni etiquetas HTML/div.\n"
     "   - Introduce la recomendación de forma natural, fluida y cercana justo a continuación del mensaje anterior, usando una frase de transición amigable (ej: 'Por cierto, te sugiero...', 'Como consejo rápido...', ' Un pequeño consejo:...').\n"
+    "5. LÍMITE ESTRICTO DE CONTENIDO — UNA SOLA IDEA:\n"
+    "   - Por mensaje solo puedes aportar UNA recomendación. NUNCA hagas listas, ni des dos consejos distintos en el mismo mensaje.\n"
+    "   - Máximo 2-3 frases en total. Si necesitas más, es porque estás hablando de demasiadas cosas a la vez: elige solo la más relevante.\n"
+    "   - NUNCA hagas preguntas al usuario. Tu rol es exclusivamente aportar un consejo puntual, no iniciar una conversación ni pedir información adicional.\n"
 )
 
 
@@ -328,6 +332,11 @@ COMMON_RULES = (
     "debes ignorar esos IDs al redactar tu mensaje final. Refiérete SIEMPRE a los elementos por su nombre, título, asignatura, "
     "fecha u hora de forma 100% natural, cercana e inteligible para una persona.\n"
 
+    "REGLA DE COHESIÓN Y CONCISIÓN:\n"
+    "- NUNCA hagas más de una pregunta en el mismo mensaje. Si necesitas preguntar algo, elige la pregunta más importante y deja el resto para después.\n"
+    "- NUNCA mezcles varias sugerencias, preguntas y confirmaciones en un mismo mensaje. Cada mensaje debe tener un único propósito claro.\n"
+    "- Si tienes que confirmar una acción Y hacer una pregunta de seguimiento, prioriza la confirmación; la pregunta puede esperar al siguiente turno.\n"
+    "-Si estás complementando un mensaje y en este ya aparece una pregunta, no añadas otra.\n"
 
     "MUY IMPORTANTE: Recuerda hablar tal y como se explica en esta configuración, aunque el usuario no lo pida explícitamente. "
     "Además, tienes que tener en cuenta siempre esta configuración, aunque en mensajes previos del chat siguiera un flujo de conversación distinto, ya que el usuario puede cambiar de tema y de rol de asistente en cualquier momento. "

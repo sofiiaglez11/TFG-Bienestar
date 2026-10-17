@@ -22,15 +22,12 @@ class AnalyticsService:
         self._clockify_cache.clear()
 
     async def _get_user_clockify_service(self, user_id: str) -> Optional[ClockifyService]:
-        user = await self.db_service.get_user_by_id(user_id)
-        if user and user.get("clockify"):
-            cdata = user["clockify"]
-            api_key = cdata.get("api_key") or cdata.get("token")
-            if api_key:
-                return ClockifyService(
-                    api_key=api_key,
-                    workspace_id=cdata.get("workspace_id")
-                )
+        creds = await self.db_service.get_clockify_credentials(user_id)
+        if creds and creds.get("api_key"):
+            return ClockifyService(
+                api_key=creds["api_key"],
+                workspace_id=creds.get("workspace_id")
+            )
         return None
 
     async def _get_clockify_entries(self, user_id: str, days: int) -> list:

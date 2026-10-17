@@ -9,6 +9,7 @@ import sys
 import secrets
 import unicodedata
 from typing import Optional
+from services.encryption_service import EncryptionService
  
  
 load_dotenv()
@@ -188,30 +189,55 @@ class DatabaseService:
         """
         Busca si algún usuario en la BD ya tiene vinculada la misma cuenta de Clockify
         (por ID de usuario en Clockify o por API Key), excluyendo opcionalmente a exclude_user_id.
+        La comparación por api_key se realiza recuperando todos los usuarios con datos de Clockify
+        y comparando la api_key descifrada, ya que el valor en BD está cifrado con Fernet.
         """
         or_conditions = []
         if clockify_user_id:
             or_conditions.append({"clockify.clockify_user_id": clockify_user_id})
-        if api_key:
-            or_conditions.append({"clockify.api_key": api_key})
 
-        if not or_conditions:
+        # No podemos comparar api_key directamente en la query porque está cifrada en BD.
+        # La búsqueda por api_key se realiza en memoria tras descifrar.
+        if not or_conditions and not api_key:
             return None
 
-        query = {"$or": or_conditions}
-        if exclude_user_id:
-            try:
-                query["_id"] = {"$ne": ObjectId(exclude_user_id)}
-            except Exception:
-                pass
+        if or_conditions:
+            query = {"$or": or_conditions}
+            if exclude_user_id:
+                try:
+                    query["_id"] = {"$ne": ObjectId(exclude_user_id)}
+                except Exception:
+                    pass
+            found = await self.users.find_one(query)
+            if found:
+                return found
 
-        return await self.users.find_one(query)
+        # Búsqueda por api_key: comparar en memoria descifrado
+        if api_key:
+            cursor = self.users.find({"clockify": {"$ne": None}})
+            async for user in cursor:
+                if exclude_user_id:
+                    try:
+                        if user["_id"] == ObjectId(exclude_user_id):
+                            continue
+                    except Exception:
+                        pass
+                stored = (user.get("clockify") or {}).get("api_key", "")
+                try:
+                    decrypted = EncryptionService.decrypt(stored) if EncryptionService.is_fernet_token(stored) else stored
+                    if decrypted == api_key:
+                        return user
+                except Exception:
+                    pass
+
+        return None
 
 
     async def update_clockify_credentials(self, user_id: str, api_key: str, workspace_id: str = None, clockify_user_id: str = None):
-        """Actualiza la API Key y Workspace de Clockify del usuario."""
+        """Actualiza la API Key (cifrada con Fernet) y Workspace de Clockify del usuario."""
+        encrypted_key = EncryptionService.encrypt(api_key)
         clockify_data = {
-            "api_key": api_key,
+            "api_key": encrypted_key,
             "workspace_id": workspace_id,
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
@@ -221,18 +247,34 @@ class DatabaseService:
             {"_id": ObjectId(user_id)},
             {"$set": {"clockify": clockify_data}}
         )
-        return clockify_data
+        # Devolvemos la key en claro para que el llamador pueda usarla
+        return {**clockify_data, "api_key": api_key}
 
     # async def update_clockify_key(self, user_id: str, api_key: str):
     #     """Compatibilidad: Actualiza la API key de Clockify de un usuario."""
     #     return await self.update_clockify_credentials(user_id=user_id, auth_type="api_key", token=api_key)
 
     async def get_clockify_credentials(self, user_id: str) -> dict | None:
-        """Devuelve las credenciales de Clockify de un usuario."""
+        """
+        Devuelve las credenciales de Clockify de un usuario con la api_key descifrada.
+        Si el valor almacenado no es un token Fernet válido (datos legacy), se devuelve tal cual.
+        """
         user = await self.get_user_by_id(user_id)
-        if user:
-            return user.get("clockify")
-        return None
+        if not user:
+            return None
+        creds = user.get("clockify")
+        if not creds:
+            return None
+        # Descifrar api_key si está cifrada
+        raw_key = creds.get("api_key", "")
+        if raw_key and EncryptionService.is_fernet_token(raw_key):
+            try:
+                creds = {**creds, "api_key": EncryptionService.decrypt(raw_key)}
+            except ValueError:
+                # Si falla el descifrado (clave cambiada, datos corruptos), devolver None
+                # para forzar al usuario a volver a vincular su cuenta.
+                return None
+        return creds
 
     async def update_current_period(self, user_id: str, period_id: str):
         """Actualiza el periodo académico actual de un usuario."""

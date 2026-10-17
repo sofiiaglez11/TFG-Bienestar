@@ -417,6 +417,12 @@ class LangGraphService:
         # Registrar esta ejecución (aunque acabe en NO_ADVICE, ya se pagó el coste)
         self._last_advisor_run_count[user_id] = self._user_message_counts.get(user_id, 0)
 
+        # REGLA DETERMINISTA: si el agente principal ya está haciendo una pregunta al usuario,
+        # el asesor no interviene para no saturar el mensaje con más preguntas o consejos.
+        if "?" in response_text:
+            print(f"[LANGGRAPH ADVISOR NODE] Silenciado: el mensaje principal ya contiene una pregunta.", file=sys.stderr)
+            return {"response_text": response_text}
+
         self.advisor_agent.set_config([])
         self.advisor_agent.load_history(history_msgs)
 
@@ -484,7 +490,10 @@ class LangGraphService:
             f"4. Introduce la recomendación con una frase natural como:\n"
             f"   'Por cierto, revisando tus datos de esta semana...' o 'Un pequeño apunte sobre tu progreso:...'\n"
             f"5. Si los datos son equilibrados y no hay nada destacable, responde exactamente: NO_ADVICE\n"
-            f"6. NUNCA uses separadores como '---', HTML ni markdown excesivo."
+            f"6. NUNCA uses separadores como '---', HTML ni markdown excesivo.\n"
+            f"7. REGLA CRÍTICA DE NO INTERFERENCIA: Si la respuesta del agente principal (mostrada arriba) "
+            f"contiene una pregunta directa al usuario, responde OBLIGATORIAMENTE: NO_ADVICE. "
+            f"Nunca añadas un consejo ni una nueva pregunta cuando el usuario ya tiene una pregunta pendiente de responder."
         )
 
 
