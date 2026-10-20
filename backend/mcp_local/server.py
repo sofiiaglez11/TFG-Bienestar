@@ -16,6 +16,8 @@ from typing import Optional
 
 
 from collections import defaultdict
+from zoneinfo import ZoneInfo
+import re
 from datetime import timedelta
 
 
@@ -1057,7 +1059,7 @@ async def get_tasks(user_id: str, subject_name: Optional[str] = None, include_co
 
         tasks_data = [serialize(root) for root in root_tasks]
 
-        print(f"[MCP TOOL: GET_TASKS] response={tasks_data}", file=sys.stderr, flush=True)
+        # print(f"[MCP TOOL: GET_TASKS] response={tasks_data}", file=sys.stderr, flush=True)
 
         return json.dumps({
             "subject": target_subject_name,
@@ -2326,7 +2328,6 @@ async def wb_get_study_reports(user_id: str, subject_name: str = None, limit: in
 #         return f"Error al generar el análisis de rendimiento: {str(e)}"
 
 
-@mcp.tool()
 # async def create_study_plan(user_id: str, title: str, items: list, start_date: str = None, end_date: str = None):
 #     """
 #     Registra oficialmente un plan de estudio en el sistema una vez que el usuario confirma la propuesta.
@@ -2346,15 +2347,20 @@ async def wb_get_study_reports(user_id: str, subject_name: str = None, limit: in
 @mcp.tool()
 async def create_study_plan(user_id: str, title: str, items: list, start_date: str = None, end_date: str = None):
     """
-    Registra un plan de estudio estructurado por bloques/sesiones diarias.
+    Registra un plan de estudio estructurado por bloques/sesiones (reemplaza el plan activo).
 
     Parámetros:
     - title: Título del plan.
-    - items: Lista de sesiones diarias. Cada elemento debe ser un objeto con:
+    - items: Lista de sesiones. Cada elemento es un objeto con:
         * day: Día de la semana o fecha (ej: 'Lunes', '2026-09-20').
         * subject_name: Nombre de la asignatura asociada (opcional si es revisión general).
         * planned_hours: Tiempo asignado en horas (ej: 1.5).
-        * description: Detalle de la actividad a realizar (ej: 'Avanzar con la tarea A y repasar apuntes').
+        * description: Detalle de la actividad (ej: 'Avanzar con la tarea A y repasar apuntes').
+        * due_date: Fecha concreta de la actividad en formato YYYY-MM-DD. MUY IMPORTANTE: sin ella
+          el sistema no puede detectar actividades vencidas ni reagendarlas. Si 'day' ya es una fecha
+          ISO, se usa como due_date automáticamente. NUNCA una fecha pasada.
+        * linked_task_titles: (opcional) lista de títulos EXACTOS de tareas de esa asignatura que cubre
+          la actividad. Permite seguir si se completan y mover sus fechas junto con la actividad.
     - start_date: Fecha inicio (YYYY-MM-DD).
     - end_date: Fecha fin (YYYY-MM-DD).
     """
@@ -2362,10 +2368,39 @@ async def create_study_plan(user_id: str, title: str, items: list, start_date: s
         if not items or not isinstance(items, list):
             return "Error: Se requiere una lista 'items' con los elementos del plan estructurados por días y asignaturas."
 
+        normalized = []
+        for raw in items:
+            if not isinstance(raw, dict):
+                continue
+            it = dict(raw)
+
+            # due_date: usar la indicada o, si 'day' es una fecha ISO, esa misma
+            day = str(it.get("day") or "").strip()
+            if it.get("due_date"):
+                it["due_date"] = (_normalize_due_date(it["due_date"]) or "")[:10] or None
+            elif re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+                it["due_date"] = day
+
+            # Vincular tareas por título (se resuelven los IDs aquí para que el LLM no los maneje)
+            linked = [str(x) for x in (it.get("linked_task_ids") or [])]
+            titles = it.pop("linked_task_titles", None) or []
+            if titles and it.get("subject_name"):
+                subject = await _find_subject_by_name(user_id, it["subject_name"])
+                if subject:
+                    for t_title in titles:
+                        task = await _find_task_by_title(subject["_id"], t_title)
+                        if task and str(task["_id"]) not in linked:
+                            linked.append(str(task["_id"]))
+            it["linked_task_ids"] = linked
+            normalized.append(it)
+
+        if not normalized:
+            return "Error: Ninguno de los elementos de 'items' tiene un formato válido."
+
         plan = await db_service.create_study_plan(
             user_id=user_id,
             title=title,
-            items=items,
+            items=normalized,
             start_date=start_date,
             end_date=end_date
         )
@@ -2387,13 +2422,14 @@ async def get_active_study_plan(user_id: str):
 
         lines = [f"📋 Plan Activo: '{plan.get('title', 'Plan de Estudio')}' (Inicio: {plan.get('start_date', 'N/A')})"]
         lines.append("\nDesglose del plan:")
-        for item in plan.get("items", []):
+        for idx, item in enumerate(plan.get("items", [])):
             day = item.get("day", "Día")
             subj = item.get("subject_name", "Asignatura")
             hrs = item.get("planned_hours", 0)
             desc = item.get("description", "")
             desc_str = f" - {desc}" if desc else ""
-            lines.append(f"- {day} [{subj}]: {hrs}h{desc_str}")
+            due = item.get("due_date") or "sin fecha"
+            lines.append(f"- [índice {idx}] {day} [{subj}]: {hrs}h, vence {due}{desc_str}")
 
         return "\n".join(lines)
     except Exception as e:
@@ -2412,6 +2448,132 @@ async def wb_get_analytics_summary(user_id: str, days: int = 7):
         return res.get("formatted_text", "Sin datos analíticos disponibles.")
     except Exception as e:
         return f"Error al calcular el resumen analítico: {str(e)}"
+
+
+@mcp.tool()
+async def get_planner_analytics(user_id: str, days: int = 14) -> str:
+    """
+    [USO EXCLUSIVO DEL AGENTE PLANIFICADOR]
+    Tendencias de estudio (mejor/peor día, horas por día, sesiones nocturnas), rendimiento por
+    asignatura y estado del plan activo (progreso y actividades retrasadas).
+    Úsala solo cuando necesites datos reales para decidir cambios en el plan; no hace falta
+    para consultas simples o cuando el usuario ya indica exactamente qué cambiar.
+    """
+    lines = []
+
+    try:
+        p = await analytics_service.get_patterns(user_id, days=days)
+        lines.append(f"=== TENDENCIAS DE ESTUDIO (últimos {days} días) ===")
+        if p.get("most_productive_weekday"):
+            lines.append(f"Día más productivo: {p['most_productive_weekday']}")
+        if p.get("least_productive_weekday"):
+            lines.append(f"Día menos productivo: {p['least_productive_weekday']}")
+        for day, h in (p.get("hours_by_weekday") or {}).items():
+            lines.append(f"  - {day}: {h}h")
+        late = p.get("late_night_sessions") or []
+        if late:
+            lines.append(f"Sesiones nocturnas (después de las 23h): {len(late)}")
+    except Exception as e:
+        lines.append(f"[Sin tendencias: {e}]")
+
+    try:
+        academic = await analytics_service.get_academic_analytics(user_id, days=days)
+        lines.append("\n=== RENDIMIENTO POR ASIGNATURA ===")
+        for sdata in academic or []:
+            conc = f", concentración {sdata['avg_concentration']}/5" if sdata.get("avg_concentration") is not None else ""
+            lines.append(
+                f"  - {sdata.get('name')}: {sdata.get('total_hours_week')}h, "
+                f"sesión media {sdata.get('avg_session_duration_minutes')} min{conc}"
+            )
+    except Exception as e:
+        lines.append(f"[Sin datos académicos: {e}]")
+
+    try:
+        plan = await analytics_service.get_study_plan_progress(user_id, days=days)
+        if plan and plan.get("has_active_plan"):
+            lines.append(f"\n=== PLAN ACTIVO '{plan.get('plan_title')}' ===")
+            lines.append(
+                f"Progreso: {plan.get('overall_progress_pct')}% "
+                f"({plan.get('total_actual_hours')}h / {plan.get('total_planned_hours')}h)"
+            )
+            for subj, d in (plan.get("progress_by_subject") or {}).items():
+                lines.append(f"  - {subj}: {d['actual_hours']}h / {d['planned_hours']}h ({d['progress_pct']}%)")
+            for ot in plan.get("overdue_tasks", []):
+                lines.append(f"  ⚠ '{ot.get('title')}' ({ot.get('subject_name')}), venció {ot.get('due_date')}")
+            if not plan.get("overdue_tasks"):
+                lines.append("Sin actividades retrasadas.")
+        else:
+            lines.append("\n[Sin plan de estudio activo]")
+    except Exception as e:
+        lines.append(f"[Sin datos del plan: {e}]")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def reschedule_plan_item(user_id: str, item_index: int, new_due_date: str,
+                               new_planned_hours: Optional[float] = None, reason: str = ""):
+    """
+    [USO EXCLUSIVO DEL AGENTE PLANIFICADOR]
+    Reagenda UNA actividad del plan de estudio activo: cambia su fecha (y opcionalmente sus horas
+    planificadas) y actualiza a la vez la fecha de las tareas vinculadas, para que plan y tareas
+    no se desincronicen. Para mover varias actividades, llámala una vez por cada una.
+
+    - item_index: índice de la actividad tal y como lo muestra get_active_study_plan.
+    - new_due_date: nueva fecha (YYYY-MM-DD o DD/MM/YYYY). NUNCA anterior a hoy.
+    - new_planned_hours: (opcional) nuevas horas planificadas, entre 0.5 y 12.
+    - reason: (opcional) motivo breve del cambio.
+    """
+    try:
+        plan = await db_service.get_active_study_plan(user_id)
+        if not plan:
+            return "No hay ningún plan de estudio activo."
+
+        items = [dict(it) for it in plan.get("items", [])]
+        if not isinstance(item_index, int) or item_index < 0 or item_index >= len(items):
+            return f"Índice de actividad no válido ({item_index}). El plan tiene {len(items)} actividades (0 a {len(items) - 1})."
+
+        try:
+            today = datetime.now(ZoneInfo("Europe/Madrid")).date()
+        except Exception:
+            today = datetime.now().date()
+
+        norm = _normalize_due_date(new_due_date) or ""
+        try:
+            new_dt = datetime.strptime(norm[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return f"Fecha no válida: '{new_due_date}'. Usa el formato YYYY-MM-DD o DD/MM/YYYY."
+        if new_dt < today:
+            return f"La nueva fecha ({new_dt.strftime('%d/%m/%Y')}) es anterior a hoy. Elige una fecha de hoy en adelante."
+
+        item = items[item_index]
+        old_due = item.get("due_date")
+
+        if new_planned_hours is not None:
+            try:
+                nh = float(new_planned_hours)
+            except (TypeError, ValueError):
+                return "Las horas planificadas deben ser un número."
+            if not (0.5 <= nh <= 12):
+                return "Las horas planificadas deben estar entre 0.5 y 12."
+            item["planned_hours"] = round(nh, 1)
+
+        new_due_str = new_dt.strftime("%Y-%m-%d")
+        item["due_date"] = new_due_str
+        item["day"] = f"Reagendado ({new_due_str})"
+
+        for tid in item.get("linked_task_ids", []):
+            await db_service.update_task(str(tid), due_date=new_due_str)
+
+        await db_service.update_study_plan_items(user_id, str(plan["_id"]), items)
+
+        label = item.get("description") or item.get("subject_name") or "Actividad"
+        old_txt = _format_date_for_display(old_due) if old_due else "sin fecha"
+        extra = f" Horas: {item.get('planned_hours')}h." if new_planned_hours is not None else ""
+        why = f" Motivo: {reason}." if reason else ""
+        return f"Actividad '{label}' reagendada: {old_txt} → {_format_date_for_display(new_due_str)}.{extra}{why}"
+    except Exception as e:
+        return f"Error al reagendar la actividad del plan: {str(e)}"
 
 
 if __name__ == "__main__":

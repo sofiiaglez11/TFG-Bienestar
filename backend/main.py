@@ -1,6 +1,7 @@
 from asyncio import queues
 import asyncio
 import os
+import sys
 import json
 import re
 from datetime import datetime, timezone
@@ -10,7 +11,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from google.genai import types
-
 
 from services.openai_service import OpenAIService
 from services.gemini_service import GeminiService
@@ -36,12 +36,23 @@ from pydantic import BaseModel, model_validator
 from services.langgraph_service import LangGraphService
 from services.analytics_service import AnalyticsService
 
+import time
+
+_plan_alert_cache: dict = {}  # user_id -> (timestamp, context_text)
+PLAN_ALERT_TTL = 600  # 10 minutos (tiempo de vida de la caché)
+_plan_alert_shown: dict = {}  # user_id -> fecha (YYYY-MM-DD) en la que ya se inyectó la alerta
+
+_timer_context_cache: dict = {}  # user_id -> (timestamp, context_text)
+TIMER_CACHE_TTL = 180  # 3 minutos
 
 
-# Servicios de MCP y de la Base de DAtos
+# Servicios de MCP y de la Base de Datos
 db_service = DatabaseService()
 analytics_service = AnalyticsService(db_service)
 mcp_client = MCPClientService()
+
+# Esquema de herramientas MCP precalculado (se rellena en lifespan al arrancar)
+GLOBAL_TOOLS_SCHEMA: list = []
 
 
 ACTIVE_MODEL = os.getenv("LLM_PROVIDER", "gemini")
@@ -53,13 +64,13 @@ if ACTIVE_MODEL == "gemini":
     wellbeing_agent = GeminiService()
     general_agent = GeminiService()
     advisor_agent = GeminiService()
-    planner_agent = GeminiService()
+    planner_agent = GeminiService()        
 elif ACTIVE_MODEL == "openai":
     academic_agent = OpenAIService()
     wellbeing_agent = OpenAIService()
     general_agent = OpenAIService()
     advisor_agent = OpenAIService()
-    planner_agent = OpenAIService()
+    planner_agent = OpenAIService()        
 
 ACADEMIC_PROMPT = (
     "Eres una IA experta en gestión del tiempo y ámbito académico. "
@@ -125,20 +136,16 @@ ACADEMIC_PROMPT = (
     "Al responder al usuario para mostrar sus tareas, usa SIEMPRE tablas Markdown con EXACTAMENTE estas 5 columnas y en este orden estricto:\n"
     "| Estado | Prioridad | Tarea | Fecha | Etiquetas |\n"
     "Reglas estrictas de formato para cada columna:\n"
-    # "1. Columna 'Estado': Usa ÚNICAMENTE el emoji correspondiente, NUNCA agregues texto de la palabra del estado:\n"
-    # "   - ⚡ (para tareas activas o en progreso)\n"
-    # "   - ⏳ (para tareas pendientes)\n"
-    # "   - ✅ (para tareas completadas)\n"
-
-    "1. Columna 'Estado': Usa ÚNICAMENTE una palabra para determinar el estado de una tarea, indicandolas como: 'PENDIENTE', 'ACTIVA' o 'COMPLETADA'. Por defecto, si el usuario no indica nada, pon PENDIENTE."
+    "1. Columna 'Estado': Usa ÚNICAMENTE una palabra para determinar el estado de una tarea, indicandolas como: 'PENDIENTE', 'ACTIVA' o 'COMPLETADA'. Por defecto, si el usuario no indica nada, pon PENDIENTE.\n"
     "2. Columna 'Prioridad': Escribe solo el número (1 a 5), sin corchetes ni ningún otro símbolo, ej: 1, 2, 3. Si no tiene prioridad, escribe '-'.\n"
-"   3. Columna 'Tarea': Escribe solo el nombre de la tarea. Si necesitas añadir una descripción aclaratoria, escríbela en la línea de abajo dentro de la misma celda usando un salto de línea normal. NUNCA uses etiquetas HTML como <br> ni <br/>. Pon la descripción entre paréntesis y en cursiva\n"    
+    "3. Columna 'Tarea': Escribe solo el nombre de la tarea. Si necesitas añadir una descripción aclaratoria, escríbela en la línea de abajo dentro de la misma celda usando un salto de línea normal. NUNCA uses etiquetas HTML como <br> ni <br/>. Pon la descripción entre paréntesis y en cursiva\n"    
     "4. Columna 'Fecha':\n"
     "   - Formato de fecha: usa SIEMPRE el formato DD/MM/YYYY (ej: 10/03/2026, o DD/MM/YYYY HH:MM si tiene hora).\n"
     "   - Fecha vencida: escribe la fecha como {{expired:DD/MM/YYYY}} ÚNICAMENTE si el campo `overdue` de la tarea es true. Si overdue es false, NUNCA uses ese formato aunque la fecha parezca pasada.\n"
     "   - Tareas completadas o no vencidas: Si la tarea ya se ha completado (✅) o si overdue=false, NO uses {{expired:...}}; escríbela de forma normal: DD/MM/YYYY.\n"
     "   - Si no tiene fecha de vencimiento, escribe '-'.\n"
-"   5. Columna 'Etiquetas': Escribe CADA etiqueta con su propio marcador {{tag:nombre}}, separados por espacios, ej: {{tag:backend}} {{tag:frontend}}. NUNCA agrupes varias etiquetas en un mismo marcador. Si no tiene etiquetas, escribe '-'.\n"    "6. Organización: Si muestras varias asignaturas, crea un título en negrita por cada asignatura (ej: **Matemáticas**) y debajo su respectiva tabla.\n"
+    "5. Columna 'Etiquetas': Escribe CADA etiqueta con su propio marcador {{tag:nombre}}, separados por espacios, ej: {{tag:backend}} {{tag:frontend}}. NUNCA agrupes varias etiquetas en un mismo marcador. Si no tiene etiquetas, escribe '-'.\n"    
+    "6. Organización: Si muestras varias asignaturas, crea un título en negrita por cada asignatura (ej: **Matemáticas**) y debajo su respectiva tabla.\n"
     "7. Cuándo mostrar completadas: Si el usuario no especifica, muéstrale las activas y pendientes; si pide ver todas o completadas, incluye también las completadas.\n\n"
     "Ejemplo de formato requerido:\n"
     "| Estado | Prioridad | Tarea | Fecha | Etiquetas |\n"
@@ -146,10 +153,6 @@ ACADEMIC_PROMPT = (
     "| ACTIVA | 1 | Entrega Proyecto Final | {{expired:10/03/2026}} | {{tag:práctica}} |\n"
     "| PENDIENTE | 2 | ↳ Redactar conclusiones | 20/06/2026 | {{tag:memoria}} {{tag:teoría}} |\n"
     "| COMPLETADA | 3 | Repaso de teoría | 15/01/2026 | {{tag:teoría}} |\n\n"
-
-    # "Al final de CADA tabla de tareas añade EXACTAMENTE esta leyenda, una sola vez y sin modificarla: (⚡ En progreso, ⏳ Pendiente, ✅ Completada). NUNCA la pongas dos veces ni uses un texto diferente.\n"
-    # "Tampoco menciones que las fechas vencidas están entre exclamaciones, ya que eso el usuario no lo ve (las ve de color rojo).\n"
-
 
     "REGLA DE FECHAS Y ACTUALIZACIONES:\n"
     "Al crear, actualizar o confirmar fechas al usuario, muestra y utiliza SIEMPRE el formato 'DD/MM/YYYY' (ej: '20/07/2026' o '20/07/2026 18:00'). "
@@ -161,7 +164,6 @@ ACADEMIC_PROMPT = (
     "- Ejemplo para asignaturas/proyectos: 'He añadido la asignatura X. Si quieres, avísame si deseas configurarle horas semanales, asociarla a un periodo o si te recuerdo qué más datos puedes añadirle.'\n"
     "- CRÍTICO: Habla SIEMPRE en lenguaje cotidiano y amigable. NUNCA uses nombres técnicos de variables ni código (evita estrictamente términos como 'due_date', 'tags', 'weekly_hours_goal', 'priority', etc.).\n"
     
-    
     "REGLA DE CAMPOS ENRIQUECIDOS DE ASIGNATURAS:\n"
     "Las asignaturas tienen campos adicionales que puedes guardar y consultar de forma natural:\n"
     "- Descripción: guárdala con edit_subject cuando el usuario describa de qué trata la asignatura (ej: 'Matemáticas son álgebra lineal y cálculo').\n"
@@ -171,12 +173,9 @@ ACADEMIC_PROMPT = (
     "IMPORTANTE: Guarda proactivamente estos datos si el usuario los menciona de pasada, aunque no lo haya pedido explícitamente. Por ejemplo, si dice 'Tengo Matemáticas, me encanta', crea la asignatura y guarda 'me encanta' como anotación directamente.\n"
     
     "REGLA DE ESTADOS DE TAREAS Y CRONÓMETROS:\n"
-    "Las tareas pueden estar en 3 estados: ACTIVE (ACTIVA), PENDING (PENTIENTE)  y COMPLETED (COMPLETADA).\n"
-
-    # "Las tareas pueden estar en 3 estados: ACTIVE (representada en tabla con ⚡), PENDING (con ⏳) y COMPLETED (con ✅).\n"
+    "Las tareas pueden estar en 3 estados: ACTIVE (ACTIVA), PENDING (PENDIENTE)  y COMPLETED (COMPLETADA).\n"
     "Cuando el usuario indique que va a ponerse a trabajar o estudiar en una tarea (ej: 'estoy trabajando en la tarea X', 'voy a hacer X ahora', 'empieza a contar tiempo para X'): "
     "debes usar start_timer especificando la asignatura (subject_name) y el título de la tarea (task_title). Esto iniciará el cronómetro en tiempo real y marcará automáticamente la tarea como ACTIVE .\n"
-    "Además, para guardar un registro de tiempo, primero tienes que revisar"
     "REGLA DE INFORME DE SESIÓN (STUDY REPORT):\n"
     "Cuando registres una sesión de estudio mediante cualquiera de estas acciones:\n"
     "  a) Parar un cronómetro con stop_timer\n"
@@ -194,14 +193,44 @@ ACADEMIC_PROMPT = (
     "Una vez registrada, confirma brevemente y pregunta si quiere apuntar cómo le fue (el seguimiento del informe lo hará otro asistente).\n"
     "IMPORTANTE: NO menciones a ningún 'compañero', 'asistente de bienestar' ni otros agentes. Para el usuario solo existe un único chat.\n"
     "NUNCA intentes tú mismo guardar el informe de sesión.\n"
-    "REGLA DE CREACIÓN Y SEGUIMIENTO DE PLANES DE ESTUDIO:\n"
-    "Cuando el usuario te pida ayuda para organizarse o estructurar sus días/semana de estudio (ej: 'ayúdame a organizarme', 'cómo distribuyo mi semana'):\n"
-    "1. Proponle un plan claro estructurado por días, asignaturas/bloques temáticos y tareas concretas a realizar (puedes basarte en horas o en tareas con fecha de vencimiento).\n"
-    "2. Cuando el usuario acepte o confirme la propuesta (ej: 'me parece bien', 'guárdalo', 'confirmo el plan'), ejecuta la herramienta `create_study_plan` mapeando tu propuesta en la lista 'items' (cada item con day, subject_name, planned_hours, description/tarea y asignándole siempre la fecha de vencimiento adecuada `due_date` en formato YYYY-MM-DD según la planificación).\n"
-    "3. Si el usuario pregunta qué plan tiene activo o qué le toca estudiar según su plan, utiliza la herramienta `get_active_study_plan`.\n"
-    "4. Si el contexto del sistema incluye alertas por tareas vencidas o no completadas dentro del plan, avisa al usuario con empatía sobre el desvío de su planificación para ayudarle a reajustar sus tareas a tiempo."
+    "REGLA DE PLANES DE ESTUDIO:\n"
+    "NO tienes acceso a las herramientas de modificar, crear o analizar planes de estudio. "
+    "Si el usuario quiere ver su plan de estudio, alterar horas (ej. 'ponme 5h hoy para Matemáticas'), "
+    "mover fechas ('pásalo al viernes') o crear un plan nuevo, confírmaselo amigablemente y el sistema "
+    "lo redirigirá al Agente Planificador automáticamente.\n"
+    "REGLA DE TAREAS SUELTAS VS. PLAN DE ESTUDIO:\n"
+    "Cambiar la fecha o prioridad de UNA tarea suelta fuera de un plan general sí puedes hacerlo tú usando edit_task.\n"
+    "REGLA CRÍTICA DE ACCIÓN INMEDIATA TRAS CONFIRMACIÓN:\n"
+    "Si en el turno anterior el agente ha propuesto hacer algo (revisar tareas, ajustar fechas, borrar algo...) "
+    "y el usuario responde con una confirmación corta (ej: 'Sí', 'Sí, adelante', 'Vale', 'Ok', 'Claro', 'Hazlo', 'Perfecto', 'Vamos', 'Venga'), "
+    "DEBES ACTUAR INMEDIATAMENTE usando las herramientas necesarias.\n"
+    "PROHIBIDO: volver a explicar la situación, pedir confirmación por segunda vez, reformular la propuesta o hacer más preguntas antes de actuar.\n"
+    "La única excepción es si para ejecutar la acción te falta un dato imprescindible que el usuario no ha proporcionado en ningún mensaje anterior "
+    "(ej: una fecha concreta que no aparece en el historial). En ese caso, haz UNA única pregunta concreta para obtenerlo y ya."
 )
 
+PLANNER_CONV_PROMPT = (
+    "Eres el Agente Planificador de estudio. Tu función es ayudar al usuario a crear, modificar "
+    "y reorganizar su plan de estudio de forma inteligente y personalizada. Eres 100% autónomo. Responde siempre en español.\n"
+    "HERRAMIENTAS DISPONIBLES:\n"
+    "  - `get_planner_analytics`: Devuelve tendencias reales de estudio (mejor/peor día, horas por asignatura, "
+    "sesiones nocturnas) y el estado del plan (progreso y actividades retrasadas). Úsala para analizar la situación antes de reorganizar fechas.\n"
+    "  - `get_active_study_plan`: Devuelve el plan activo con el índice, día, fecha de vencimiento y horas de cada actividad.\n"
+    "  - `reschedule_plan_item`: Cambia la fecha y/o las horas de UNA actividad del plan (por su índice). Actualiza a la vez la actividad y las tareas vinculadas.\n"
+    "  - `create_study_plan`: Crea un plan nuevo (reemplaza el activo).\n"
+    "  - `get_tasks` / `edit_task`: Consulta y edita tareas concretas.\n"
+    "FLUJO DE TRABAJO (Razonamiento ReAct):\n"
+    "1. EDICIONES SIMPLES: Si el usuario pide un cambio claro y directo (ej: 'Ponme 5 horas hoy al TFG', 'Mueve lo de mañana al viernes'), "
+    "usa `get_active_study_plan` para localizar el índice de la actividad afectada, y luego llama directamente a `reschedule_plan_item`. No necesitas analíticas profundas para esto.\n"
+    "2. REORGANIZACIÓN O REVISIÓN AUTOMÁTICA: Si el mensaje del sistema indica 'SISTEMA: REVISIÓN DIARIA AUTOMÁTICA' o el usuario dice "
+    "'estoy agobiado, ajusta mi plan':\n"
+    "   a) Llama a `get_planner_analytics` para ver cuántas tareas están vencidas y cuáles son sus mejores días de rendimiento.\n"
+    "   b) Con esos datos, usa `reschedule_plan_item` para mover lo vencido/pospuesto al día adecuado (nunca a un día pasado) o reducir horas irreales.\n"
+    "   c) Redacta un resumen final al usuario.\n"
+    "REGLAS ESTRICTAS:\n"
+    "  - NUNCA uses fechas pasadas. La fecha de hoy aparece en el contexto del sistema del mensaje.\n"
+    "  - IMPORTANTE: NO menciones a ningún 'compañero', 'otro agente' ni otros sistemas. Para el usuario solo existe un único chat.\n"
+)
 
 WELLBEING_PROMPT = (
     "Eres un asistente empático y comprensivo especializado en bienestar y salud mental para estudiantes. "
@@ -252,14 +281,6 @@ WELLBEING_PROMPT = (
     "pero intenta cerrar el informe primero si es posible."
 )
 
-
-
-# GENERAL_PROMPT = (
-#     "Eres un asistente amigable y conversacional. Responde cordialmente a los saludos y "
-#     "preguntas generales. Si el usuario necesita ayuda con sus estudios, recomiéndale hablar de sus asignaturas "
-#     "o tiempos de estudio; y si se siente estresado o cansado, ofrécete a escucharle y ayudarle con su bienestar."
-# )
-
 GENERAL_PROMPT = (
     "Eres un asistente amigable y conversacional. Responde cordialmente a los saludos. "
     "Si el usuario pregunta qué puedes hacer o pide ayuda, usa SIEMPRE la herramienta "
@@ -271,7 +292,6 @@ GENERAL_PROMPT = (
     "Si el usuario responde 'sí' o te pide una acción sobre sus estudios, NUNCA afirmes haber realizado la acción ni simules haber borrado nada."
 )
 
-
 ADVISOR_PROMPT = (
     "Eres un asesor experto y empático en hábitos de estudio, rendimiento académico y bienestar estudiantil.\n"
     "Tu tarea es analizar la respuesta propuesta por el agente principal y la información en la base de datos del usuario (asignaturas, tiempos de estudio, hábitos, informes de bienestar y estudio) para determinar si es oportuno añadir una recomendación proactiva y personalizada al final de la respuesta.\n"
@@ -282,14 +302,19 @@ ADVISOR_PROMPT = (
     "   - El usuario ha saludado o ha hecho una pregunta informativa concreta.\n"
     "   - Ya se ha dado algún consejo en los últimos 5 intercambios del chat.\n"
     "   - No detectas un patrón problemático claro y significativo en los datos.\n"
+    "   - El último mensaje del usuario es una confirmación corta ('sí', 'vale', 'ok', 'claro', 'vamos', 'adelante', "
+    "'perfecto', 'hazlo', o similar) en respuesta a una propuesta o pregunta del agente. "
+    "El usuario está confirmando una acción en curso: NO interrumpas el flujo con un consejo.\n"
+    "   - La respuesta del agente principal ya contiene una propuesta activa, está guiando al usuario hacia una acción "
+    "concreta, o hace una pregunta de seguimiento. En ese caso SIEMPRE NO_ADVICE.\n"
     "Solo actúa (añade consejo) cuando el contexto sea una conversación larga o reflexiva Y detectes un patrón real y urgente.\n"
     "PATRONES CLAVE A ANALIZAR (solo cuando NO aplique la regla de silencio):\n"
-    "1. DESEQUILIBRIO ENTRE ASIGNATURAS: Usa 'list_subjects' y 'get_time_summary' para comparar el tiempo dedicado a cada asignatura. Si notas que una asignatura acumula casi todo el tiempo mientras otra asignatura activa tiene 0 horas o está desatendida, aconseja redistribuir el tiempo.\n"
-    "2. HORARIOS NOCIVOS (ESTUDIO EN MADRUGADA): Usa 'get_time_entries' para revisar los horarios de inicio de las sesiones de estudio. Si detectas sesiones entre las 00:00 y las 06:00 AM, advierte con empatía sobre los riesgos para el descanso, la retención y la salud mental.\n"
+    "1. DESEQUILIBRIO ENTRE ASIGNATURAS: Usa los DATOS ACADÉMICOS proporcionados para comparar el tiempo dedicado a cada asignatura. Si notas que una asignatura acumula casi todo el tiempo mientras otra asignatura activa tiene 0 horas o está desatendida, aconseja redistribuir el tiempo.\n"
+    "2. HORARIOS NOCIVOS (ESTUDIO EN MADRUGADA): Revisa en los PATRONES y sesiones proporcionados los horarios de inicio de las sesiones de estudio. Si detectas sesiones entre las 00:00 y las 06:00 AM, advierte con empatía sobre los riesgos para el descanso, la retención y la salud mental.\n"
     "3. SESIONES DISPERSAS O FRAGMENTADAS: Si ves múltiples entradas cortas e intermitentes sin bloques de trabajo enfocado, sugiere la técnica Pomodoro o definir bloques claros de estudio.\n"
-    "4. TENDENCIA DE AGOTAMIENTO Y FATIGA: Correlaciona 'wb_get_study_reports' (fatiga, baja concentración) con 'wb_get_wellbeing_trends' / 'wb_get_wellbeing_report' (pocas horas de sueño, bajo estado de ánimo). Si detectas fatiga acumulada o mal descanso, aconseja pausas de recuperación activa.\n"
+    "4. TENDENCIA DE AGOTAMIENTO Y FATIGA: Correlaciona la baja concentración de los DATOS ACADÉMICOS con los datos de BIENESTAR (pocas horas de sueño, bajo estado de ánimo). Si detectas fatiga acumulada o mal descanso, aconseja pausas de recuperación activa.\n"
     "REGLAS DE ACTUACIÓN:\n"
-    "1. SOLO LECTURA: Tienes acceso a herramientas de consulta para revisar datos del usuario. NUNCA intentes modificar, crear ni eliminar datos.\n"
+    "1. SOLO LECTURA: No tienes herramientas; trabajas únicamente con los datos que se te proporcionan en el mensaje. NUNCA inventes datos ni llamadas a herramientas.\n"
     "2. SELECCIÓN DE CONSEJOS: Sé breve, conciso, oportuno y muy valioso. Da recomendaciones basadas en patrones reales observados en sus datos. NUNCA hables de tareas pendientes de forma proactiva si el usuario no lo ha pedido.\n"
     "3. CONTROL DE REPETICIONES DE CONSEJOS:\n"
     "   - NUNCA repitas el mismo consejo que ya se le haya dado al usuario previamente en la misma sesión o conversación reciente.\n"
@@ -302,25 +327,6 @@ ADVISOR_PROMPT = (
     "   - Por mensaje solo puedes aportar UNA recomendación. NUNCA hagas listas, ni des dos consejos distintos en el mismo mensaje.\n"
     "   - Máximo 2-3 frases en total. Si necesitas más, es porque estás hablando de demasiadas cosas a la vez: elige solo la más relevante.\n"
     "   - NUNCA hagas preguntas al usuario. Tu rol es exclusivamente aportar un consejo puntual, no iniciar una conversación ni pedir información adicional.\n"
-)
-
-
-PLANNER_PROMPT = (
-    "Eres el Agente de Planificación Diaria de una plataforma de estudio.\n"
-    "Tu única función es analizar el plan de estudio activo de un usuario junto con sus tendencias reales "
-    "de rendimiento (mejor/peor día de la semana, horas reales vs. planificadas por asignatura, sesiones "
-    "nocturnas...) y decidir qué actividades vencidas o pospuestas conviene reprogramar y, si procede, "
-    "recortar en horas planificadas.\n"
-    "NO hablas directamente con el usuario: tu salida se procesa de forma automática y, cuando corresponda, "
-    "otro agente conversacional se la explica al usuario en lenguaje natural. Por eso NUNCA debes dirigirte "
-    "al usuario en segunda persona ni redactar nada fuera del JSON pedido.\n"
-    "REGLAS ESTRICTAS:\n"
-    "1. Responde SIEMPRE con el JSON exacto que se te pida en cada petición: sin texto antes ni después, "
-    "sin explicaciones adicionales y sin bloques de código markdown (nada de ```).\n"
-    "2. No inventes índices de actividades, asignaturas ni cifras que no aparezcan en el contexto que se "
-    "te proporciona en cada petición.\n"
-    "3. Sé conservador: ante la duda de si reprogramar o recortar horas, no propongas el cambio.\n"
-    "4. Nunca adelantes una fecha a antes de hoy, y nunca aumentes las horas planificadas de una actividad."
 )
 
 
@@ -348,11 +354,8 @@ wellbeing_agent.set_system_instruction(WELLBEING_PROMPT + COMMON_RULES)
 general_agent.set_system_instruction(GENERAL_PROMPT + COMMON_RULES)
 if hasattr(advisor_agent, "set_system_instruction"):
     advisor_agent.set_system_instruction(ADVISOR_PROMPT + COMMON_RULES)
-# El planner_agent no conversa con el usuario (solo devuelve JSON interno), así que
-# NO lleva COMMON_RULES: esas reglas están redactadas para respuestas cara al usuario
-# (ocultar IDs, tono, etc.) y no aplican a una salida estructurada no conversacional.
 if hasattr(planner_agent, "set_system_instruction"):
-    planner_agent.set_system_instruction(PLANNER_PROMPT)
+    planner_agent.set_system_instruction(PLANNER_CONV_PROMPT + COMMON_RULES)
 
 
 langgraph_service = LangGraphService(
@@ -368,15 +371,31 @@ langgraph_service = LangGraphService(
 )
 
 
-# FastAPI lifespan: Manages startup and shutdown of the app
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Al arrancar la API, encendemos el "USB" del servidor MCP una sola vez
     await mcp_client.connect()
-    await db_service.ensure_indexes()  # Aseguramos que los índices estén creados al iniciar la app
+    await db_service.ensure_indexes() 
+
+    global GLOBAL_TOOLS_SCHEMA
+    for tool in mcp_client.tools:
+        schema = dict(tool.inputSchema) if tool.inputSchema else {}
+        if "properties" in schema and "user_id" in schema["properties"]:
+            props = dict(schema["properties"])
+            del props["user_id"]
+            schema["properties"] = props
+            if "required" in schema and "user_id" in schema["required"]:
+                reqs = list(schema["required"])
+                reqs.remove("user_id")
+                schema["required"] = reqs
+        GLOBAL_TOOLS_SCHEMA.append({
+            "name": tool.name,
+            "description": tool.description or f"Ejecutar {tool.name}",
+            "parameters": schema
+        })
+
+    print(f"[STARTUP] Servidor MCP conectado. {len(GLOBAL_TOOLS_SCHEMA)} herramientas cargadas.", file=sys.stderr)
 
     yield
-    # Al apagar la API, desconectamos el proceso de fondo de forma segura
     await mcp_client.disconnect()
     db_service.client.close()
 
@@ -388,13 +407,8 @@ app = FastAPI(title="TFG Bienestar", lifespan=lifespan)
 security = HTTPBearer()
 
 async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-    """
-    Coge el token de la cabecera, 
-    verifica que sea válido y devuelve el ID del usuario.
-    """
     token = credentials.credentials
     try:
-        # Intentamos descifrar el token con nuestra clave secreta
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
         if user_id is None:
@@ -407,11 +421,16 @@ async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depend
 
 
 async def get_timer_context(user_id: str, db_service: DatabaseService) -> str:
-    """Comprueba si hay un cronómetro activo en Clockify y devuelve contexto para el agente."""
+    cached = _timer_context_cache.get(user_id)
+    if cached and time.monotonic() - cached[0] < TIMER_CACHE_TTL:
+        return cached[1]
+
+    result_context = ""
     try:
         clockify_creds = await db_service.get_clockify_credentials(user_id)
         if not clockify_creds or not clockify_creds.get("api_key"):
-            return ""
+            _timer_context_cache[user_id] = (time.monotonic(), result_context)
+            return result_context
         
         cs = ClockifyService(
             api_key=clockify_creds["api_key"],
@@ -419,7 +438,8 @@ async def get_timer_context(user_id: str, db_service: DatabaseService) -> str:
         )
         active = await asyncio.to_thread(cs.get_active_time_entry)
         if not active:
-            return ""
+            _timer_context_cache[user_id] = (time.monotonic(), result_context)
+            return result_context
         
         desc = active.get("description", "sin descripción")
         start_raw = active.get("timeInterval", {}).get("start", "")
@@ -432,7 +452,6 @@ async def get_timer_context(user_id: str, db_service: DatabaseService) -> str:
                 local_dt = start_dt.astimezone(ZoneInfo("Europe/Madrid"))
                 start_str = local_dt.strftime("%H:%M")
                 
-                # Calcular tiempo transcurrido
                 now_dt = datetime.now(ZoneInfo("Europe/Madrid"))
                 elapsed_seconds = max(0, (now_dt - local_dt).total_seconds())
                 elapsed_mins = int(elapsed_seconds // 60)
@@ -445,20 +464,23 @@ async def get_timer_context(user_id: str, db_service: DatabaseService) -> str:
             except Exception:
                 start_str = start_raw
 
-        return (
+        result_context = (
             f"\n[CONTEXTO DEL SISTEMA: El usuario tiene un cronómetro activo "
             f"iniciado a las {start_str} (hora local de España){elapsed_str} para '{desc}'. "
             f"Si es relevante para la conversación, puedes mencionarlo o recordárselo al usuario.]"
         )
     except Exception:
-        return ""
+        pass
+
+    _timer_context_cache[user_id] = (time.monotonic(), result_context)
+    return result_context
 
  
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"], # Permitir solicitudes desde el frontend
-    allow_methods=["*"], # Permitir todos los métodos HTTP
-    allow_headers=["*"], # Permitir todos los encabezados
+    allow_origins=["http://localhost:3000"], 
+    allow_methods=["*"], 
+    allow_headers=["*"], 
 )
 
 ##################################################################
@@ -475,12 +497,11 @@ class RegisterRequest(BaseModel):
     email: str
     name: str
     password: str
+    role: str = "student" 
 
 class ProactiveGreetingRequest(BaseModel):
     is_login: Optional[bool] = False
     force_onboarding: Optional[bool] = False
-
-
 
 class ClockifyCredentialsRequest(BaseModel):
     api_key: Optional[str] = None
@@ -490,7 +511,6 @@ class ClockifyCredentialsRequest(BaseModel):
     @classmethod
     def normalize_payload(cls, data):
         if isinstance(data, dict):
-            # Normaliza api_key buscando variantes comunes
             key = data.get("api_key") or data.get("apiKey") or data.get("token")
             if not key:
                 raise ValueError("Se requiere la clave API de Clockify (api_key, apiKey o token).")
@@ -500,19 +520,16 @@ class ClockifyCredentialsRequest(BaseModel):
 class SubjectGradeRequest(BaseModel):
     grade: float
 
-
 class CreateCourseRequest(BaseModel):
     name: str
     description: Optional[str] = None
-    academic_year: Optional[str] = None  # ej. '2025/26'
-
+    academic_year: Optional[str] = None 
 
 class UpdateCourseRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     academic_year: Optional[str] = None
     is_active: Optional[bool] = None
-
 
 class EnrollCourseRequest(BaseModel):
     code: str
@@ -521,7 +538,6 @@ class EnrollCourseRequest(BaseModel):
 
 ##################################################################
 def get_datetime_context() -> str:
-    """Devuelve la fecha y hora actual formateada en español como contexto para el agente."""
     try:
         from zoneinfo import ZoneInfo
         now = datetime.now(ZoneInfo("Europe/Madrid"))
@@ -537,10 +553,6 @@ def get_datetime_context() -> str:
 
 
 async def get_daily_check_context(user_id: str, db_service: DatabaseService, analytics_service: AnalyticsService) -> str:
-    """
-    Comprueba si hoy el usuario ha registrado su informe de bienestar (horas de sueño)
-    y el estado de su plan de estudio activo para aportar contexto al agente.
-    """
     context_parts = []
     try:
         from zoneinfo import ZoneInfo
@@ -548,7 +560,6 @@ async def get_daily_check_context(user_id: str, db_service: DatabaseService, ana
     except Exception:
         today_str = datetime.now().strftime("%Y-%m-%d")
 
-    # 1. Comprobar si ya existe informe de bienestar para hoy
     try:
         has_today_report = await db_service.has_wellbeing_report_for_date(user_id, today_str)
         if not has_today_report:
@@ -559,27 +570,38 @@ async def get_daily_check_context(user_id: str, db_service: DatabaseService, ana
             )
     except Exception as e:
         import sys
-        print(f"[DAILY CHECK] Error comprobando informe de hoy: {e}", file=sys.stderr)
+        print(f"[ERROR][DAILY CHECK] Error comprobando informe de hoy: {e}", file=sys.stderr)
 
-    # 2. Comprobar únicamente si hay desvíos / tareas retrasadas en el plan activo
-    try:
-        if analytics_service:
-            plan_progress = await analytics_service.get_study_plan_progress(user_id, days=7)
-            if plan_progress and plan_progress.get("has_active_plan") and plan_progress.get("has_overdue_tasks"):
-                overdue_list = plan_progress.get("overdue_tasks", [])
-                overdue_details = []
-                for ot in overdue_list:
-                    status_label = "pendiente/sin terminar" if ot.get("status") == "INCUMPLIDA_PENDIENTE" else f"completada con retraso ({ot.get('completed_at')})"
-                    overdue_details.append(f"• '{ot.get('title')}' ({ot.get('subject_name')}, venció: {ot.get('due_date')}, estado: {status_label})")
-                
-                context_parts.append(
-                    f" ⚠️ ALERTAS DE INCUMPLIMIENTO/DESVÍO DEL PLAN: Se han detectado tareas no completadas dentro del plazo del plan o retrasadas: "
-                    f"[{'; '.join(overdue_details)}]. "
-                    f"Avisa al usuario con empatía sobre este retraso e incítale a reorganizarse, ya que no se está siguiendo el plan según lo previsto."
-                )
-    except Exception as e:
-        import sys
-        print(f"[DAILY CHECK] Error comprobando alertas del plan activo: {e}", file=sys.stderr)
+    if _plan_alert_shown.get(user_id) != today_str:
+        cached = _plan_alert_cache.get(user_id)
+        if cached and time.monotonic() - cached[0] < PLAN_ALERT_TTL:
+            plan_context = cached[1]
+        else:
+            plan_context = ""
+            try:
+                if analytics_service:
+                    plan_progress = await analytics_service.get_study_plan_progress(user_id, days=7)
+                    if plan_progress and plan_progress.get("has_active_plan") and plan_progress.get("has_overdue_tasks"):
+                        overdue_list = plan_progress.get("overdue_tasks", [])
+                        overdue_details = []
+                        for ot in overdue_list:
+                            status_label = "pendiente/sin terminar" if ot.get("status") == "INCUMPLIDA_PENDIENTE" else f"completada con retraso ({ot.get('completed_at')})"
+                            overdue_details.append(f"• '{ot.get('title')}' ({ot.get('subject_name')}, venció: {ot.get('due_date')}, estado: {status_label})")
+
+                        plan_context = (
+                            f" ⚠️ ALERTAS DE INCUMPLIMIENTO/DESVÍO DEL PLAN: Se han detectado tareas no completadas dentro del plazo del plan o retrasadas: "
+                            f"[{'; '.join(overdue_details)}]. "
+                            f"Si es oportuno, comenta con empatía este retraso y ofrécele reorganizar el plan (solo si no vas a hacer ya otra pregunta en el mismo mensaje)."
+                        )
+            except Exception as e:
+                import sys
+                print(f"[ERROR][DAILY CHECK] Error comprobando alertas del plan activo: {e}", file=sys.stderr)
+
+            _plan_alert_cache[user_id] = (time.monotonic(), plan_context)
+
+        if plan_context:
+            context_parts.append(plan_context)
+            _plan_alert_shown[user_id] = today_str
 
     if not context_parts:
         return ""
@@ -590,9 +612,6 @@ async def get_daily_check_context(user_id: str, db_service: DatabaseService, ana
 @app.post("/api/chat")
 async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_user_id)):
     try:
-
-
-        # Recuperamos los últimos 20 mensajes de historial del usuario para tener contexto de la conversación
         history_msgs = await db_service.get_history(user_id=user_id, limit=10)
 
         user_msg = await db_service.insert_message(
@@ -603,36 +622,11 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
 
         date_context = get_datetime_context()
         timer_context = await get_timer_context(user_id, db_service)
-        # Limpiar la caché de Clockify al inicio de cada petición de chat
-        # para no mezclar datos de usuarios distintos ni peticiones consecutivas.
-        analytics_service.clear_clockify_cache()
         daily_context = await get_daily_check_context(user_id, db_service, analytics_service)
         message_with_context = request.message + date_context + timer_context + daily_context
 
+        tools_raw = GLOBAL_TOOLS_SCHEMA
 
-        # Obtenemos la lista de herramientas disponibles en el MCP
-        # y ocultamos el campo "user_id" para que la IA no se lo invente.
-        tools_raw = []
-        for tool in mcp_client.tools:
-            schema = dict(tool.inputSchema) if tool.inputSchema else {}
-            if "properties" in schema and "user_id" in schema["properties"]:
-                props = dict(schema["properties"])
-                del props["user_id"]
-                schema["properties"] = props
-                
-                if "required" in schema and "user_id" in schema["required"]:
-                    reqs = list(schema["required"])
-                    reqs.remove("user_id")
-                    schema["required"] = reqs
-                    
-            tools_raw.append({
-                "name": tool.name,
-                "description": tool.description or f"Ejecutar {tool.name}",
-                "parameters": schema
-            })
-
-    
-        # Ejecución a través del flujo de LangGraph
         result = await langgraph_service.run(
             user_id=user_id,
             user_message=request.message,
@@ -657,7 +651,8 @@ async def handle_chat(request: ChatRequest, user_id: str = Depends(get_current_u
         }
 
     except Exception as e:
-        print(f"Error crítico en handle_chat: {str(e)}")
+        import sys
+        print(f"[ERROR][CHAT] Error crítico en handle_chat: {e}")
         raise HTTPException(status_code=500, detail=str(e))
  
 
@@ -666,22 +661,18 @@ async def get_proactive_greeting(
     request: Optional[ProactiveGreetingRequest] = None,
     user_id: str = Depends(get_current_user_id)
 ):
-    """
-    Endpoint que genera el saludo proactivo adecuado a través del grafo de LangGraph:
-    - Si es un usuario nuevo (o sin historial ni asignaturas): ejecuta onboarding_node (GENERAL)
-    - Si es un usuario recurrente (inicio de sesión): ejecuta login_greeting_node (BIENESTAR)
-    """
     is_force_onboarding = request.force_onboarding if request else False
+    tools_raw = GLOBAL_TOOLS_SCHEMA
 
     result = await langgraph_service.run_proactive_greeting(
         user_id=user_id,
+        tools_raw=tools_raw,
         is_force_onboarding=is_force_onboarding
     )
 
     response_text = result["response"]
     agent_used = result["agent_used"]
 
-    # Guardar el saludo en el historial de MongoDB
     greeting_msg = await db_service.insert_message(
         user_id=user_id,
         role="assistant",
@@ -699,11 +690,8 @@ async def get_proactive_greeting(
 async def trigger_daily_study_plan_review(
     user_id: str = Depends(get_current_user_id)
 ):
-    """
-    Endpoint para invocar bajo demanda la revisión y reajuste del plan de estudio
-    realizada por el Agente de Planificación.
-    """
-    result = await langgraph_service.run_daily_plan_review(user_id, force=True)
+    tools_raw = GLOBAL_TOOLS_SCHEMA
+    result = await langgraph_service.run_daily_plan_review(user_id, tools_raw, force=True)
     return result
 
 @app.post("/api/login")
@@ -715,19 +703,16 @@ async def login(request: LoginRequest):
     token = create_token(str(user["_id"]), user["email"])
     return {"token": token, "user": {"email": user["email"], "name": user["name"]}}
 
-
-
-
 @app.post("/api/register")
 async def register(request: RegisterRequest):
     existing = await db_service.get_user_by_email(request.email)
     if existing:
         raise HTTPException(status_code=400, detail="Ya existe una cuenta con ese email")
     
+    role = request.role if request.role in ("student", "teacher") else "student"
     hashed = hash_password(request.password)
-    user = await db_service.create_user(request.email, request.name, hashed)
+    user = await db_service.create_user(request.email, request.name, hashed, role=role)
     return {"message": "Usuario creado correctamente", "user_id": user["_id"]}
-
 
 @app.get("/api/chat/history")
 async def get_chat_history(
@@ -735,25 +720,20 @@ async def get_chat_history(
     limit: int = 30,
     skip: int = 0
 ):
-    """
-    Devuelve los mensajes del historial del usuario desde MongoDB con paginación.
-    """
     messages = await db_service.get_history(user_id=user_id, limit=limit, skip=skip)
     has_more = len(messages) == limit
     return {"history": messages, "has_more": has_more}
 
-
 @app.post("/api/chat/reset")
 async def reset_chat(user_id: str = Depends(get_current_user_id)):
-    """
-     Reinicia la memoria del bot en RAM y vacía la colección 
-    'history' de este usuario en MongoDB.
-    """
     academic_agent.clear_history()
     wellbeing_agent.clear_history()
     general_agent.clear_history()
+    planner_agent.clear_history()
+    if hasattr(advisor_agent, "clear_history"):
+        advisor_agent.clear_history()
+    orchestrator.classifier.clear_history()
     
-    # Borramos también la persistencia en Mongo para este usuario
     deleted_count = await db_service.clear_history(user_id)
     
     return {
@@ -761,24 +741,16 @@ async def reset_chat(user_id: str = Depends(get_current_user_id)):
         "deleted_messages": deleted_count
     }
 
-
-
 @app.post("/api/user/clockify-credentials")
 async def set_clockify_credentials(request: ClockifyCredentialsRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    Valida la API Key de Clockify contra su API y, si es correcta, la guarda.
-    """
-    # 1. Validar la clave ANTES de guardar nada
     try:
         clockify_user = await ClockifyService.validate_api_key(request.api_key)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # 2. La clave es válida → obtener workspace por defecto
     clockify_user_id = clockify_user.get("id")
     default_workspace_id = request.workspace_id or clockify_user.get("defaultWorkspace")
 
-    # 3. Verificar que esta cuenta de Clockify no esté ya vinculada a otro usuario en la plataforma
     existing_user = await db_service.get_user_by_clockify_id_or_key(
         clockify_user_id=clockify_user_id,
         api_key=request.api_key,
@@ -790,7 +762,6 @@ async def set_clockify_credentials(request: ClockifyCredentialsRequest, user_id:
             detail="Esta cuenta de Clockify ya está vinculada a otro usuario en la plataforma."
         )
 
-    # 4. Guardar en base de datos
     await db_service.update_clockify_credentials(
         user_id=user_id,
         api_key=request.api_key,
@@ -805,12 +776,8 @@ async def set_clockify_credentials(request: ClockifyCredentialsRequest, user_id:
         "clockify_user_id": clockify_user_id,
     }
 
-
 @app.get("/api/user/clockify-status")
 async def get_clockify_status(user_id: str = Depends(get_current_user_id)):
-    """
-    Devuelve el estado actual de la conexión del usuario con Clockify.
-    """
     user = await db_service.get_user_by_id(user_id)
     if not user or not user.get("clockify"):
         return {"connected": False}
@@ -822,7 +789,6 @@ async def get_clockify_status(user_id: str = Depends(get_current_user_id)):
         "updated_at": cdata.get("updated_at")
     }
 
-
 @app.get("/api/user/me")
 async def get_user_me(user_id: str = Depends(get_current_user_id)):
     user = await db_service.get_user_by_id(user_id)
@@ -830,46 +796,33 @@ async def get_user_me(user_id: str = Depends(get_current_user_id)):
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     return {
         "email": user.get("email"),
-        "name": user.get("name")
+        "name": user.get("name"),
+        "role": user.get("role", "student")
     }
-
 
 @app.post("/api/subjects/{subject_id}/grades")
 async def update_grade(subject_id: str, request: SubjectGradeRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    Actualiza la nota de una asignatura concreta.
-    """
     success = await db_service.update_subject_grade(subject_id, request.grade)
     if not success:
         raise HTTPException(status_code=404, detail="Asignatura no encontrada")
     return {"message": "Nota actualizada correctamente", "grade": request.grade}
-
 
 @app.get("/api/dashboard/student-analytics")
 async def get_student_analytics(
     days: int = 7,
     user_id: str = Depends(get_current_user_id)
 ):
-    """
-    Devuelve las analíticas agregadas para el dashboard del alumno.
-    `days`: 7 últimos días, 30 últimos 30 días, 0 = histórico completo.
-    """
     try:
         return await analytics_service.get_full_dashboard_analytics(user_id, days)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al generar analíticas: {str(e)}")
 
-
 @app.get("/api/analytics/summary")
 async def get_analytics_summary(days: int = 7, user_id: str = Depends(get_current_user_id)):
-    """
-    Devuelve las métricas y resúmenes estadísticos agregados del usuario para los últimos `days` días.
-    """
     try:
         return await analytics_service.get_user_analytics(user_id, days=days)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al generar analíticas: {str(e)}")
-
 
 @app.post("/api/share/generate")
 async def generate_share_code(user_id: str = Depends(get_current_user_id)):
@@ -899,7 +852,6 @@ async def get_shared_analytics(
     days: int = 7,
     user_id: str = Depends(get_current_user_id)
 ):
-    # Verificar acceso: solo si lo sigues o eres tú mismo
     if target_user_id != user_id:
         followed = await db_service.get_followed_users(user_id)
         ids = [f["user_id"] for f in followed]
@@ -918,45 +870,31 @@ async def get_my_share_code(user_id: str = Depends(get_current_user_id)):
         code = await db_service.generate_share_code(user_id)
     return {"code": code}
 
-
 @app.delete("/api/share/followed/{target_user_id}")
 async def unfollow_user(
     target_user_id: str, 
     user_id: str = Depends(get_current_user_id)
 ):
-    """
-    Permite dejar de seguir a otro usuario.
-    """
     await db_service.remove_followed_user(user_id, target_user_id)
     return {"status": "ok", "message": "Has dejado de seguir al usuario."}
 
-
 @app.get("/api/share/followers")
 async def get_followers(user_id: str = Depends(get_current_user_id)):
-    """
-    Obtiene la lista de usuarios que te siguen.
-    """
     followers = await db_service.get_followers(user_id)
     return {"followers": followers}
-
 
 @app.delete("/api/share/followers/{follower_id}")
 async def revoke_follower(
     follower_id: str, 
     user_id: str = Depends(get_current_user_id)
 ):
-    """
-    Revoca el acceso a un usuario para que deje de ver tus estadísticas.
-    """
     await db_service.remove_follower(user_id, follower_id)
     return {"status": "ok", "message": "Acceso revocado correctamente."}
-
 
 
 ##################################################################
 # TAGS ENDPOINTS
 ##################################################################
-
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 class TagColorRequest(BaseModel):
@@ -967,16 +905,12 @@ class TagRenameRequest(BaseModel):
     old_name: str
     new_name: str
 
-
 @app.get("/api/tags")
 async def get_tags(user_id: str = Depends(get_current_user_id)):
-    """Lista de etiquetas del usuario: [{name, color|None}], unión de user_tags y tags usados en tareas."""
     return {"tags": await db_service.get_all_tags(user_id)}
-
 
 @app.post("/api/tags")
 async def set_tag_color(req: TagColorRequest, user_id: str = Depends(get_current_user_id)):
-    """Crea o actualiza el color de una etiqueta."""
     if req.color is not None and not HEX_COLOR_RE.match(req.color):
         raise HTTPException(status_code=400, detail="Color inválido (se espera formato #RRGGBB)")
     try:
@@ -985,24 +919,18 @@ async def set_tag_color(req: TagColorRequest, user_id: str = Depends(get_current
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "ok", "tag": {"name": doc["name"], "color": doc["color"]}}
 
-
 @app.delete("/api/tags")
 async def delete_tag_color(name: str, user_id: str = Depends(get_current_user_id)):
-    """Quita el color guardado de una etiqueta (la etiqueta sigue existiendo en las tareas que la usen)."""
     await db_service.delete_user_tag(user_id, name)
     return {"status": "ok"}
 
-
 @app.post("/api/tags/merge-duplicates")
 async def merge_duplicate_tags(user_id: str = Depends(get_current_user_id)):
-    """Fusiona etiquetas duplicadas (mayúsculas/tildes) del usuario en tareas y colores."""
     merged = await db_service.merge_duplicate_tags(user_id)
     return {"status": "ok", "merged": merged}
 
-
 @app.put("/api/tags/rename")
 async def rename_tag(req: TagRenameRequest, user_id: str = Depends(get_current_user_id)):
-    """Renombra una etiqueta en todas las tareas del usuario y conserva su color."""
     try:
         new_name = await db_service.rename_tag(user_id, req.old_name, req.new_name)
     except ValueError as e:
@@ -1010,17 +938,14 @@ async def rename_tag(req: TagRenameRequest, user_id: str = Depends(get_current_u
     return {"status": "ok", "name": new_name}
 
 
-
 ##################################################################
 # COURSES ENDPOINTS
 ##################################################################
-
 @app.post("/api/courses")
 async def create_course(
     request: CreateCourseRequest,
     user_id: str = Depends(get_current_user_id)
 ):
-    """Crea un nuevo curso (el usuario pasa a ser profesor del mismo)."""
     course = await db_service.create_course(
         teacher_id=user_id,
         name=request.name,
@@ -1029,33 +954,25 @@ async def create_course(
     )
     return course
 
-
 @app.get("/api/courses/teaching")
 async def get_teaching_courses(user_id: str = Depends(get_current_user_id)):
-    """Devuelve los cursos en los que el usuario es profesor."""
     return {"courses": await db_service.get_courses_by_teacher(user_id)}
-
 
 @app.get("/api/courses/enrolled")
 async def get_enrolled_courses(user_id: str = Depends(get_current_user_id)):
-    """Devuelve los cursos en los que el usuario está matriculado como alumno."""
     return {"courses": await db_service.get_enrolled_courses(user_id)}
-
 
 @app.get("/api/courses/{course_id}")
 async def get_course(
     course_id: str,
     user_id: str = Depends(get_current_user_id)
 ):
-    """Detalle de un curso concreto. Sólo accesible por profesores o alumnos matriculados."""
     course = await db_service.get_course_by_id(course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
-    # Verificar acceso
     if user_id not in course.get("teacher_ids", []) and user_id not in course.get("student_ids", []):
         raise HTTPException(status_code=403, detail="Sin acceso a este curso")
     return course
-
 
 @app.patch("/api/courses/{course_id}")
 async def update_course(
@@ -1063,7 +980,6 @@ async def update_course(
     request: UpdateCourseRequest,
     user_id: str = Depends(get_current_user_id)
 ):
-    """Edita nombre, descripción, año académico o estado del curso. Solo el profesor."""
     course = await db_service.get_course_by_id(course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
@@ -1074,13 +990,11 @@ async def update_course(
         await db_service.update_course(course_id, **fields)
     return {"message": "Curso actualizado"}
 
-
 @app.delete("/api/courses/{course_id}")
 async def delete_course(
     course_id: str,
     user_id: str = Depends(get_current_user_id)
 ):
-    """Elimina un curso. Solo el profesor principal puede eliminarlo."""
     course = await db_service.get_course_by_id(course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
@@ -1089,17 +1003,13 @@ async def delete_course(
     await db_service.delete_course(course_id)
     return {"message": "Curso eliminado"}
 
-
 @app.get("/api/subjects/unlinked")
 async def get_unlinked_subjects(user_id: str = Depends(get_current_user_id)):
-    """Devuelve asignaturas del alumno que no están vinculadas a ningún curso."""
     subjects = await db_service.get_subjects_by_user(user_id)
     return {"subjects": [{"id": str(s["_id"]), "name": s["name"]} for s in subjects if not s.get("course_id")]}
 
-
 @app.get("/api/courses/check/{code}")
 async def check_course_code(code: str, user_id: str = Depends(get_current_user_id)):
-    """Verifica si un código de curso es válido y devuelve su info básica sin matricular."""
     course = await db_service.get_course_by_enrollment_code(code.strip())
     if not course:
         raise HTTPException(status_code=404, detail="Código de curso no válido")
@@ -1107,24 +1017,17 @@ async def check_course_code(code: str, user_id: str = Depends(get_current_user_i
         raise HTTPException(status_code=400, detail="Ya estás matriculado en este curso")
     return {"id": str(course["_id"]), "name": course["name"], "academic_year": course.get("academic_year", "")}
 
-
-
 @app.post("/api/courses/enroll")
 async def enroll_in_course(
     request: EnrollCourseRequest,
     user_id: str = Depends(get_current_user_id)
 ):
-    """Matricularse en un curso mediante código de inscripción."""
     code = request.code.strip()
-
-    # 1. Encontrar el curso
     course = await db_service.get_course_by_enrollment_code(code)
     if not course:
         raise HTTPException(status_code=404, detail="Código de curso no válido")
 
     course_id = str(course["_id"])
-
-    # 3. Verificar que no esté ya matriculado
     if user_id in course.get("student_ids", []):
         raise HTTPException(status_code=400, detail="Ya estás matriculado en este curso")
 
@@ -1137,7 +1040,6 @@ async def enroll_in_course(
             subject = None
 
     if not subject:
-        # 4. Crear proyecto en Clockify si el alumno lo tiene vinculado
         clockify_project_id = ""
         try:
             clockify_creds = await db_service.get_clockify_credentials(user_id)
@@ -1149,9 +1051,8 @@ async def enroll_in_course(
                 project = await asyncio.to_thread(cs.add_new_project, course["name"])
                 clockify_project_id = project.get("id", "")
         except Exception as e:
-            print(f"[ENROLL] No se pudo crear proyecto Clockify: {e}")
+            pass
 
-        # 5. Crear subject vinculada al curso
         subject = await db_service.create_subject(
             user_id=user_id,
             name=course["name"],
@@ -1159,18 +1060,14 @@ async def enroll_in_course(
             course_id=course_id
         )
 
-    # 6. Añadir al curso
     await db_service.add_student_to_course(course_id, user_id)
-
     return {"subject": subject, "course_name": course["name"]}
-
 
 @app.delete("/api/courses/{course_id}/leave")
 async def leave_course(
     course_id: str,
     user_id: str = Depends(get_current_user_id)
 ):
-    """Desmatricularse de un curso."""
     course = await db_service.get_course_by_id(course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
@@ -1179,16 +1076,11 @@ async def leave_course(
     await db_service.remove_student_from_course(course_id, user_id)
     return {"message": "Desmatriculado correctamente"}
 
-
 @app.get("/api/courses/{course_id}/students")
 async def get_course_students(
     course_id: str,
     user_id: str = Depends(get_current_user_id)
 ):
-    """
-    Lista de estudiantes del curso con nombre y email 
-    Solo accesible por el profesor.
-    """
     course = await db_service.get_course_by_id(course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
@@ -1203,15 +1095,12 @@ async def get_course_students(
             "name": u.get("name", "Estudiante") if u else "Estudiante",
             "email": u.get("email", "") if u else "",
         })
-
     return {"students": students, "course": course}
-
 
 
 ##################################################################
 # GLOBAL ANALYTICS ENDPOINTS
 ##################################################################
-
 GLOBAL_SUMMARY_PROMPT = (
     "Eres un sistema automático de análisis de datos educativos. "
     "Tu única función es generar, de forma INMEDIATA y DIRECTA, un párrafo analítico de 4 a 5 frases sobre las estadísticas de una clase. "
@@ -1239,7 +1128,6 @@ async def get_course_global_analytics(
     course_id: str,
     user_id: str = Depends(get_current_user_id)
 ):
-    """Obtiene la lista con los datos resumidos de todos los alumnos de un curso."""
     course = await db_service.get_course_by_id(course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
@@ -1252,13 +1140,11 @@ async def get_course_global_analytics(
         "global_summary_generated_at": course.get("global_summary_generated_at")
     }
 
-
 @app.post("/api/courses/{course_id}/global-summary")
 async def generate_global_course_summary(
     course_id: str,
     user_id: str = Depends(get_current_user_id)
 ):
-    """Genera un resumen global de la clase y lo guarda en el curso."""
     course = await db_service.get_course_by_id(course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
@@ -1269,7 +1155,6 @@ async def generate_global_course_summary(
     if not global_stats:
         raise HTTPException(status_code=400, detail="No hay datos suficientes para generar un resumen")
 
-    # Datos agregados para el LLM
     n = len(global_stats)
     hours_list = [s['hours'] for s in global_stats if s.get('hours') is not None]
     conc_list  = [s['avg_concentration'] for s in global_stats if s.get('avg_concentration') is not None]

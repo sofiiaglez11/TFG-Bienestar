@@ -33,6 +33,7 @@ export default function ChatPage() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [userName, setUserName] = useState("Estudiante");
   const [userEmail, setUserEmail] = useState("Cargando...");
+  const [userRole, setUserRole] = useState("student");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
@@ -42,6 +43,7 @@ export default function ChatPage() {
     localStorage.removeItem("token");
     localStorage.removeItem("userName");
     localStorage.removeItem("userEmail");
+    localStorage.removeItem("userRole");
     clearTagColors(); // evita que el siguiente usuario vea los colores del anterior
     setIsAuthenticated(false);
     router.push("/login");
@@ -193,8 +195,13 @@ export default function ChatPage() {
     const fetchUserInfo = async () => {
       const cachedName = localStorage.getItem("userName");
       const cachedEmail = localStorage.getItem("userEmail");
+      const cachedRole = localStorage.getItem("userRole");
       if (cachedName) setUserName(cachedName);
       if (cachedEmail) setUserEmail(cachedEmail);
+      if (cachedRole) {
+        setUserRole(cachedRole);
+        if (cachedRole === "teacher") setActiveTab("courses");
+      }
 
       try {
         const res = await fetch(`${BACKEND_URL}/api/user/me`, {
@@ -208,8 +215,15 @@ export default function ChatPage() {
           const data = await res.json();
           setUserName(data.name || "Estudiante");
           setUserEmail(data.email || "");
+          const role = data.role || "student";
+          setUserRole(role);
           localStorage.setItem("userName", data.name || "Estudiante");
           localStorage.setItem("userEmail", data.email || "");
+          localStorage.setItem("userRole", role);
+          // Redirigir al tab por defecto según el rol (solo si no hay cache previo)
+          if (!cachedRole) {
+            setActiveTab(role === "teacher" ? "courses" : "chat");
+          }
         }
       } catch (err) {
         console.error("Error al cargar información del usuario:", err);
@@ -272,6 +286,7 @@ export default function ChatPage() {
     localStorage.removeItem("token");
     localStorage.removeItem("userName");
     localStorage.removeItem("userEmail");
+    localStorage.removeItem("userRole");
     clearTagColors(); // evita que el siguiente usuario vea los colores del anterior
     setIsAuthenticated(false);
     router.push("/login");
@@ -518,7 +533,7 @@ export default function ChatPage() {
         </div>
 
         <div style={{ flex: 1, display: activeTab === "courses" ? "flex" : "none", flexDirection: "column", height: "100%", padding: "24px", overflow: "hidden" }}>
-          {activeTab === "courses" && <CoursesDashboard onClose={() => setActiveTab("chat")} />}
+          {activeTab === "courses" && <CoursesDashboard userRole={userRole} onClose={() => setActiveTab(userRole === "teacher" ? "courses" : "chat")} />}
         </div>
       </div>
 

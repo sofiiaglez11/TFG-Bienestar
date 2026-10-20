@@ -8,12 +8,12 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:800
 export default function RegisterPage() {
     const router = useRouter();
 
-    const handleRegister = async (name, email, password) => {
+    const handleRegister = async (name, email, password, role) => {
         try {
             const response = await fetch(`${BACKEND_URL}/api/register`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, email, password }),
+                body: JSON.stringify({ name, email, password, role }),
             });
 
             if (!response.ok) {

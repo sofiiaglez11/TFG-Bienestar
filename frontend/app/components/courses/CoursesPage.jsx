@@ -354,7 +354,7 @@ function CreateCourseModal({ onClose, onCreated }) {
 
 /* PÁGINA*/
 
-export default function CoursesPage({ onNavigate }) {
+export default function CoursesPage({ onNavigate, userRole = "student" }) {
   const token = getToken();
 
   const [teachingCourses, setTeachingCourses] = useState([]);
@@ -410,10 +410,12 @@ export default function CoursesPage({ onNavigate }) {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", flexWrap: "wrap" }}>
           <div>
             <h1 style={{ margin: 0, fontSize: "1.4rem", fontWeight: "700", display: "flex", alignItems: "center", gap: "10px", color: "var(--text-primary)" }}>
-              Mis Cursos
+              {userRole === "teacher" ? "Mis Cursos" : "Mis Cursos"}
             </h1>
             <p style={{ margin: "4px 0 0 0", fontSize: "14px", color: "var(--text-secondary)" }}>
-              Gestiona los cursos en los que estás matriculado y los que impartes
+              {userRole === "teacher"
+                ? "Gestiona los cursos que impartes"
+                : "Gestiona los cursos en los que estás matriculado"}
             </p>
           </div>
 
@@ -439,7 +441,8 @@ export default function CoursesPage({ onNavigate }) {
         </div>
       ) : (
         <>
-          {/* 1. Matriculado + botón unirse */}
+          {/* 1. Matriculado + botón unirse — solo para estudiantes */}
+          {userRole !== "teacher" && (
           <section style={{ marginBottom: "40px" }}>
             <SectionHeader
               icon={GraduationCap}
@@ -469,8 +472,10 @@ export default function CoursesPage({ onNavigate }) {
               </div>
             )}
           </section>
+          )}
 
-          {/* 2. Imparto + botón crear */}
+          {/* 2. Imparto + botón crear — solo para profesores */}
+          {userRole !== "student" && (
           <section>
             <SectionHeader
               icon={Users}
@@ -500,6 +505,7 @@ export default function CoursesPage({ onNavigate }) {
               </div>
             )}
           </section>
+          )}
         </>
       )}
 

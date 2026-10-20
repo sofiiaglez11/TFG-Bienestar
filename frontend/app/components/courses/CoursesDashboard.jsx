@@ -4,7 +4,7 @@ import TeacherCoursePage from './TeacherCoursePage';
 import StudentCoursePage from './StudentCoursePage';
 
 
-export default function CoursesDashboard({ onClose }) {
+export default function CoursesDashboard({ onClose, userRole = "student" }) {
   const [viewState, setViewState] = useState({ view: "list" });
 
   const handleNavigate = (newState) => {
@@ -14,7 +14,7 @@ export default function CoursesDashboard({ onClose }) {
 
   switch (viewState.view) {
     case "list": //LISTA DE CURSOS
-      return <CoursesPage onNavigate={handleNavigate} />;
+      return <CoursesPage onNavigate={handleNavigate} userRole={userRole} />;
 
     case "course": //DETALLE DEL CURSO
       return viewState.role === "teacher"

@@ -109,12 +109,13 @@ class DatabaseService:
     ############################################################################
     # METHODS FOR USERS
  
-    async def create_user(self, email: str, name: str, hashed_password: str) -> dict:
+    async def create_user(self, email: str, name: str, hashed_password: str, role: str = "student") -> dict:
         """Crea un nuevo usuario en la base de datos."""
         user = {
             "email": email,
             "name": name,
             "password": hashed_password,
+            "role": role,
             "current_period_id": None,
             "clockify": None
         }
