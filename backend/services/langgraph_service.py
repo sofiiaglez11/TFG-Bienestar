@@ -730,6 +730,11 @@ class LangGraphService:
             if last_review == today_str and not force:
                 return {"reviewed": False, "plan_modified": False, "summary": ""}
 
+            # Sin plan activo no hay nada que revisar: se evita la llamada al LLM
+            active_plan = await self.db_service.get_active_study_plan(user_id)
+            if not active_plan:
+                return {"reviewed": False, "plan_modified": False, "summary": ""}
+
             print(f"[PLANNER] Iniciando revisión diaria/reorganización autónoma para {user_id}", file=sys.stderr)
 
             inputs = {
@@ -809,13 +814,6 @@ class LangGraphService:
         }
 
     async def run_proactive_greeting(self, user_id: str, tools_raw: list, is_force_onboarding: bool = False) -> dict:
-        # Ejecutar la revisión diaria silenciosa antes de dar los buenos días
-        daily_review_res = {}
-        try:
-            daily_review_res = await self.run_daily_plan_review(user_id, tools_raw)
-        except Exception as e:
-            print(f"[ERROR][GREETING] Error en revisión diaria del plan: {e}", file=sys.stderr)
-
         user = await self.db_service.get_user_by_id(user_id)
         user_name = (user.get("name") if user else None) or "estudiante"
 
@@ -823,6 +821,14 @@ class LangGraphService:
         subjects = await self.db_service.get_subjects_by_user(user_id)
 
         is_new_user = is_force_onboarding or (len(history_msgs) == 0 and len(subjects) == 0)
+
+        # Revisión diaria silenciosa antes de saludar; no tiene sentido para un usuario nuevo
+        daily_review_res = {}
+        if not is_new_user:
+            try:
+                daily_review_res = await self.run_daily_plan_review(user_id, tools_raw)
+            except Exception as e:
+                print(f"[ERROR][GREETING] Error en revisión diaria del plan: {e}", file=sys.stderr)
 
         if is_new_user:
             event_type = "ONBOARDING"
