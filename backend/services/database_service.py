@@ -10,9 +10,20 @@ import secrets
 import unicodedata
 from typing import Optional
 from services.encryption_service import EncryptionService
+from pymongo import ReturnDocument
+
  
  
 load_dotenv()
+
+# Tipos de tarea cuya fecha es fija: el agente planificador no puede reprogramarlos.
+FIXED_DATE_TYPES = {"exam", "assignment"}
+
+
+def task_can_be_rescheduled(task: dict) -> bool:
+    """True si el planificador puede mover la fecha de la tarea (exámenes y entregas tienen fecha fija)."""
+    return (task or {}).get("type") not in FIXED_DATE_TYPES
+
  
 class DatabaseService:
  
@@ -538,6 +549,7 @@ class DatabaseService:
         type puede ser: 'task', 'exam', 'assignment' u 'other'.
         subject_id es opcional para permitir eventos globales o administrativos.
         priority es opcional: entero entre 1 (muy baja) y 5 (muy alta).
+        Los tipos 'exam' y 'assignment' tienen fecha fija: el agente planificador no puede reprogramarlos.
         Al crearlas, el campo status por defecto es "PENDING".
         """
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -559,6 +571,17 @@ class DatabaseService:
         result = await self.tasks.insert_one(task)
         task["_id"] = str(result.inserted_id)
         return task
+
+    async def plan_item_is_fixed(self, item: dict) -> bool:
+        """True si alguna tarea vinculada a la actividad del plan tiene fecha fija (examen/entrega)."""
+        for tid in (item or {}).get("linked_task_ids", []):
+            try:
+                t = await self.get_task_by_id(str(tid))
+            except Exception:
+                t = None
+            if t and not task_can_be_rescheduled(t):
+                return True
+        return False
 
     async def get_tasks_by_subject(self, subject_id: str = None, user_id: str = None, include_completed: bool = True, include_active: bool = True, include_in_progress: bool = True, include_pending: bool = True, priorities: list[int] = None) -> list:
         """Devuelve todas las tareas de una asignatura (o de todas las asignaturas si subject_id es None y se pasa user_id) según filtros de estado y prioridades."""
@@ -929,6 +952,55 @@ class DatabaseService:
             e["_id"] = str(e["_id"])
         return entries
 
+    async def upsert_wellbeing_report(self, user_id: str, date: str, sleep_hours: float = None, sleep_quality: int = None, mood_score: int = None,
+        energy_level: int = None, notes: str = None,) -> dict:
+        """
+        Crea o actualiza el informe de bienestar de un día (uno por user_id + date).
+        Solo se modifican los campos que se pasan (not None); el resto se conserva.
+        Las notas nuevas se añaden a las anteriores en lugar de sobrescribirlas.
+        Devuelve el documento completo tras la operación.
+        """
+        for name, value in (("sleep_quality", sleep_quality),
+                            ("mood_score", mood_score),
+                            ("energy_level", energy_level)):
+            if value is not None and not (1 <= int(value) <= 5):
+                raise ValueError(f"{name} debe estar entre 1 y 5 (recibido: {value}).")
+        if sleep_hours is not None and not (0 <= float(sleep_hours) <= 24):
+            raise ValueError(f"sleep_hours debe estar entre 0 y 24 (recibido: {sleep_hours}).")
+
+        incoming = {
+            "sleep_hours": sleep_hours,
+            "sleep_quality": sleep_quality,
+            "mood_score": mood_score,
+            "energy_level": energy_level,
+        }
+        to_set = {k: v for k, v in incoming.items() if v is not None}
+
+        # Notas: concatenar con las existentes
+        if notes:
+            existing = await self.wellbeing_entries.find_one(
+                {"user_id": user_id, "date": date}, {"notes": 1}
+            )
+            prev = (existing or {}).get("notes")
+            to_set["notes"] = f"{prev} | {notes}" if prev else notes
+
+        # Al crear el documento, los campos no informados quedan a None (misma forma que create_wellbeing_report)
+        all_fields = list(incoming) + ["notes"]
+        set_on_insert = {k: None for k in all_fields if k not in to_set}
+
+        update = {"$setOnInsert": set_on_insert}
+        if to_set:
+            update["$set"] = to_set
+
+        doc = await self.wellbeing_entries.find_one_and_update(
+            {"user_id": user_id, "date": date},
+            update,
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        doc["_id"] = str(doc["_id"])
+        return doc
+
 
     ############################################################################
     # METHODS FOR STUDY REPORTS
@@ -1057,7 +1129,8 @@ class DatabaseService:
             it["due_date"] = due_date
             subj_name = it.get("subject_name")
             desc = it.get("description") or it.get("task", "")
-            linked_tasks = []
+            # Conservar los vínculos ya resueltos por la herramienta MCP (linked_task_titles -> ids)
+            linked_tasks = [str(x) for x in (it.get("linked_task_ids") or [])]
 
             if subj_name:
                 sub_doc = await self.subjects.find_one({
@@ -1074,8 +1147,10 @@ class DatabaseService:
                             t_title = task.get("title", "").strip()
                             if t_title.lower() in desc.lower() and len(t_title) > 2:
                                 t_id = str(task["_id"])
-                                linked_tasks.append(t_id)
-                                if task.get("due_date") != due_date:
+                                if t_id not in linked_tasks:
+                                    linked_tasks.append(t_id)
+                                # Exámenes/entregas: se vinculan pero nunca se les cambia la fecha
+                                if task.get("due_date") != due_date and task_can_be_rescheduled(task):
                                     await self.update_task(t_id, due_date=due_date)
 
             it["linked_task_ids"] = linked_tasks

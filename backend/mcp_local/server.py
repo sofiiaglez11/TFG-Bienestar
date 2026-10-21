@@ -9,7 +9,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
  
 from services.clockify_service import ClockifyService
-from services.database_service import DatabaseService
+from services.database_service import DatabaseService, task_can_be_rescheduled
 from services.analytics_service import AnalyticsService
 import asyncio
 from typing import Optional
@@ -814,7 +814,7 @@ async def assign_subject_to_period(user_id: str, subject_name: str, period_name:
 async def add_task(user_id: str, subject_name: str, title: str, description: str = "",
                     due_date: str = None, parent_task_title: str = None,
                     workspace_id: str = None, priority: int = None,
-                    tags: list[str] = None):
+                    tags: list[str] = None, type: str = "task"):
     '''
     Crea un nuevo elemento en la agenda del usuario. 
     Úsala tanto para tareas normales como para exámenes, entregas de proyectos o fechas importantes.
@@ -897,7 +897,8 @@ async def add_task(user_id: str, subject_name: str, title: str, description: str
             parent_task_id=parent_task_id,
             clockify_task_id=clockify_task_id,
             priority=priority,
-            tags=tags
+            tags=tags,
+            type=type if type in ("task", "exam", "assignment", "other") else "task"
         )
         return f"Tarea '{title}' añadida a '{subject_name}' correctamente."
     except Exception as e:
@@ -1059,7 +1060,7 @@ async def get_tasks(user_id: str, subject_name: Optional[str] = None, include_co
 
         tasks_data = [serialize(root) for root in root_tasks]
 
-        # print(f"[MCP TOOL: GET_TASKS] response={tasks_data}", file=sys.stderr, flush=True)
+        print(f"[MCP TOOL: GET_TASKS] response={tasks_data}", file=sys.stderr, flush=True)
 
         return json.dumps({
             "subject": target_subject_name,
@@ -1153,9 +1154,11 @@ async def mark_task_active(user_id: str, subject_name: str, task_title: str, act
 async def edit_task(user_id: str, subject_name: str, task_title: str,
                     new_title: str = None, description: str = None,
                     due_date: str = None, priority: int = None,
-                    tags: list[str] = None):
+                    tags: list[str] = None, type: str = None):
     """
-    Edita una tarea existente: título, descripción, fecha de vencimiento, prioridad o tags.
+    Edita una tarea existente: título, descripción, fecha de vencimiento, prioridad, tags o tipo.
+    type: 'task', 'exam', 'assignment' u 'other'. Los exámenes y entregas tienen fecha FIJA: el sistema
+        no los reprograma automáticamente (solo el usuario puede cambiarles la fecha).
     Para marcar una tarea como completada o revertirla, usa complete_task.
     Para cambiar la jerarquía (padre/subtarea), usa set_task_hierarchy.
     due_date debe tener formato ISO 8601 (ej: '2026-07-20' o '2026-07-20T18:00:00'). Si el usuario indica una hora concreta, inclúyela.
@@ -1188,6 +1191,8 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
         if tags is not None:
             # Normalizar: minúsculas, sin duplicados, sin espacios en los extremos
             updates["tags"] = await db_service.canonicalize_tags(user_id, tags)
+        if type in ("task", "exam", "assignment", "other"):
+            updates["type"] = type
 
         if not updates:
             return "No me has indicado qué quieres cambiar de la tarea."
@@ -1230,6 +1235,8 @@ async def edit_task(user_id: str, subject_name: str, task_title: str,
         if tags is not None:
             cambios.append(f"tags: {updates.get('tags', [])!r}")
 
+        if "type" in updates:
+            cambios.append(f"tipo: {updates['type']}")
         return f"Tarea '{task_title}' actualizada: {', '.join(cambios)}."
     except Exception as e:
         return f"Error al editar la tarea: {str(e)}"
@@ -1995,22 +2002,46 @@ async def delete_time_entry(user_id: str, time_entry_id: Optional[str] = None, s
 
 
 @mcp.tool()
-async def wb_add_wellbeing_report(user_id: str, date: str, sleep_hours: float, sleep_quality: int, mood_score: int, energy_level: int, notes: str = ""):
+async def wb_add_wellbeing_report(user_id: str, date: str, sleep_hours: Optional[float] = None,
+                                  sleep_quality: Optional[int] = None, mood_score: Optional[int] = None,
+                                  energy_level: Optional[int] = None, notes: Optional[str] = None):
     """
-    Registra un informe de bienestar del usuario.
-    Úsala cuando el usuario quiera registrar su estado de ánimo o bienestar.
+    Registra o ACTUALIZA el informe de bienestar DIARIO del usuario (uno por día).
+    Se puede llamar varias veces el mismo día: cada llamada AÑADE al informe de hoy solo los datos
+    que se pasen (los que no se pasen se conservan). Pasa ÚNICAMENTE los datos que el usuario acaba de dar;
+    NO inventes valores ni repitas los ya guardados.
+    - date: fecha de hoy (YYYY-MM-DD).
+    - sleep_hours: horas de sueño.
+    - sleep_quality: calidad del descanso, 1 (muy mala) a 5 (excelente).
+    - mood_score: estado de ánimo, 1 (muy bajo) a 5 (muy alto).
+    - energy_level: nivel de energía, 1 (muy bajo) a 5 (muy alto).
+    - notes: comentario libre (opcional).
+    La respuesta indica qué datos faltan todavía, para que sepas qué preguntar a continuación.
     """
     try:
-        await db_service.create_wellbeing_report(
-            user_id=user_id,
-            date=date,
-            sleep_hours=sleep_hours,
-            sleep_quality=sleep_quality,
-            mood_score=mood_score,
-            energy_level=energy_level,
-            notes=notes
-        )
-        return "Informe de bienestar registrado correctamente."
+        fields = {
+            "sleep_hours": sleep_hours,
+            "sleep_quality": sleep_quality,
+            "mood_score": mood_score,
+            "energy_level": energy_level,
+            "notes": notes,
+        }
+        provided = {k: v for k, v in fields.items() if v is not None}
+        if not provided:
+            return "No se ha indicado ningún dato nuevo para el informe de bienestar."
+
+        report = await db_service.upsert_wellbeing_report(user_id=user_id, date=date, **provided)
+
+        labels = {
+            "sleep_hours": "horas de sueño",
+            "sleep_quality": "calidad del descanso",
+            "mood_score": "estado de ánimo",
+            "energy_level": "nivel de energía",
+        }
+        missing = [lbl for key, lbl in labels.items() if (report or {}).get(key) is None]
+        if missing:
+            return f"Informe de bienestar de hoy actualizado. Aún faltan: {', '.join(missing)}."
+        return "Informe de bienestar de hoy completo y guardado."
     except Exception as e:
         return f"Error al registrar el informe de bienestar: {str(e)}"
 
@@ -2498,10 +2529,27 @@ async def get_planner_analytics(user_id: str, days: int = 14) -> str:
             )
             for subj, d in (plan.get("progress_by_subject") or {}).items():
                 lines.append(f"  - {subj}: {d['actual_hours']}h / {d['planned_hours']}h ({d['progress_pct']}%)")
+            # Exámenes/entregas (fecha fija) no se reagendan: se separan de los retrasos
+            all_tasks = await db_service.get_tasks_by_subject(user_id=user_id)
+            subjects_all = await db_service.get_subjects_by_user(user_id, include_archived=True)
+            sid_name = {str(s["_id"]): (s.get("name") or "").lower() for s in subjects_all}
+            fixed_keys = {
+                ((t.get("title") or "").lower(), sid_name.get(str(t.get("subject_id")), "general"))
+                for t in all_tasks if not task_can_be_rescheduled(t)
+            }
+            movable, fixed_overdue = [], []
             for ot in plan.get("overdue_tasks", []):
+                key = ((ot.get("title") or "").lower(), (ot.get("subject_name") or "").lower())
+                (fixed_overdue if key in fixed_keys else movable).append(ot)
+            for ot in movable:
                 lines.append(f"  ⚠ '{ot.get('title')}' ({ot.get('subject_name')}), venció {ot.get('due_date')}")
-            if not plan.get("overdue_tasks"):
+            if not movable:
                 lines.append("Sin actividades retrasadas.")
+            if fixed_overdue:
+                lines.append(
+                    "Informativo (exámenes/entregas de fecha fija; NO reagendar ni contar como retraso): "
+                    + ", ".join(f"'{o.get('title')}' ({o.get('subject_name')}, {o.get('due_date')})" for o in fixed_overdue)
+                )
         else:
             lines.append("\n[Sin plan de estudio activo]")
     except Exception as e:

@@ -8,6 +8,7 @@ from typing import TypedDict, Optional, List, Dict, Any
 from langgraph.graph import StateGraph, START, END
 from zoneinfo import ZoneInfo
 from datetime import timedelta
+from services.database_service import task_can_be_rescheduled
 
 class GraphState(TypedDict):
     user_id: str
@@ -372,6 +373,66 @@ class LangGraphService:
             "advisor_trigger": "periodic_counter" if periodic_trigger else ""
         }
 
+    # Nombres de argumentos que pueden usar las herramientas MCP (ajusta si en server.py se llaman distinto)
+    PLAN_ITEM_INDEX_KEYS = ("item_index", "index", "plan_item_index", "activity_index")
+    TASK_ID_KEYS = ("task_id", "id")
+    TASK_TITLE_KEYS = ("task_title", "title", "task_name", "name")
+    NEW_DATE_KEYS = ("due_date", "new_due_date")
+
+    async def _find_task_for_guard(self, user_id: str, arguments: dict) -> Optional[Dict[str, Any]]:
+        """Localiza la tarea a la que apunta una llamada a edit_task (por id o por título)."""
+        tid = next((arguments[k] for k in self.TASK_ID_KEYS if arguments.get(k)), None)
+        if tid:
+            return await self.db_service.get_task_by_id(str(tid))
+
+        title = next((arguments[k] for k in self.TASK_TITLE_KEYS if arguments.get(k)), None)
+        if not title:
+            return None
+        title = str(title).strip().lower()
+        tasks = await self.db_service.get_tasks_by_subject(user_id=user_id)
+        matches = [t for t in tasks if (t.get("title") or "").strip().lower() == title]
+
+        subj_name = arguments.get("subject_name")
+        if subj_name and len(matches) > 1:
+            subjects = await self.db_service.get_subjects_by_user(user_id, include_archived=True)
+            ids = {str(s["_id"]) for s in subjects if (s.get("name") or "").lower() == str(subj_name).lower()}
+            matches = [t for t in matches if str(t.get("subject_id")) in ids] or matches
+
+        # Si alguna coincidencia es de fecha fija, se devuelve esa (criterio conservador)
+        for t in matches:
+            if not task_can_be_rescheduled(t):
+                return t
+        return matches[0] if matches else None
+
+    async def _planner_fixed_date_guard(self, user_id: str, name: str, arguments: dict) -> Optional[str]:
+        """
+        Devuelve un mensaje de error (str) si la llamada intenta mover un examen/entrega;
+        None si puede continuar. Nunca lanza: ante un fallo deja pasar la llamada.
+        """
+        msg = (
+            "BLOQUEADO: esa actividad corresponde a un examen o entrega con fecha FIJA y no puede "
+            "reprogramarse automáticamente. Déjala como está, no la cuentes como movida y sigue con el resto."
+        )
+        try:
+            if name == "reschedule_plan_item":
+                idx = next((arguments[k] for k in self.PLAN_ITEM_INDEX_KEYS if arguments.get(k) is not None), None)
+                if idx is None:
+                    return None
+                plan = await self.db_service.get_active_study_plan(user_id)
+                items = (plan or {}).get("items", [])
+                idx = int(idx)
+                if 0 <= idx < len(items) and await self.db_service.plan_item_is_fixed(items[idx]):
+                    return msg
+            elif name == "edit_task":
+                if not any(arguments.get(k) for k in self.NEW_DATE_KEYS):
+                    return None
+                task = await self._find_task_for_guard(user_id, arguments)
+                if task and not task_can_be_rescheduled(task):
+                    return msg
+        except Exception as e:
+            print(f"[ERROR][PLANNER GUARD] {e}", file=sys.stderr)
+        return None
+
     async def _planner_node(self, state: GraphState) -> Dict[str, Any]:
         """
         Nodo conversacional del agente planificador autónomo (ReAct).
@@ -408,6 +469,12 @@ class LangGraphService:
             if name != "get_agent_capabilities":
                 arguments["user_id"] = user_id
             print(f"[PLANNER CONV] 🔧 Herramienta: {name}", file=sys.stderr)
+            # En la revisión automática el usuario no ha pedido nada: exámenes y entregas son intocables.
+            if event_type == "DAILY_REVIEW":
+                blocked = await self._planner_fixed_date_guard(user_id, name, arguments)
+                if blocked:
+                    print(f"[PLANNER CONV] ⛔ Bloqueado {name}: tarea de fecha fija.", file=sys.stderr)
+                    return blocked
             res = await self.mcp_client.call_tool(name, arguments)
             if name in PLAN_CHANGING_TOOLS:
                 try:
@@ -681,7 +748,8 @@ class LangGraphService:
                     "Es el inicio del día o el sistema te ha despertado para hacer un chequeo.\n"
                     "1. Usa la herramienta get_planner_analytics para comprobar si el plan de estudio activo tiene tareas vencidas o pospuestas.\n"
                     "2. Si no hay plan activo o todo está al día (0 retrasos), no hagas nada y responde EXACTAMENTE con la palabra 'PLAN_OK' (sin comillas ni ningún texto adicional).\n"
-                    "3. Si hay retrasos, usa reschedule_plan_item para ajustar las fechas y/u horas basándote en las tendencias reales de productividad del usuario.\n"
+                    "3. Si hay retrasos, usa reschedule_plan_item para ajustar las fechas y/u horas basándote en las tendencias reales de productividad del usuario. "
+                    "NUNCA muevas exámenes ni entregas: tienen fecha fija; ignóralos aunque aparezcan vencidos.\n"
                     "4. Finalmente, redacta un breve resumen empático dirigido al usuario explicándole qué actividades has movido y por qué para adaptarte a su ritmo real."
                 )
             }
