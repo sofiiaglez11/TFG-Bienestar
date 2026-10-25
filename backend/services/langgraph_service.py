@@ -468,12 +468,12 @@ class LangGraphService:
         async def planner_tool_executor(name: str, arguments: dict):
             if name != "get_agent_capabilities":
                 arguments["user_id"] = user_id
-            print(f"[PLANNER CONV] 🔧 Herramienta: {name}", file=sys.stderr)
+            print(f"[PLANNER CONV] Herramienta: {name}", file=sys.stderr)
             # En la revisión automática el usuario no ha pedido nada: exámenes y entregas son intocables.
             if event_type == "DAILY_REVIEW":
                 blocked = await self._planner_fixed_date_guard(user_id, name, arguments)
                 if blocked:
-                    print(f"[PLANNER CONV] ⛔ Bloqueado {name}: tarea de fecha fija.", file=sys.stderr)
+                    print(f"[PLANNER CONV] Bloqueado {name}: tarea de fecha fija.", file=sys.stderr)
                     return blocked
             res = await self.mcp_client.call_tool(name, arguments)
             if name in PLAN_CHANGING_TOOLS:
@@ -837,11 +837,11 @@ class LangGraphService:
                 "Dale una cálida, entusiasta y cercana bienvenida llamándole por su nombre.\n"
                 "Explícale de manera clara, amigable y bien estructurada (usa viñetas o puntos breves) "
                 "las funcionalidades principales con las que este chat le ayudará en su día a día como estudiante:\n"
-                "• **Gestión de Asignaturas y Tareas**: Organización de materias, tareas pendientes, fechas límite de entregas y exámenes.\n"
-                "• **Temporizador y Registro de Estudio**: Medición del tiempo real de estudio con cronómetro en directo e integración con Clockify.\n"
-                "• **Planes de Estudio Personalizados**: Creación y seguimiento de planificaciones semanales adaptadas a sus objetivos y ritmo.\n"
-                "• **Cuidado de tu Bienestar**: Registro de horas de sueño, descansos, niveles de estrés y fatiga tras cada sesión para mantener un equilibrio saludable.\n"
-                "• **Métricas y Consejos Inteligentes**: Análisis de rendimiento y recomendaciones proactivas para optimizar su estudio sin agotarse.\n\n"
+                # "• **Gestión de Asignaturas y Tareas**: Organización de materias, tareas pendientes, fechas límite de entregas y exámenes.\n"
+                # "• **Temporizador y Registro de Estudio**: Medición del tiempo real de estudio con cronómetro en directo e integración con Clockify.\n"
+                # "• **Planes de Estudio Personalizados**: Creación y seguimiento de planificaciones semanales adaptadas a sus objetivos y ritmo.\n"
+                # "• **Cuidado de tu Bienestar**: Registro de horas de sueño, descansos, niveles de estrés y fatiga tras cada sesión para mantener un equilibrio saludable.\n"
+                # "• **Métricas y Consejos Inteligentes**: Análisis de rendimiento y recomendaciones proactivas para optimizar su estudio sin agotarse.\n\n"
                 "Termina el mensaje con una llamada a la acción clara e interactiva para empezar, sugiriendo registrar sus asignaturas actuales. Por ejemplo:\n"
                 "'Para empezar a organizarnos, ¿qué te parece si registramos tus asignaturas? Cuéntame qué asignaturas estás cursando este cuatrimestre y las configuramos juntos.'\n\n"
                 "REGLA ESTRICTA: En este primer saludo de onboarding NO le preguntes cuántas horas ha dormido hoy ni le pidas informe de bienestar todavía; el foco absoluto es presentarle la plataforma e invitarle a registrar sus asignaturas."

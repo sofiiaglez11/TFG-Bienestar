@@ -412,7 +412,7 @@ async def lifespan(app: FastAPI):
 
     yield
     await mcp_client.disconnect()
-    db_service.client.close()
+    await db_service.close()
 
 
 

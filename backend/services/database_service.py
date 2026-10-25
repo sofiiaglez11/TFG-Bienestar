@@ -1,6 +1,5 @@
 import os
 import re
-from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from bson import ObjectId
 from datetime import datetime, timezone, timedelta
@@ -10,7 +9,7 @@ import secrets
 import unicodedata
 from typing import Optional
 from services.encryption_service import EncryptionService
-from pymongo import ReturnDocument
+from pymongo import AsyncMongoClient, ReturnDocument
 
  
  
@@ -28,7 +27,7 @@ def task_can_be_rescheduled(task: dict) -> bool:
 class DatabaseService:
  
     def __init__(self):
-        self.client = AsyncIOMotorClient(os.getenv("MONGODB_URI"))
+        self.client = AsyncMongoClient(os.getenv("MONGODB_URI"))
         self.db = self.client["tfg_bienestar"]
  
         # Colecciones
@@ -43,6 +42,10 @@ class DatabaseService:
         self.study_plans = self.db["study_plans"]
         self.courses = self.db["courses"]
         self.user_tags = self.db["user_tags"]
+
+    async def close(self):
+        """Cierra la conexión con MongoDB."""
+        await self.client.close()
 
     async def ensure_indexes(self):
         """
@@ -668,9 +671,6 @@ class DatabaseService:
         print(f"[DEBUG] El ID de la tarea a eliminar es: {task_id}", file=sys.stderr)
         str_id = str(task_id)
         task_oid = ObjectId(str_id)
-        # Eliminar entradas de tiempo vinculadas
-        # await self.time_entries.delete_many({"task_id": str_id})
-        # print(f"[DEBUG] Entradas de tiempo eliminadas", file=sys.stderr)
         # Eliminar subtareas
         await self.tasks.delete_many({"parent_task_id": str_id})
         # Eliminar la propia tarea
@@ -753,19 +753,20 @@ class DatabaseService:
 
     async def get_all_tags(self, user_id: str) -> list:
         """Devuelve la lista de tags (objetos dict con 'name' y 'color') del usuario."""
-        # 1. Obtener tags configurados por el usuario
+        # Obtener tags configurados por el usuario
         cursor = self.user_tags.find({"user_id": user_id})
         saved_tags = await cursor.to_list(500)
         tag_dict = {t["name"]: t.get("color") for t in saved_tags if "name" in t}
 
-        # 2. Buscar tags usados en tareas que aún no estén registrados explícitamente
+        # Buscar tags usados en tareas que aún no estén registrados explícitamente
         pipeline = [
             {"$match": {"user_id": user_id, "tags": {"$exists": True, "$ne": []}}},
             {"$unwind": "$tags"},
             {"$group": {"_id": "$tags"}},
             {"$sort": {"_id": 1}}
         ]
-        result = await self.tasks.aggregate(pipeline).to_list(200)
+        agg_cursor = await self.tasks.aggregate(pipeline)
+        result = await agg_cursor.to_list(200)
         task_tags = [doc["_id"] for doc in result]
 
         # Combinar
@@ -840,57 +841,6 @@ class DatabaseService:
             e["_id"] = str(e["_id"])
         return events
  
- 
-    # ############################################################################
-    # # METHODS FOR TIME ENTRIES
- 
-    # async def create_time_entry(self, user_id: str, subject_id: str,
-    #                             task_id: str = None, description: str = "") -> dict:
-    #     """
-    #     Crea una nueva entrada de tiempo.
-    #     - subject_id es siempre obligatorio.
-    #     - task_id es opcional: puede dedicarse tiempo a la asignatura en general,
-    #       sin tarea concreta asociada.
-    #     """
-    #     time_entry = {
-    #         "user_id": user_id,
-    #         "subject_id": subject_id,
-    #         "task_id": task_id,
-    #         "description": description
-    #     }
-    #     result = await self.time_entries.insert_one(time_entry)
-    #     time_entry["_id"] = str(result.inserted_id)
-    #     return time_entry
- 
-    # async def get_time_entries_by_subject(self, subject_id: str) -> list:
-    #     """Devuelve todas las entradas de tiempo de una asignatura, más recientes primero."""
-    #     cursor = self.time_entries.find({"subject_id": subject_id})
-    #     time_entries = await cursor.to_list(100)
-    #     for te in time_entries:
-    #         te["_id"] = str(te["_id"])
-    #     return time_entries
- 
-    # async def get_time_entries_by_task(self, task_id: str) -> list:
-    #     """Devuelve todas las entradas de tiempo de una tarea concreta."""
-    #     cursor = self.time_entries.find({"task_id": task_id})
-    #     time_entries = await cursor.to_list(100)
-    #     for te in time_entries:
-    #         te["_id"] = str(te["_id"])
-    #     return time_entries
- 
-    # async def get_active_time_entry(self, user_id: str) -> dict | None:
-    #     """
-    #     Devuelve la entrada de tiempo en marcha del usuario (end_time == None), si hay una.
-    #     Útil para comprobar si ya hay un cronómetro corriendo antes de arrancar otro.
-    #     """
-    #     entry = await self.time_entries.find_one({"user_id": user_id, "end_time": None})
-    #     if entry:
-    #         entry["_id"] = str(entry["_id"])
-    #     return entry
- 
-    # async def delete_time_entry(self, time_entry_id: str):
-    #     """Elimina una entrada de tiempo por su ID."""
-    #     await self.time_entries.delete_one({"_id": ObjectId(time_entry_id)})
  
  
     # ############################################################################

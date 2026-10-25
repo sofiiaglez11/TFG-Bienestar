@@ -340,8 +340,7 @@ class AnalyticsService:
             except Exception:
                 today_str = datetime.now().strftime("%Y-%m-%d")
 
-            cursor = self.db_service.tasks.find({"user_id": user_id})
-            all_user_tasks = await cursor.to_list(500)
+            all_user_tasks = await self.db_service.get_tasks_by_subject(user_id=user_id)
 
             subjects_list = await self.db_service.get_subjects_by_user(user_id, include_archived=True)
             subj_id_to_name = {str(s["_id"]): s.get("name", "Asignatura") for s in subjects_list}
