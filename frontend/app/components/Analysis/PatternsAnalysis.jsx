@@ -23,9 +23,9 @@ export default function PatternsAnalysis({ patterns = {}, periodLabel, formatDat
             <div>
                 <h3 style={{ fontSize: "1.05rem", fontWeight: "600", marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <span>Distribución Diaria de Horas</span>
-                    <span style={{ fontSize: "12px", fontWeight: "500", color: "var(--text-secondary)", backgroundColor: "var(--bg-page)", padding: "2px 8px", borderRadius: "12px", border: "1px solid var(--border)" }}>
+                    {/* <span style={{ fontSize: "12px", fontWeight: "500", color: "var(--text-secondary)", backgroundColor: "var(--bg-page)", padding: "2px 8px", borderRadius: "12px", border: "1px solid var(--border)" }}>
                         {periodLabel}
-                    </span>
+                    </span> */}
                 </h3>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>

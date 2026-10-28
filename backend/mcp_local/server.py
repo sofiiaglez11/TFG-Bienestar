@@ -215,23 +215,32 @@ async def get_agent_capabilities() -> str:
 @mcp.tool()
 async def get_user_progress(user_id: str):
     """
-    Devuelve un resumen del progreso del usuario en sus asignaturas y tareas.
+    Devuelve un resumen del progreso del usuario en sus asignaturas y tareas:
+    tareas completadas, activas (en las que está trabajando ahora) y pendientes.
     Úsala cuando el usuario pregunte 'cuánto he avanzado' o 'qué progreso tengo'.
     """
     try:
         subjects = await db_service.get_subjects_by_user(user_id)
+        if not subjects:
+            return "No tienes ninguna asignatura registrada todavía."
+
         progress_summary = []
- 
+
         for s in subjects:
             tasks = await db_service.get_tasks_by_subject(s["_id"])
             total_tasks = len(tasks)
-            completed_tasks = sum(1 for t in tasks if t["completed"])
-            progress_summary.append(f"- {s['name']}: {completed_tasks}/{total_tasks} tareas completadas")
- 
+            completed_tasks = sum(1 for t in tasks if t.get("status") == "COMPLETED")
+            active_tasks = sum(1 for t in tasks if t.get("status") in ("ACTIVE"))
+            pending_tasks = total_tasks - completed_tasks - active_tasks
+            pct = round(100 * completed_tasks / total_tasks) if total_tasks else 0
+            progress_summary.append(
+                f"- {s['name']}: {completed_tasks}/{total_tasks} tareas completadas ({pct}%) "
+                f"| {active_tasks} activas | {pending_tasks} pendientes"
+            )
+
         return "Progreso de tus asignaturas:\n" + "\n".join(progress_summary)
     except Exception as e:
         return f"Error al obtener el progreso: {str(e)}"
-
 
 @mcp.tool()
 async def get_time_spent_summary(user_id: str):

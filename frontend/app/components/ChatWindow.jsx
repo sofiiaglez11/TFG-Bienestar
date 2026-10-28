@@ -112,7 +112,7 @@ export default function ChatWindow({
             padding: "4px 0",
           }}
         >
-          <div
+          {/* <div
             style={{
               width: "28px",
               height: "28px",
@@ -127,7 +127,7 @@ export default function ChatWindow({
             }}
           >
             IA
-          </div>
+          </div> */}
           <div
             style={{
               padding: "10px 14px",

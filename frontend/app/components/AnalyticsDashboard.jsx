@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import {
-  BarChart3, BookOpen, Clock, Moon, Smile, Zap, Calendar, Award, Layers
+  BarChart3, BookOpen, Clock, Moon, Smile, Zap, Calendar, Award, Layers, Share2
 } from "lucide-react";
 
 // Importación de componentes modulares
@@ -14,7 +14,7 @@ import PatternsAnalysis from "./Analysis/PatternsAnalysis";
 const RAW_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 const BACKEND_URL = RAW_BACKEND_URL.replace(/\/+$/, "");
 
-export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, isActive = true, clockifyConnected, followKey = 0 }) {
+export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, isActive = true, clockifyConnected, followKey = 0, onOpenShareSettings }) {
   const [data, setData] = useState({
     analytics: [],
     wellbeing: {},
@@ -226,6 +226,30 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
             </p>
           </div>
           <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+            {/* Botón Compartir: abre Ajustes en la pestaña de privacidad/compartir */}
+            {onOpenShareSettings && (
+              <button
+                type="button"
+                onClick={onOpenShareSettings}
+                title="Configurar cómo compartes tus estadísticas"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border)",
+                  backgroundColor: "var(--bg-input)",
+                  color: "var(--text-primary)",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  cursor: "pointer"
+                }}
+              >
+                <Share2 size={14} /> Compartir
+              </button>
+            )}
+
             {/* Selector de usuario */}
             <select
               value={selectedUserId}
@@ -402,7 +426,7 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
                   transition: "all 0.2s"
                 }}
               >
-                <BookOpen size={16} /> Académico y Asignaturas
+                <BookOpen size={16} /> Asignaturas
               </button>
               <button
                 onClick={() => setActiveSubTab("breakdown")}

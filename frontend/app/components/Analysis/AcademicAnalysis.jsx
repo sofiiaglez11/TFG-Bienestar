@@ -20,7 +20,7 @@ export default function AcademicAnalysis({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
       {/* Plan de Estudio Activo */}
-      {studyPlan.has_active_plan && (
+      {/* {studyPlan.has_active_plan && (
         <div
           style={{
             padding: "16px 20px",
@@ -70,11 +70,12 @@ export default function AcademicAnalysis({
             />
           </div>
         </div>
-      )}
+      )
+      } */}
 
       {/* Lista de Asignaturas */}
       <div>
-        <h3
+        {/* <h3
           style={{
             fontSize: "1.05rem",
             fontWeight: "600",
@@ -85,8 +86,9 @@ export default function AcademicAnalysis({
             color: "var(--text-primary)"
           }}
         >
-          <BookOpen size={18} style={{ color: "var(--brand)" }} /> Mis Asignaturas
-        </h3>
+          <BookOpen size={18} style={{ color: "var(--brand)" }} /> 
+          Mis Asignaturas
+        </h3> */}
 
         {analytics.length === 0 ? (
           <p

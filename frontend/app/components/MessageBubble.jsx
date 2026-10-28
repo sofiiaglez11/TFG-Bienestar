@@ -47,7 +47,7 @@ export default function MessageBubble({ message }) {
         marginBottom: "12px",
       }}
     >
-      {!isUser && (
+      {/* {!isUser && (
         <div
           style={{
             width: "28px",
@@ -66,7 +66,7 @@ export default function MessageBubble({ message }) {
         >
           IA
         </div>
-      )}
+      )} */}
 
       <div
         style={{

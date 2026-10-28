@@ -21,16 +21,22 @@ export default function TimeBreakdownAnalysis({ timeBreakdown = {}, formatTime }
 
     const filteredTotalHoursRaw = filteredTasks.reduce((acc, t) => acc + (t.hours || 0) + ((t.minutes || 0) / 60), 0);
 
+    const labelStyle = { fontSize: "12px", fontWeight: "600", color: "var(--text-secondary)", whiteSpace: "nowrap" };
+    const selectStyle = { padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", backgroundColor: "var(--bg-surface)", color: "var(--text-primary)", fontSize: "13px" };
+    const fieldStyle = { display: "flex", flexDirection: "row", alignItems: "center", gap: "8px" };
+
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
             {/* Filtros */}
-            <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", backgroundColor: "var(--bg-input)", padding: "12px", borderRadius: "10px", border: "1px solid var(--border)" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    <label style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-secondary)" }}>Asignatura</label>
+            <div style={{ display: "flex", gap: "16px", alignItems: "center", flexWrap: "wrap", backgroundColor: "var(--bg-input)", padding: "12px", borderRadius: "10px", border: "1px solid var(--border)" }}>
+                <span style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)" }}>Filtros</span>
+
+                <div style={fieldStyle}>
+                    <label style={labelStyle}>Asignatura</label>
                     <select
                         value={subjectFilter}
                         onChange={(e) => setSubjectFilter(e.target.value)}
-                        style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", backgroundColor: "var(--bg-surface)", color: "var(--text-primary)", fontSize: "13px" }}
+                        style={selectStyle}
                     >
                         {availableSubjects.map((s) => (
                             <option key={s} value={s}>{s === "All" ? "Todas" : s}</option>
@@ -38,12 +44,12 @@ export default function TimeBreakdownAnalysis({ timeBreakdown = {}, formatTime }
                     </select>
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    <label style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-secondary)" }}>Etiqueta</label>
+                <div style={fieldStyle}>
+                    <label style={labelStyle}>Etiqueta</label>
                     <select
                         value={tagFilter}
                         onChange={(e) => setTagFilter(e.target.value)}
-                        style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", backgroundColor: "var(--bg-surface)", color: "var(--text-primary)", fontSize: "13px" }}
+                        style={selectStyle}
                     >
                         {availableTags.map((t) => (
                             <option key={t} value={t}>{t === "All" ? "Todas" : t}</option>
@@ -51,9 +57,9 @@ export default function TimeBreakdownAnalysis({ timeBreakdown = {}, formatTime }
                     </select>
                 </div>
 
-                <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                    <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "600" }}>Tiempo Total Filtrado</span>
-                    <span style={{ fontSize: "18px", fontWeight: "700", color: "var(--brand)" }}>
+                <div style={{ ...fieldStyle, marginLeft: "auto" }}>
+                    <span style={labelStyle}>Tiempo Total Filtrado</span>
+                    <span style={{ fontSize: "18px", fontWeight: "700", color: "var(--brand)", whiteSpace: "nowrap" }}>
                         {formatTime(filteredTotalHoursRaw)}
                     </span>
                 </div>

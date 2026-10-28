@@ -30,7 +30,7 @@ export default function RegisterForm({ onRegister }) {
             Icon: GraduationCap,
             label: 'Estudiante',
             desc: 'Accede al chat, estadísticas y cursos en los que estás matriculado',
-            color: '#10b981',
+            color: 'var(--brand)',
         },
         {
             value: 'teacher',

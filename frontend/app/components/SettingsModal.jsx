@@ -374,7 +374,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
                 textAlign: "left"
               }}
             >
-              <Shield size={16} /> Permisos y Accesos
+              <Shield size={16} /> Estadísticas
             </button>
 
             <button
@@ -394,7 +394,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
                 textAlign: "left"
               }}
             >
-              <TagIcon size={16} /> Etiquetas y Colores
+              <TagIcon size={16} /> Etiquetas
             </button>
           </div>
 

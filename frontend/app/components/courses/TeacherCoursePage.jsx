@@ -1,9 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
-import { BarChart3, Bot, Users, ChevronRight } from 'lucide-react';
+import { BarChart3, Bot, Users, ChevronRight, Loader2, XCircle, ArrowLeft, Trash2 } from 'lucide-react';
 import {
   BACKEND_URL, getToken, authHeaders,
   PageShell, FullPageMessage, BackButton, ErrorBanner, CourseHeader, MarkdownText
 } from './shared';
+
+const iconLabel = { display: "inline-flex", alignItems: "center", gap: "6px" };
+
+const BackLabel = () => (
+  <span style={iconLabel}>
+    <ArrowLeft size={16} /> Volver a cursos
+  </span>
+);
 
 /* CONCLUSIONES IA DE LA CLASE*/
 
@@ -16,7 +24,7 @@ function GlobalSummaryCard({ summaryText, summaryDate, generating, onGenerate })
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
         <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "8px" }}>
           <Bot size={20} color="var(--brand)" />
-          Conclusiones del Agente IA
+          Resumen generado por el agente de IA
         </h3>
         {summaryDate && (
           <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
@@ -198,9 +206,18 @@ export default function TeacherCoursePage({ courseId, onNavigate }) {
     }
   };
 
-  if (loading) return <FullPageMessage emoji="⏳">Cargando curso...</FullPageMessage>;
+  if (loading) return (
+    <FullPageMessage >
+      Cargando curso...
+    </FullPageMessage>
+  );
   if (fatalError) return (
-    <FullPageMessage emoji="❌" error onBack={() => onNavigate({ view: "list" })} backLabel="← Volver a cursos">
+    <FullPageMessage
+      emoji={<XCircle size={32} color="#ef4444" />}
+      error
+      onBack={() => onNavigate({ view: "list" })}
+      backLabel={<BackLabel />}
+    >
       {fatalError}
     </FullPageMessage>
   );
@@ -209,22 +226,22 @@ export default function TeacherCoursePage({ courseId, onNavigate }) {
 
   return (
     <PageShell>
-      <BackButton onClick={() => onNavigate({ view: "list" })}>← Volver a cursos</BackButton>
+      <BackButton onClick={() => onNavigate({ view: "list" })}><BackLabel /></BackButton>
 
       <CourseHeader
         course={course}
         isTeacher
         studentsCount={studentsCount}
         summariesCount={students.filter(s => s.summary).length}
-      >
-
-        <button
-          onClick={handleDelete}
-          style={{ padding: "10px 18px", borderRadius: "10px", border: "1px solid #ef4444", background: "none", color: "#ef4444", fontWeight: "600", fontSize: "13px", cursor: "pointer" }}
-        >
-          🗑 Eliminar curso
-        </button>
-      </CourseHeader>
+        actions={
+          <button
+            onClick={handleDelete}
+            style={{ ...iconLabel, padding: "10px 18px", borderRadius: "10px", border: "1px solid #ef4444", background: "none", color: "#ef4444", fontWeight: "600", fontSize: "13px", cursor: "pointer" }}
+          >
+            <Trash2 size={16} /> Eliminar curso
+          </button>
+        }
+      />
 
       <ErrorBanner message={error} style={{ marginBottom: "16px" }} />
 

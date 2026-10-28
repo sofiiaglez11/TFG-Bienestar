@@ -16,7 +16,7 @@ export default function WellbeingAnalysis({ wellbeing = {}, periodLabel, formatD
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            {wellbeing.worst_day && (
+            {/* {wellbeing.worst_day && (
                 <div
                     style={{
                         padding: "14px 16px",
@@ -35,18 +35,19 @@ export default function WellbeingAnalysis({ wellbeing = {}, periodLabel, formatD
                         <strong>Día crítico detectado:</strong> El <strong>{wellbeing.worst_day}</strong> registraste el menor nivel de estado de ánimo. Recuerda programar pausas de recuperación.
                     </div>
                 </div>
-            )}
+            )} */}
 
             {/* Registro de Bienestar */}
             <div>
-                <h3 style={{ fontSize: "1.05rem", fontWeight: "600", marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                {/* <h3 style={{ fontSize: "1.05rem", fontWeight: "600", marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <Moon size={18} /> Registro de Bienestar y Sueño
+                        <Moon size={18} /> 
+                        Registro de Bienestar y Sueño
                     </span>
                     <span style={{ fontSize: "12px", fontWeight: "500", color: "var(--text-secondary)", backgroundColor: "var(--bg-page)", padding: "2px 8px", borderRadius: "12px", border: "1px solid var(--border)" }}>
                         {periodLabel}
                     </span>
-                </h3>
+                </h3> */}
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                     {paginatedDays.length === 0 ? (
@@ -169,7 +170,7 @@ export default function WellbeingAnalysis({ wellbeing = {}, periodLabel, formatD
                     lineHeight: "1.5"
                 }}
             >
-                <strong>Registro de Bienestar:</strong> Para guardar tus horas de descanso diarias o tu estado de ánimo, simplemente coméntaselo al tutor de bienestar en el chat (ej: <em>"Hoy he dormido 7 horas y me siento descansado"</em>).
+                <strong>Registro de Bienestar:</strong> Para guardar tus horas de descanso diarias o tu estado de ánimo, simplemente coméntaselo al Asistente Inteligente en el chat (ej: <em>"Hoy he dormido 7 horas y me siento descansado"</em>).
             </div>
         </div>
     );

@@ -31,7 +31,7 @@ function CourseCard({ course, role, onClick }) {
     >
       <div style={{
         position: "absolute", top: 0, left: 0, right: 0, height: "3px",
-        background: isTeacher ? "linear-gradient(90deg, #6366f1, #8b5cf6)" : "linear-gradient(90deg, #10b981, #059669)"
+        background: "var(--brand)", borderRadius: "3px 3px 0 0"
       }} />
 
 
@@ -41,13 +41,13 @@ function CourseCard({ course, role, onClick }) {
             {course.name}
           </h3>
           {course.academic_year && (
-            <Badge color={isTeacher ? "#6366f1" : "#10b981"}>
+            <Badge color="var(--brand)">
               <Calendar size={10} />
               {course.academic_year}
             </Badge>
           )}
         </div>
-        <span style={{ marginLeft: "12px", display: "flex", alignItems: "center", color: isTeacher ? "#6366f1" : "#10b981" }}>
+        <span style={{ marginLeft: "12px", display: "flex", alignItems: "center", color: "var(--brand)" }}>
           {isTeacher
             ? <Users size={22} strokeWidth={1.8} />
             : <GraduationCap size={22} strokeWidth={1.8} />
@@ -64,13 +64,13 @@ function CourseCard({ course, role, onClick }) {
       <div style={{ display: "flex", gap: "12px", fontSize: "12px", color: "var(--text-secondary)", marginTop: "8px" }}>
         {isTeacher ? (
           <>
-            <span>👥 {course.student_ids?.length || 0} alumnos</span>
+            <span>{course.student_ids?.length || 0} alumnos</span>
             <span style={{ marginLeft: "auto", fontFamily: "monospace", background: "var(--bg-input)", padding: "2px 8px", borderRadius: "6px", fontSize: "12px", letterSpacing: "1px", color: "var(--text-primary)" }}>
               {course.enrollment_code}
             </span>
           </>
         ) : (
-          <span style={{ color: "#10b981" }}>✓ Matriculado</span>
+          <span style={{ color: "var(--brand)" }}>✓ Matriculado</span>
         )}
       </div>
     </div>
@@ -189,7 +189,7 @@ function JoinCourseModal({ unlinkedSubjects, onClose, onEnrolled }) {
               <button
                 onClick={() => executeEnroll(confirm.code, confirm.exactMatch.id)}
                 disabled={loading}
-                style={{ padding: "10px 18px", borderRadius: "10px", border: "none", background: "linear-gradient(135deg, #10b981, #059669)", color: "#fff", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+                style={{ padding: "10px 18px", borderRadius: "10px", border: "none", background: "var(--brand)", color: "#fff", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
               >
                 {loading ? "Uniendo..." : "Sí, sincronizar datos"}
               </button>
@@ -198,7 +198,7 @@ function JoinCourseModal({ unlinkedSubjects, onClose, onEnrolled }) {
             <button
               onClick={() => executeEnroll(confirm.code, subjectId)}
               disabled={loading}
-              style={{ padding: "10px 18px", borderRadius: "10px", border: "none", background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+              style={{ padding: "10px 18px", borderRadius: "10px", border: "none", background: "var(--brand)", color: "#fff", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
             >
               {loading ? "Uniendo..." : "Continuar e inscribirme"}
             </button>
@@ -247,7 +247,7 @@ function JoinCourseModal({ unlinkedSubjects, onClose, onEnrolled }) {
             type="submit" disabled={disabled}
             style={{
               flex: 1, padding: "12px", borderRadius: "10px", border: "none",
-              background: disabled ? "var(--border)" : "linear-gradient(135deg, #10b981, #059669)",
+              background: disabled ? "var(--border)" : "var(--brand)",
               color: "#fff", fontWeight: "700", fontSize: "14px", cursor: disabled ? "not-allowed" : "pointer"
             }}
           >
@@ -342,7 +342,7 @@ function CreateCourseModal({ onClose, onCreated }) {
           </button>
           <button
             type="submit" disabled={creating}
-            style={{ flex: 1, padding: "12px", borderRadius: "10px", border: "none", background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff", fontWeight: "700", cursor: creating ? "not-allowed" : "pointer", fontSize: "14px" }}
+            style={{ flex: 1, padding: "12px", borderRadius: "10px", border: "none", background: "var(--brand)", color: "#fff", fontWeight: "700", cursor: creating ? "not-allowed" : "pointer", fontSize: "14px" }}
           >
             {creating ? "Creando..." : "Crear curso"}
           </button>
@@ -432,11 +432,11 @@ export default function CoursesPage({ onNavigate, userRole = "student" }) {
         </div>
       </div>
 
-      {notice && <div style={{ marginBottom: "16px", fontSize: "13px", color: "#10b981" }}>{notice}</div>}
+      {notice && <div style={{ marginBottom: "16px", fontSize: "13px", color: "var(--brand)" }}>{notice}</div>}
 
       {loading ? (
         <div style={{ textAlign: "center", padding: "60px", color: "var(--text-secondary)" }}>
-          <div style={{ fontSize: "32px", marginBottom: "12px" }}>⏳</div>
+          <div style={{ fontSize: "32px", marginBottom: "12px" }}></div>
           Cargando cursos...
         </div>
       ) : (
@@ -448,11 +448,11 @@ export default function CoursesPage({ onNavigate, userRole = "student" }) {
               icon={GraduationCap}
               title="Cursos en los que estoy matriculado"
               count={filteredEnrolled.length}
-              color="#10b981"
+              color="var(--brand)"
               action={
                 <button
                   onClick={() => setShowJoin(true)}
-                  style={{ padding: "10px 18px", borderRadius: "10px", border: "none", background: "linear-gradient(135deg, #10b981, #059669)", color: "#fff", fontWeight: "700", fontSize: "14px", cursor: "pointer", boxShadow: "0 4px 12px rgba(16,185,129,0.3)" }}
+                  style={{ padding: "10px 18px", borderRadius: "10px", border: "none", background: "var(--brand)", color: "#fff", fontWeight: "700", fontSize: "14px", cursor: "pointer" }}
                 >
                   Unirme a un curso
                 </button>
@@ -487,7 +487,7 @@ export default function CoursesPage({ onNavigate, userRole = "student" }) {
                   onClick={() => setShowCreate(true)}
                   style={{ padding: "10px 18px", borderRadius: "10px", border: "none", background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff", fontWeight: "700", fontSize: "14px", cursor: "pointer", boxShadow: "0 4px 12px rgba(99,102,241,0.3)" }}
                 >
-                  + Crear curso
+                  Crear curso
                 </button>
               }
             />
@@ -495,7 +495,7 @@ export default function CoursesPage({ onNavigate, userRole = "student" }) {
               <EmptyState>
                 {filterYear !== "all"
                   ? "No hay cursos en este año académico."
-                  : "Aún no has creado ningún curso. Pulsa '+ Crear curso' para empezar."}
+                  : "Aún no has creado ningún curso. Pulsa 'Crear curso' para empezar."}
               </EmptyState>
             ) : (
               <div style={gridStyle}>

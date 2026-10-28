@@ -551,7 +551,7 @@ class DatabaseService:
         Crea un elemento de trabajo o evento en el sistema (Tarea, Examen, Entrega, etc.).
         type puede ser: 'task', 'exam', 'assignment' u 'other'.
         subject_id es opcional para permitir eventos globales o administrativos.
-        priority es opcional: entero entre 1 (muy baja) y 5 (muy alta).
+        priority es opcional: entero entre 1 (muy alta) y 5 (muy baja).
         Los tipos 'exam' y 'assignment' tienen fecha fija: el agente planificador no puede reprogramarlos.
         Al crearlas, el campo status por defecto es "PENDING".
         """
@@ -601,7 +601,7 @@ class DatabaseService:
         if include_pending:
             allowed_statuses.append("PENDING")
         if want_active:
-            allowed_statuses.extend(["ACTIVE", "IN_PROGRESS"])
+            allowed_statuses.extend(["ACTIVE"])
         if include_completed:
             allowed_statuses.append("COMPLETED")
 
@@ -644,7 +644,7 @@ class DatabaseService:
         if "status" in fields:
             if fields["status"] == "COMPLETED" and "completed_at" not in fields:
                 fields["completed_at"] = datetime.now(timezone.utc).isoformat()
-            elif fields["status"] in ["PENDING", "ACTIVE", "IN_PROGRESS"] and "completed_at" not in fields:
+            elif fields["status"] in ["PENDING", "ACTIVE"] and "completed_at" not in fields:
                 fields["completed_at"] = None
 
         await self.tasks.update_one({"_id": ObjectId(task_id)}, {"$set": fields})

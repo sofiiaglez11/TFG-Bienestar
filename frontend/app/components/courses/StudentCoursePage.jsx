@@ -1,9 +1,17 @@
 import { useState, useEffect } from 'react';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, Loader2, XCircle, ArrowLeft } from 'lucide-react';
 import {
   BACKEND_URL, getToken, authHeaders,
   PageShell, FullPageMessage, BackButton, ErrorBanner, CourseHeader
 } from './shared';
+
+const iconLabel = { display: "inline-flex", alignItems: "center", gap: "6px" };
+
+const BackLabel = () => (
+  <span style={iconLabel}>
+    <ArrowLeft size={16} /> Volver a cursos
+  </span>
+);
 
 export default function StudentCoursePage({ courseId, onNavigate }) {
   const token = getToken();
@@ -43,16 +51,25 @@ export default function StudentCoursePage({ courseId, onNavigate }) {
     }
   };
 
-  if (loading) return <FullPageMessage emoji="⏳">Cargando curso...</FullPageMessage>;
+  if (loading) return (
+    <FullPageMessage emoji={<Loader2 size={32} style={{ animation: "spin 1s linear infinite" }} />}>
+      Cargando curso...
+    </FullPageMessage>
+  );
   if (fatalError) return (
-    <FullPageMessage emoji="❌" error onBack={() => onNavigate({ view: "list" })} backLabel="← Volver a cursos">
+    <FullPageMessage
+      emoji={<XCircle size={32} color="#ef4444" />}
+      error
+      onBack={() => onNavigate({ view: "list" })}
+      backLabel={<BackLabel />}
+    >
       {fatalError}
     </FullPageMessage>
   );
 
   return (
     <PageShell maxWidth="900px">
-      <BackButton onClick={() => onNavigate({ view: "list" })}>← Volver a cursos</BackButton>
+      <BackButton onClick={() => onNavigate({ view: "list" })}><BackLabel /></BackButton>
 
       <CourseHeader course={course} isTeacher={false}>
         <button

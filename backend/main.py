@@ -142,7 +142,7 @@ ACADEMIC_PROMPT = (
     "4. Columna 'Fecha':\n"
     "   - Formato de fecha: usa SIEMPRE el formato DD/MM/YYYY (ej: 10/03/2026, o DD/MM/YYYY HH:MM si tiene hora).\n"
     "   - Fecha vencida: escribe la fecha como {{expired:DD/MM/YYYY}} ÚNICAMENTE si el campo `overdue` de la tarea es true. Si overdue es false, NUNCA uses ese formato aunque la fecha parezca pasada.\n"
-    "   - Tareas completadas o no vencidas: Si la tarea ya se ha completado (✅) o si overdue=false, NO uses {{expired:...}}; escríbela de forma normal: DD/MM/YYYY.\n"
+    "   - Tareas completadas o no vencidas: Si la tarea ya se ha completado o si overdue=false, NO uses {{expired:...}}; escríbela de forma normal: DD/MM/YYYY.\n"
     "   - Si no tiene fecha de vencimiento, escribe '-'.\n"
     "5. Columna 'Etiquetas': Escribe CADA etiqueta con su propio marcador {{tag:nombre}}, separados por espacios, ej: {{tag:backend}} {{tag:frontend}}. NUNCA agrupes varias etiquetas en un mismo marcador. Si no tiene etiquetas, escribe '-'.\n"    
     "6. Organización: Si muestras varias asignaturas, crea un título en negrita por cada asignatura (ej: **Matemáticas**) y debajo su respectiva tabla.\n"
@@ -416,7 +416,7 @@ async def lifespan(app: FastAPI):
 
 
 
-app = FastAPI(title="TFG Bienestar", lifespan=lifespan)
+app = FastAPI(title="SABIO", lifespan=lifespan)
 
 # ESQUEMA DE SEGURIDAD
 security = HTTPBearer()
@@ -604,7 +604,7 @@ async def get_daily_check_context(user_id: str, db_service: DatabaseService, ana
                             overdue_details.append(f"• '{ot.get('title')}' ({ot.get('subject_name')}, venció: {ot.get('due_date')}, estado: {status_label})")
 
                         plan_context = (
-                            f" ⚠️ ALERTAS DE INCUMPLIMIENTO/DESVÍO DEL PLAN: Se han detectado tareas no completadas dentro del plazo del plan o retrasadas: "
+                            f"  ALERTAS DE INCUMPLIMIENTO/DESVÍO DEL PLAN: Se han detectado tareas no completadas dentro del plazo del plan o retrasadas: "
                             f"[{'; '.join(overdue_details)}]. "
                             f"Si es oportuno, comenta con empatía este retraso y ofrécele reorganizar el plan (solo si no vas a hacer ya otra pregunta en el mismo mensaje)."
                         )
@@ -1120,22 +1120,23 @@ GLOBAL_SUMMARY_PROMPT = (
     "Eres un sistema automático de análisis de datos educativos. "
     "Tu única función es generar, de forma INMEDIATA y DIRECTA, un párrafo analítico de 4 a 5 frases sobre las estadísticas de una clase. "
     "INSTRUCCIONES DE FORMATO — OBLIGATORIAS: "
-    "Tu respuesta debe comenzar DIRECTAMENTE con el análisis, sin saludos, sin introducción, sin Hola, sin !Claro!. "
-    "NO hagas preguntas al usuario. NO ofrezcas opciones ni listes lo que puedes hacer. "
-    "NO uses listas con viñetas ni bullet points: solo texto en prosa continua. "
-    "NO menciones a ningún alumno individual ni uses nombres propios de alumnos. "
-    "Habla siempre del conjunto: la clase, el grupo, los alumnos en general. "
-    "Usa un tono profesional, objetivo y conciso. Responde siempre en español. "
+    "1. Tu respuesta debe comenzar DIRECTAMENTE con el análisis, sin saludos, sin introducción, sin Hola, sin !Claro!. "
+    "2. NO hagas preguntas al usuario. NO ofrezcas opciones ni listes lo que puedes hacer. "
+    "3. Usa listas con  bullet points para que el mensaje se entienda más fácilmente "
+    "4. NO menciones a ningún alumno individual ni uses nombres propios de alumnos. "
+    "5. Habla siempre del conjunto: la clase, el grupo, los alumnos en general. "
+    "6. Usa un tono profesional, objetivo y conciso. "
+    "7. Responde siempre en español. "
     "CONTENIDO que debe incluir el análisis: "
-    "La media de horas de estudio y su relación con la nota media. "
-    "Qué porcentaje de alumnos aprueba y si se correlaciona con las horas dedicadas. "
-    "Observaciones sobre concentración y sueño del grupo. "
-    "Una conclusión general útil para el profesor. "
-    "EJEMPLO DE RESPUESTA VALIDA (sigue exactamente este estilo sin saludos ni preguntas): "
-    "La clase dedica de media X horas al estudio, lo que se traduce en una nota media de Y. "
-    "El Z porciento de los alumnos supera el aprobado, cifra que coincide con el porcentaje que estudia más de W horas. "
-    "La concentración media del grupo es de C sobre 5, y las horas de sueño promedio son S. "
-    "En general, existe una correlación positiva entre el tiempo de estudio y el rendimiento académico."
+    "- La media de horas de estudio y su relación con la nota media. "
+    "- Qué porcentaje de alumnos aprueba y si se correlaciona con las horas dedicadas. "
+    "- Observaciones sobre concentración y sueño del grupo. "
+    "- Una conclusión general útil para el profesor. "
+    # "EJEMPLO DE RESPUESTA VALIDA (sigue exactamente este estilo sin saludos ni preguntas): "
+    # "La clase dedica de media X horas al estudio, lo que se traduce en una nota media de Y. "
+    # "El Z porciento de los alumnos supera el aprobado, cifra que coincide con el porcentaje que estudia más de W horas. "
+    # "La concentración media del grupo es de C sobre 5, y las horas de sueño promedio son S. "
+    # "En general, existe una correlación positiva entre el tiempo de estudio y el rendimiento académico."
 )
 
 @app.get("/api/courses/{course_id}/global-analytics")

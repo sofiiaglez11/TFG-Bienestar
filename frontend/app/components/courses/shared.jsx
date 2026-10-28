@@ -46,7 +46,7 @@ export function CopyButton({ text }) {
       onClick={handleCopy}
       style={{
         padding: "6px 14px", borderRadius: "8px", border: "1px solid var(--border)",
-        background: copied ? "#10b981" : "var(--bg-input)", color: copied ? "#fff" : "var(--text-primary)",
+        background: copied ? "var(--brand)" : "var(--bg-input)", color: copied ? "#fff" : "var(--text-primary)",
         fontSize: "12px", fontWeight: "600", cursor: "pointer", transition: "all 0.2s"
       }}
     >
@@ -165,8 +165,11 @@ export function FullPageMessage({ emoji, icon, children, error = false, onBack, 
   );
 }
 
-/** Cabecera de un curso (la usan la página del profesor y la del alumno). Los botones van como children. */
-export function CourseHeader({ course, isTeacher, studentsCount = 0, summariesCount = 0, children }) {
+/** Cabecera de un curso (la usan la página del profesor y la del alumno).
+ *  - Profesor: el código de inscripción va junto al nombre; a la derecha, el nº de alumnos
+ *    y debajo las `actions` (p. ej. eliminar curso).
+ *  - `children`: fila de botones inferior (la usa la página del alumno). */
+export function CourseHeader({ course, isTeacher, studentsCount = 0, summariesCount = 0, actions, children }) {
   return (
     <div style={{
       background: "var(--bg-surface)", border: "1px solid var(--border)",
@@ -175,14 +178,15 @@ export function CourseHeader({ course, isTeacher, studentsCount = 0, summariesCo
     }}>
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "4px", background: "linear-gradient(90deg, #6366f1, #8b5cf6, #ec4899)" }} />
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
-        <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px" }}>
+        {/* Izquierda: Icono, Nombre, Año académico y Descripción */}
+        <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
             {isTeacher ? <Users size={32} color="var(--brand)" /> : <GraduationCap size={32} color="var(--brand)" />}
             <div>
               <h1 style={{ margin: 0, fontSize: "24px", fontWeight: "800", color: "var(--text-primary)" }}>{course?.name}</h1>
               {course?.academic_year && (
-                <span style={{ fontSize: "13px", color: "var(--text-secondary)", fontWeight: "500", display: "flex", alignItems: "center", gap: "4px" }}>
+                <span style={{ fontSize: "13px", color: "var(--text-secondary)", fontWeight: "500", display: "flex", alignItems: "center", gap: "4px", marginTop: "2px" }}>
                   <Calendar size={13} />
                   Curso {course.academic_year}
                 </span>
@@ -191,26 +195,33 @@ export function CourseHeader({ course, isTeacher, studentsCount = 0, summariesCo
           </div>
 
           {course?.description && (
-            <p style={{ margin: "0 0 16px", fontSize: "14px", color: "var(--text-secondary)", lineHeight: "1.6", maxWidth: "500px" }}>
+            <p style={{ margin: "0", fontSize: "14px", color: "var(--text-secondary)", lineHeight: "1.6", maxWidth: "500px" }}>
               {course.description}
             </p>
           )}
-
-          {isTeacher && (
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 16px", background: "var(--bg-page)", borderRadius: "10px", border: "1px solid var(--border)", width: "fit-content" }}>
-              <span style={{ fontSize: "13px", color: "var(--text-secondary)", fontWeight: "500" }}>Código de inscripción:</span>
-              <span style={{ fontFamily: "monospace", fontSize: "16px", fontWeight: "800", color: "var(--text-primary)", letterSpacing: "3px" }}>
-                {course?.enrollment_code}
-              </span>
-              <CopyButton text={course?.enrollment_code} />
-            </div>
-          )}
         </div>
 
+        {/* Derecha: Código -> Botón Eliminar -> Nº Alumnos */}
         {isTeacher && (
-          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+            {/* 1. Código para compartir */}
+            {course?.enrollment_code && (
+              <div
+                title="Código de inscripción"
+                style={{ display: "flex", alignItems: "center", gap: "8px", padding: "6px 10px 6px 14px", background: "var(--bg-page)", borderRadius: "10px", border: "1px solid var(--border)" }}
+              >
+                <span style={{ fontFamily: "monospace", fontSize: "15px", fontWeight: "800", color: "var(--text-primary)", letterSpacing: "3px" }}>
+                  {course.enrollment_code}
+                </span>
+                <CopyButton text={course.enrollment_code} />
+              </div>
+            )}
+
+            {/* 2. Botón de eliminar */}
+            {actions}
+
+            {/* 3. Número de alumnos (A la derecha del todo) */}
             <StatBadge label="Alumnos" value={studentsCount} color="#6366f1" />
-            {/*<StatBadge label="Con resumen" value={summariesCount} color="#10b981" />*/}
           </div>
         )}
       </div>

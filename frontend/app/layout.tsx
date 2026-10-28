@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TFG Bienestar",
-  description: "Aplicación de bienestar y gestión académica para estudiantes.",
+  title: "SABIO",
+  description: "Sistema Académico y de Bienestar Inteligente para la Organización",
 };
 
 export default function RootLayout({

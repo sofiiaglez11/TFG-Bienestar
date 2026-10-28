@@ -326,8 +326,8 @@ export default function ChatPage() {
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                   <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "linear-gradient(135deg, #6366f1, #8b5cf6)", flexShrink: 0 }} />
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--text-primary)" }}>Tutor de Bienestar</div>
-                    <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>Académico & Personal</div>
+                    <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--text-primary)" }}>Asistente Inteligente</div>
+                    <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>Académico y Personal</div>
                   </div>
                 </div>
                 <button
@@ -529,7 +529,16 @@ export default function ChatPage() {
         </div>
 
         <div style={{ flex: 1, display: activeTab === "stats" ? "flex" : "none", flexDirection: "column", height: "100%", padding: "24px", overflow: "hidden" }}>
-          <AnalyticsDashboard isInline={true} isActive={activeTab === "stats"} clockifyConnected={clockifyConnected} followKey={followKey} />
+          <AnalyticsDashboard
+            isInline={true}
+            isActive={activeTab === "stats"}
+            clockifyConnected={clockifyConnected}
+            followKey={followKey}
+            onOpenShareSettings={() => {
+              setSettingsInitialTab("privacy");
+              setShowSettingsModal(true);
+            }}
+          />
         </div>
 
         <div style={{ flex: 1, display: activeTab === "courses" ? "flex" : "none", flexDirection: "column", height: "100%", padding: "24px", overflow: "hidden" }}>
