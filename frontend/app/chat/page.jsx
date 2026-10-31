@@ -542,7 +542,7 @@ export default function ChatPage() {
         </div>
 
         <div style={{ flex: 1, display: activeTab === "courses" ? "flex" : "none", flexDirection: "column", height: "100%", padding: "24px", overflow: "hidden" }}>
-          {activeTab === "courses" && <CoursesDashboard userRole={userRole} onClose={() => setActiveTab(userRole === "teacher" ? "courses" : "chat")} />}
+          <CoursesDashboard userRole={userRole} onClose={() => setActiveTab(userRole === "teacher" ? "courses" : "chat")} />
         </div>
       </div>
 

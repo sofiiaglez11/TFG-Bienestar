@@ -157,11 +157,11 @@ ACADEMIC_PROMPT = (
     "REGLA DE FECHAS Y ACTUALIZACIONES:\n"
     "Al crear, actualizar o confirmar fechas al usuario, muestra y utiliza SIEMPRE el formato 'DD/MM/YYYY' (ej: '20/07/2026' o '20/07/2026 18:00'). "
     "El parámetro 'due_date' en las herramientas acepta tanto formato DD/MM/YYYY como formato ISO (YYYY-MM-DD). Si el usuario menciona una hora específica (ej: 'entregar a las 18:00'), inclúyela.\n"
-    "REGLA DE INFORMACIÓN AL CREAR ENTIDADES (TAREAS, PROYECTOS/ASIGNATURAS, PERIODOS):\n"
-    "Al crear con éxito una entidad (tarea, asignatura/proyecto o periodo académico), sé breve, conciso y natural. "
+    "REGLA DE INFORMACIÓN AL CREAR ENTIDADES (TAREAS Y PROYECTOS/ASIGNATURAS):\n"
+    "Al crear con éxito una entidad (tarea o asignatura/proyecto), sé breve, conciso y natural. "
     "Confirma la creación y ofrece de forma sutil y ligera la posibilidad de añadir más información o recordarle las opciones disponibles.\n"
     "- Ejemplo para tareas: 'He creado la tarea X. Si quieres, avísame si deseas añadirle fecha límite, prioridad, descripción o etiquetas.' o bien 'Ya he creado X. Si quieres te puedo recordar qué más información le puedes añadir.'\n"
-    "- Ejemplo para asignaturas/proyectos: 'He añadido la asignatura X. Si quieres, avísame si deseas configurarle horas semanales, asociarla a un periodo o si te recuerdo qué más datos puedes añadirle.'\n"
+    "- Ejemplo para asignaturas/proyectos: 'He añadido la asignatura X. Si quieres, avísame si deseas configurarle horas semanales, ponerle fecha de inicio y de fin o si te recuerdo qué más datos puedes añadirle.'\n"
     "- CRÍTICO: Habla SIEMPRE en lenguaje cotidiano y amigable. NUNCA uses nombres técnicos de variables ni código (evita estrictamente términos como 'due_date', 'tags', 'weekly_hours_goal', 'priority', etc.).\n"
     
     "REGLA DE CAMPOS ENRIQUECIDOS DE ASIGNATURAS:\n"
@@ -170,6 +170,7 @@ ACADEMIC_PROMPT = (
     "- Criterios de evaluación: guárdalos con edit_subject cuando el usuario mencione cómo le evalúan (ej: '60% examen final, 40% prácticas', 'hay un parcial y un examen final'). NUNCA llames al parámetro 'evaluation_criteria' al usuario; dile 'criterios de evaluación' o 'cómo te evalúan'.\n"
     "- Anotaciones: guárdalas con edit_subject cuando el usuario haga un comentario personal sobre una asignatura (ej: 'Matemáticas me encanta', 'el profe de Física explica muy bien', 'Historia se me da fatal'). NUNCA llames al parámetro 'notes' al usuario; dile 'tus anotaciones' o 'tus comentarios'.\n"
     
+    "- Fechas de inicio y fin de la asignatura: guárdalas con add_subject o edit_subject SOLO si el usuario las menciona (ej: 'Física empieza el 15/09 y acaba en enero'). NUNCA se las pidas por iniciativa propia. Llámalas 'fecha de inicio' y 'fecha de fin'; nunca menciones los nombres técnicos de los parámetros. Usa siempre el formato DD/MM/YYYY al mostrárselas.\n"
     "IMPORTANTE: Guarda proactivamente estos datos si el usuario los menciona de pasada, aunque no lo haya pedido explícitamente. Por ejemplo, si dice 'Tengo Matemáticas, me encanta', crea la asignatura y guarda 'me encanta' como anotación directamente.\n"
     
     "REGLA DE ESTADOS DE TAREAS Y CRONÓMETROS:\n"
@@ -221,7 +222,7 @@ PLANNER_CONV_PROMPT = (
     "  - `get_tasks` / `edit_task`: Consulta y edita tareas concretas.\n"
     "FLUJO DE TRABAJO (Razonamiento ReAct):\n"
     "1. EDICIONES SIMPLES: Si el usuario pide un cambio claro y directo (ej: 'Ponme 5 horas hoy al TFG', 'Mueve lo de mañana al viernes'), "
-    "usa `get_active_study_plan` para localizar el índice de la actividad afectada, y luego llama directamente a `reschedule_plan_item`. No necesitas analíticas profundas para esto.\n"
+    "usa `get_active_study_plan` para localizar el índice de la actividad afectada, y luego llama directamente a `reschedule_plan_item`. No necesitas estadísticas profundas para esto.\n"
     "2. REORGANIZACIÓN O REVISIÓN AUTOMÁTICA: Si el mensaje del sistema indica 'SISTEMA: REVISIÓN DIARIA AUTOMÁTICA' o el usuario dice "
     "'estoy agobiado, ajusta mi plan':\n"
     "   a) Llama a `get_planner_analytics` para ver cuántas tareas están vencidas y cuáles son sus mejores días de rendimiento.\n"
@@ -298,9 +299,23 @@ WELLBEING_PROMPT = (
 
 GENERAL_PROMPT = (
     "Eres un asistente amigable y conversacional. Responde cordialmente a los saludos. "
-    "Si el usuario pregunta qué puedes hacer o pide ayuda, usa SIEMPRE la herramienta "
-    "get_agent_capabilities para obtener la lista real de funciones disponibles y explícasela "
-    "de forma amigable, sin inventarte nada. "
+    "REGLA DE AYUDA Y DUDAS (RESPUESTAS DETALLADAS):\n"
+    "Si el usuario pregunta qué puedes hacer, pide ayuda o tiene una duda sobre cómo funciona el sistema o alguna de sus "
+    "funcionalidades (ej: '¿cómo registro mi tiempo?', '¿qué es el plan de estudio?', '¿cómo comparto mis estadísticas?', "
+    "'¿para qué sirven las etiquetas?'), llama SIEMPRE primero a get_agent_capabilities y responde basándote ÚNICAMENTE "
+    "en lo que devuelve, sin inventarte nada.\n"
+    "- Pregunta general ('¿qué puedes hacer?', 'ayuda'): da un resumen completo organizado por bloques, cada uno con "
+    "su título en negrita, una o dos frases explicando qué permite y un ejemplo de frase que el usuario puede escribir.\n"
+    "- Duda concreta: céntrate en esa funcionalidad y explícala con detalle: qué hace, cómo se pide (paso a paso si "
+    "procede), ejemplos reales de mensajes, y requisitos o límites (por ejemplo, que necesita Clockify vinculado, o que "
+    "borrar pide confirmación previa).\n"
+    "- Si la funcionalidad no está en el chat sino en la aplicación, indica dónde está (pestaña o apartado de Configuración).\n"
+    "- Si lo que pregunta no existe en el sistema, díselo con claridad y sin inventar alternativas.\n"
+    "- En estas respuestas puedes extenderte lo necesario, con una estructura clara (listas cortas y negritas). "
+    "La regla de concisión se refiere a no mezclar varias preguntas o sugerencias, no limita la explicación. "
+    "Termina, como mucho, con UNA sola pregunta o invitación, formulada para que sea el usuario quien escriba "
+    "lo que quiere hacer (ej: 'Cuando quieras, cuéntame qué asignaturas tienes'), nunca como '¿quieres que lo haga yo?', "
+    "porque tú no puedes ejecutar acciones.\n"
     "Si necesita ayuda con estudios, recomiéndale hablar de asignaturas o tiempos de estudio. "
     "Si se siente estresado, ofrécete a escucharle. "
     "IMPORTANTE: Tú NO dispones de herramientas para crear, modificar o eliminar asignaturas, tareas ni registros de tiempo. "
@@ -830,14 +845,14 @@ async def get_student_analytics(
     try:
         return await analytics_service.get_full_dashboard_analytics(user_id, days)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al generar analíticas: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al generar estadísticas: {str(e)}")
 
 @app.get("/api/analytics/summary")
 async def get_analytics_summary(days: int = 7, user_id: str = Depends(get_current_user_id)):
     try:
         return await analytics_service.get_user_analytics(user_id, days=days)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al generar analíticas: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al generar estadísticas: {str(e)}")
 
 @app.post("/api/share/generate")
 async def generate_share_code(user_id: str = Depends(get_current_user_id)):
@@ -875,7 +890,7 @@ async def get_shared_analytics(
     try:
         return await analytics_service.get_full_dashboard_analytics(target_user_id, days)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al generar analíticas: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al generar estadísticas: {str(e)}")
 
 @app.get("/api/user/share-code")
 async def get_my_share_code(user_id: str = Depends(get_current_user_id)):

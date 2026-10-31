@@ -11,6 +11,7 @@ from mcp.server.session import ServerSession
 from services.clockify_service import ClockifyService
 from services.database_service import DatabaseService, task_can_be_rescheduled
 from services.analytics_service import AnalyticsService
+from services.capabilities import FEATURES_OVERVIEW
 import asyncio
 from typing import Optional
 
@@ -70,6 +71,21 @@ def _normalize_due_date(val: Optional[str]) -> Optional[str]:
     except Exception:
         pass
     return val
+
+
+def _normalize_subject_date(val: Optional[str]) -> Optional[str]:
+    """Convierte DD/MM/YYYY o YYYY-MM-DD a 'YYYY-MM-DD' (sin hora). Cadena vacía -> None.
+    Lanza ValueError si el formato no es válido."""
+    if val is None:
+        return None
+    val = str(val).strip()
+    if not val:
+        return None
+    iso = _normalize_due_date(val) or ""
+    try:
+        return datetime.strptime(iso[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError:
+        raise ValueError(f"Fecha no válida: '{val}'. Usa el formato DD/MM/YYYY o YYYY-MM-DD.")
 
 
 def _format_date_for_display(val: Optional[str]) -> str:
@@ -154,26 +170,17 @@ async def _update_clockify_names_recursive(
 @mcp.tool()
 async def get_agent_capabilities() -> str:
     """
-    Devuelve la lista de herramientas disponibles para que el LLM pueda explicarlas
-    al usuario de forma amigable.
-    Úsala cuando el usuario pregunte '¿qué puedes hacer?', 'ayuda', quiera saber tus 
-    funciones o cuando haga una consulta que esté fuera de tu ámbito (es decir, que no tengas ninguna tool específica
-    que se encargue de eso) o que no esté clara.
-    IMPORTANTE: No inventes herramientas ni funciones que no existan. Solo describe las que
-    realmente están disponibles en el MCP.
+    Devuelve la descripción completa y detallada de las funcionalidades del sistema
+    (qué se puede hacer desde el chat, qué hay en la aplicación, cómo se pide cada cosa
+    y qué requisitos o límites tiene).
+    Úsala cuando el usuario pregunte '¿qué puedes hacer?', 'ayuda', tenga una duda sobre cómo
+    funciona el sistema o una funcionalidad concreta, o haga una consulta fuera de tu ámbito
+    o poco clara.
+    IMPORTANTE: responde SOLO con lo que devuelve esta herramienta; no inventes funciones.
+    Adapta el nivel de detalle a la pregunta: resumen completo si es una pregunta general,
+    explicación detallada de esa parte si es una duda concreta.
     """
-    try:
-        herramientas = await mcp.list_tools()
-        
-        lineas = []
-        for tool in herramientas:
-            if tool.name != "get_agent_capabilities":
-                lineas.append(f"- {tool.name}: {tool.description}")
-            
-        return "\n".join(lineas)
-        
-    except Exception as e:
-        return f"Error: {str(e)}"
+    return FEATURES_OVERVIEW
  
  
 # TOOLS FOR PLANNING AND ORGANIZATION
@@ -313,7 +320,8 @@ async def get_time_spent_summary(user_id: str):
 # TOOLS FOR SUBJECTS
 @mcp.tool()
 async def add_subject(user_id: str, name: str, weekly_hours_goal: int = 0, workspace_id: str = None,
-                      description: str = None, evaluation_criteria: str = None, notes: str = None):
+                      description: str = None, evaluation_criteria: str = None, notes: str = None,
+                      start_date: str = None, end_date: str = None):
     """
     Añade una nueva asignatura al sistema.
     IMPORTANTE: Antes de llamar a esta herramienta, asegúrate de tener el nombre
@@ -326,8 +334,18 @@ async def add_subject(user_id: str, name: str, weekly_hours_goal: int = 0, works
     - description: descripción breve de qué trata la asignatura (ej: 'Álgebra lineal y cálculo').
     - evaluation_criteria: cómo se evalúa la asignatura (ej: '60% examen final, 40% prácticas'). Úsalo cuando el usuario lo mencione.
     - notes: anotaciones libres del usuario sobre la asignatura (ej: 'me gusta mucho', 'el profe explica muy bien'). Úsalo para capturar opiniones o comentarios personales del usuario sobre la asignatura.
+    - start_date / end_date: fecha de inicio y de fin de la asignatura (formato DD/MM/YYYY o YYYY-MM-DD). Opcionales:
+      úsalas solo si el usuario las menciona (ej: 'empieza en septiembre y acaba en enero'); NO se las preguntes.
     """
     try:
+        try:
+            norm_start = _normalize_subject_date(start_date)
+            norm_end = _normalize_subject_date(end_date)
+        except ValueError as ve:
+            return str(ve)
+        if norm_start and norm_end and norm_end < norm_start:
+            return "La fecha de fin no puede ser anterior a la fecha de inicio."
+
         cs = await _get_user_clockify_service(user_id)
         if not cs.api_key:
             return "No tienes configurada tu API Key de Clockify. Conéctala desde el menú de perfil antes de añadir asignaturas."
@@ -343,7 +361,9 @@ async def add_subject(user_id: str, name: str, weekly_hours_goal: int = 0, works
             weekly_hours_goal=weekly_hours_goal,
             description=description,
             evaluation_criteria=evaluation_criteria,
-            notes=notes
+            notes=notes,
+            start_date=norm_start,
+            end_date=norm_end
         )
  
         return f"Asignatura '{name}' añadida correctamente."
@@ -430,6 +450,10 @@ async def get_subjects(user_id: str, include_archived: bool = False, only_archiv
             lines = []
             goal = f" (objetivo: {s['weekly_hours_goal']}h/semana)" if s.get('weekly_hours_goal') else ""
             header = f"- **{s['name']}**{goal}"
+            if s.get("start_date") or s.get("end_date"):
+                lines.append(
+                    f"  Fechas: {_format_date_for_display(s.get('start_date'))} -> {_format_date_for_display(s.get('end_date'))}"
+                )
             if s.get("description"):
                 lines.append(f"  Descripción: {s['description']}")
             if s.get("evaluation_criteria"):
@@ -458,19 +482,21 @@ async def get_subjects(user_id: str, include_archived: bool = False, only_archiv
 
 @mcp.tool()
 async def edit_subject(user_id: str, subject_name: str, new_name: str = None, note: str = None,
-                       weekly_hours_goal: int = None, period_name: str = None, is_archived: bool = None,
-                       description: str = None, evaluation_criteria: str = None, notes: str = None):
+                       weekly_hours_goal: int = None, is_archived: bool = None,
+                       description: str = None, evaluation_criteria: str = None, notes: str = None,
+                       start_date: str = None, end_date: str = None):
     """
     Edita una asignatura existente. Permite cambiar su nombre, su objetivo de horas
-    semanales y/o el periodo académico al que pertenece, su descripción, criterios de evaluación
+    semanales, sus fechas de inicio y fin, su descripción, criterios de evaluación
     y anotaciones personales.
     Úsala cuando el usuario diga 'cambia el nombre de X a Y', 'quiero dedicar N horas
-    semanales a X', 'mueve X al periodo Y', 'la evaluación de X es...', 'sobre X tengo que decir que...'.
+    semanales a X', 'X empieza el 15/09/2026', 'X termina el 20/01/2027', 'la evaluación de X es...', 'sobre X tengo que decir que...'.
     Solo se actualizan los campos que el usuario especifique — los demás se quedan igual.
     Parámetros opcionales nuevos:
     - description: actualiza la descripción de la asignatura.
     - evaluation_criteria: actualiza cómo se evalúa (ej: '60% examen, 40% prácticas'). Úsalo cuando el usuario mencione cómo le evalúan en la asignatura.
     - notes: añade o actualiza una anotación libre o comentario personal del usuario sobre la asignatura (ej: 'me gusta mucho', 'el profesor explica genial'). Úsalo cuando el usuario haga un comentario personal sobre la asignatura.
+    - start_date / end_date: fecha de inicio / fin de la asignatura (DD/MM/YYYY o YYYY-MM-DD). Pasa una cadena vacía '' para borrarla.
     """
     try:
         subject = await _find_subject_by_name(user_id, subject_name)
@@ -486,11 +512,18 @@ async def edit_subject(user_id: str, subject_name: str, new_name: str = None, no
             updates["name"] = new_name
         if weekly_hours_goal is not None:
             updates["weekly_hours_goal"] = weekly_hours_goal
-        if period_name:
-            period = await db_service.get_period_by_user_and_name(user_id, period_name)
-            if not period:
-                return f"No encontré ningún periodo llamado '{period_name}'."
-            updates["period_id"] = period["_id"]
+        try:
+            if start_date is not None:
+                updates["start_date"] = _normalize_subject_date(start_date)
+            if end_date is not None:
+                updates["end_date"] = _normalize_subject_date(end_date)
+        except ValueError as ve:
+            return str(ve)
+        # Validar coherencia con el valor final (lo nuevo o, si no se toca, lo que ya tenía)
+        final_start = updates["start_date"] if "start_date" in updates else subject.get("start_date")
+        final_end = updates["end_date"] if "end_date" in updates else subject.get("end_date")
+        if final_start and final_end and str(final_end)[:10] < str(final_start)[:10]:
+            return "La fecha de fin no puede ser anterior a la fecha de inicio."
         if description is not None:
             updates["description"] = description
         if evaluation_criteria is not None:
@@ -508,8 +541,10 @@ async def edit_subject(user_id: str, subject_name: str, new_name: str = None, no
             cambios.append(f"nombre → '{new_name}'")
         if weekly_hours_goal is not None:
             cambios.append(f"objetivo semanal → {weekly_hours_goal}h")
-        if period_name:
-            cambios.append(f"periodo → '{period_name}'")
+        if "start_date" in updates:
+            cambios.append(f"inicio → {_format_date_for_display(updates['start_date'])}")
+        if "end_date" in updates:
+            cambios.append(f"fin → {_format_date_for_display(updates['end_date'])}")
         if description is not None:
             cambios.append("descripción actualizada")
         if evaluation_criteria is not None:
@@ -614,88 +649,6 @@ async def delete_subject(user_id: str, subject_name: str):
  
  
 ############################################################################
-# TOOLS FOR PERIODS
- 
-@mcp.tool()
-async def create_period(user_id: str, name: str, start_date: str, end_date: str = None):
-    """
-    Crea un nuevo periodo académico (cuatrimestre, trimestre, curso escolar, o cualquier
-    periodo que el usuario quiera usar para organizar sus asignaturas) y lo establece
-    automáticamente como el periodo activo.
-    IMPORTANTE: pregunta el nombre y la fecha de inicio si el usuario no los ha dado.
-    Úsala cuando el usuario diga 'empiezo un cuatrimestre nuevo' o similar.
-    start_date y end_date deben tener formato ISO 8601 (ej: '2026-09-01'). end_date es
-    opcional si el periodo aún no tiene fecha de fin definida.
-    """
-    try:
-        period = await db_service.create_period(
-            user_id=user_id,
-            name=name,
-            start_date=start_date,
-            end_date=end_date
-        )
-        await db_service.set_active_period(user_id, period["_id"])
-        return f"Periodo '{name}' creado y establecido como periodo activo."
-    except Exception as e:
-        return f"Error al crear el periodo: {str(e)}"
- 
- 
-@mcp.tool()
-async def get_periods(user_id: str):
-    """
-    Devuelve la lista de periodos académicos del usuario.
-    Úsala cuando el usuario pregunte 'qué periodos tengo' o 'muéstrame mis cuatrimestres'.
-    """
-    try:
-        periods = await db_service.get_periods_by_user(user_id)
-        if not periods:
-            return "No tienes ningún periodo académico registrado todavía."
- 
-        result = "Tus periodos:\n"
-        for p in periods:
-            marca = " (activo)" if p.get("is_active") else ""
-            fin = p.get("end_date") or "sin fecha de fin"
-            result += f"- {p['name']}: {p['start_date']} -> {fin}{marca}\n"
-        return result
-    except Exception as e:
-        return f"Error al obtener los periodos: {str(e)}"
- 
- 
-@mcp.tool()
-async def set_current_period(user_id: str, period_name: str):
-    """
-    Establece un periodo ya existente como el periodo activo del usuario.
-    A partir de ese momento, cuando el usuario hable de sus asignaturas sin especificar
-    periodo, se entenderá que se refiere a este.
-    Úsala cuando el usuario diga 'cambia al cuatrimestre X' o 'ahora estoy en Y'.
-    """
-    try:
-        period = await db_service.get_period_by_user_and_name(user_id, period_name)
-        if not period:
-            return f"No encontré ningún periodo llamado '{period_name}'."
-        await db_service.set_active_period(user_id, period["_id"])
-        return f"Periodo activo cambiado a '{period_name}'."
-    except Exception as e:
-        return f"Error al cambiar de periodo: {str(e)}"
- 
- 
-@mcp.tool()
-async def get_current_period(user_id: str):
-    """
-    Devuelve el periodo académico activo del usuario, si tiene uno definido.
-    Úsala cuando el usuario pregunte 'en qué periodo estoy' o 'qué cuatrimestre tengo activo'.
-    """
-    try:
-        period = await db_service.get_active_period(user_id)
-        if not period:
-            return "No tienes ningún periodo activo ahora mismo."
-        fin = period.get("end_date") or "sin fecha de fin"
-        return f"Tu periodo activo es '{period['name']}' ({period['start_date']} -> {fin})."
-    except Exception as e:
-        return f"Error al obtener el periodo activo: {str(e)}"
- 
- 
-############################################################################
 # TOOLS FOR SUBJECTS (adicionales)
  
 # @mcp.tool()
@@ -796,25 +749,6 @@ async def unarchive_subject(user_id: str, subject_name: str):
     except Exception as e:
         return f"Error al desarchivar la asignatura: {str(e)}"
 
- 
-@mcp.tool()
-async def assign_subject_to_period(user_id: str, subject_name: str, period_name: str):
-    """
-    Asocia una asignatura ya existente a un periodo académico ya existente.
-    Úsala si el usuario añadió una asignatura sin periodo y luego quiere organizarla dentro de uno.
-    """
-    try:
-        subject = await _find_subject_by_name(user_id, subject_name)
-        if not subject:
-            return f"No encontré ninguna asignatura llamada '{subject_name}'."
-        period = await db_service.get_period_by_user_and_name(user_id, period_name)
-        if not period:
-            return f"No encontré ningún periodo llamado '{period_name}'."
-        await db_service.update_subject(subject["_id"], period_id=period["_id"])
-        return f"Asignatura '{subject_name}' asignada al periodo '{period_name}'."
-    except Exception as e:
-        return f"Error al asignar la asignatura al periodo: {str(e)}"
- 
  
 ############################################################################
 # TOOLS FOR TASKS
@@ -1517,7 +1451,7 @@ async def stop_timer(user_id: str):
     Úsala cuando el usuario diga 'para el cronómetro', 'ya he terminado de estudiar' o 'ya paré'.
     NO necesita ningún parámetro de asignatura — para el cronómetro que esté activo, sea cual sea.
     NO llames a start_timer después de esta herramienta salvo que el usuario lo pida explícitamente.
-    Tras parar el cronómetro, informa al usuario de que el asistente de bienestar le va a preguntar
+    Tras parar el cronómetro, informa al usuario de que le vas a preguntar
     cómo le fue la sesión para guardar un pequeño informe.
     """
     try:

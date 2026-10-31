@@ -10,6 +10,7 @@ import AcademicAnalysis from "./Analysis/AcademicAnalysis";
 import TimeBreakdownAnalysis from "./Analysis/TimeBreakdownAnalysis";
 import WellbeingAnalysis from "./Analysis/WellbeingAnalysis";
 import PatternsAnalysis from "./Analysis/PatternsAnalysis";
+import styles from "./AnalyticsDashboard.module.css";
 
 const RAW_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 const BACKEND_URL = RAW_BACKEND_URL.replace(/\/+$/, "");
@@ -166,85 +167,34 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
 
   if (!isOpen && !isInline) return null;
 
+  const TABS = [
+    { id: "academic",  label: "Asignaturas",          Icon: BookOpen },
+    { id: "breakdown", label: "Desglose de Tiempo",   Icon: Layers },
+    { id: "wellbeing", label: "Bienestar y Descanso", Icon: Smile },
+    { id: "patterns",  label: "Hábitos y Patrones",   Icon: Calendar },
+  ];
+
   return (
-    <div
-      style={
-        isInline
-          ? { width: "100%", height: "100%", display: "flex", flexDirection: "column", color: "var(--text-primary)" }
-          : {
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(0,0,0,0.6)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-            padding: "20px"
-          }
-      }
-    >
-      <div
-        style={
-          isInline
-            ? {
-              backgroundColor: "var(--bg-surface)",
-              border: "1px solid var(--border)",
-              borderRadius: "16px",
-              padding: "28px",
-              width: "100%",
-              height: "100%",
-              overflowY: "auto",
-              boxShadow: "none",
-              color: "var(--text-primary)"
-            }
-            : {
-              backgroundColor: "var(--bg-surface)",
-              borderRadius: "16px",
-              padding: "28px",
-              width: "100%",
-              maxWidth: "920px",
-              maxHeight: "90vh",
-              overflowY: "auto",
-              boxShadow: "0 20px 30px rgba(0,0,0,0.25)",
-              color: "var(--text-primary)",
-              border: "1px solid var(--border)"
-            }
-        }
-      >
+    <div className={isInline ? styles.wrapperInline : styles.backdrop}>
+      <div className={isInline ? styles.panelInline : styles.panelModal}>
         {/* Header Superior */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+        <div className={styles.header}>
           <div>
-            <h2 style={{ margin: 0, fontSize: "1.4rem", fontWeight: "700", display: "flex", alignItems: "center", gap: "10px" }}>
-              {/* <BarChart3 size={24} color="var(--brand)" /> */}
+            <h2 className={styles.headerTitle}>
               Estadísticas de estudio y bienestar
             </h2>
-            <p style={{ margin: "4px 0 0 0", color: "var(--text-secondary)", fontSize: "14px" }}>
+            <p className={styles.headerSubtitle}>
               Análisis completo de asignaturas, tareas, tiempo dedicado y descanso
             </p>
           </div>
-          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+          <div className={styles.headerActions}>
             {/* Botón Compartir: abre Ajustes en la pestaña de privacidad/compartir */}
             {onOpenShareSettings && (
               <button
                 type="button"
                 onClick={onOpenShareSettings}
                 title="Configurar cómo compartes tus estadísticas"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "6px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--border)",
-                  backgroundColor: "var(--bg-input)",
-                  color: "var(--text-primary)",
-                  fontSize: "13px",
-                  fontWeight: "600",
-                  cursor: "pointer"
-                }}
+                className={styles.btnSecondary}
               >
                 <Share2 size={14} /> Compartir
               </button>
@@ -254,16 +204,7 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
             <select
               value={selectedUserId}
               onChange={(e) => handleSelectUser(e.target.value)}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "8px",
-                border: "1px solid var(--border)",
-                backgroundColor: "var(--bg-input)",
-                color: "var(--text-primary)",
-                fontSize: "13px",
-                fontWeight: "600",
-                cursor: "pointer"
-              }}
+              className={styles.selectUser}
             >
               <option value="me">Mis estadísticas</option>
               {followedUsers.map((u, idx) => {
@@ -290,7 +231,7 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
             </select>
 
             {/* Selector de periodo */}
-            <div style={{ display: "flex", gap: "4px", backgroundColor: "var(--bg-input)", borderRadius: "8px", padding: "3px", border: "1px solid var(--border)" }}>
+            <div className={styles.periodGroup}>
               {[
                 { label: "7 días", value: 7 },
                 { label: "30 días", value: 30 },
@@ -299,17 +240,7 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
                 <button
                   key={opt.value}
                   onClick={() => handleSelectDays(opt.value)}
-                  style={{
-                    padding: "5px 10px",
-                    borderRadius: "6px",
-                    border: "none",
-                    fontSize: "12px",
-                    fontWeight: "600",
-                    cursor: "pointer",
-                    transition: "all 0.2s",
-                    backgroundColor: selectedDays === opt.value ? "var(--brand)" : "transparent",
-                    color: selectedDays === opt.value ? "#fff" : "var(--text-secondary)"
-                  }}
+                  className={`${styles.periodBtn} ${selectedDays === opt.value ? styles.periodBtnActive : ""}`}
                 >
                   {opt.label}
                 </button>
@@ -317,10 +248,7 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
             </div>
 
             {!isInline && (
-              <button
-                onClick={onClose}
-                style={{ background: "none", border: "none", fontSize: "1.5rem", cursor: "pointer", color: "var(--text-secondary)" }}
-              >
+              <button onClick={onClose} className={styles.btnClose}>
                 &times;
               </button>
             )}
@@ -328,169 +256,70 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
         </div>
 
         {isMe && !isClockifyActive ? (
-          <div
-            style={{
-              padding: "36px 24px",
-              borderRadius: "12px",
-              backgroundColor: "var(--bg-input)",
-              border: "1px solid var(--border)",
-              textAlign: "center",
-              margin: "20px 0"
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: "12px", color: "var(--text-secondary)" }}>
+          <div className={styles.emptyState}>
+            <div className={styles.emptyStateIcon}>
               <BarChart3 size={40} strokeWidth={1.5} />
             </div>
-            <h3 style={{ margin: "0 0 8px 0", fontSize: "16px", fontWeight: "600", color: "var(--text-primary)" }}>
+            <h3 className={styles.emptyStateTitle}>
               Estadísticas personales no disponibles sin Clockify
             </h3>
-            <p style={{ margin: "0 auto", fontSize: "13px", color: "var(--text-secondary)", maxWidth: "520px", lineHeight: "1.5" }}>
-              No has vinculado tu cuenta de Clockify para generar tus analíticas de estudio.
+            <p className={styles.emptyStateText}>
+              No has vinculado tu cuenta de Clockify para generar tus estadísticas de estudio.
               <br /><br />
-
             </p>
           </div>
         ) : (
           <>
             {/* Tarjetas KPI de Resumen General */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "12px",
-                backgroundColor: "var(--bg-input)",
-                padding: "10px 18px",
-                borderRadius: "10px",
-                border: "1px solid var(--border)",
-                marginBottom: "20px",
-                flexWrap: "wrap"
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div className={styles.kpiStrip}>
+              <div className={styles.kpiItem}>
                 <Clock size={16} style={{ color: "#1d4ed8" }} />
-                <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Total:</span>
-                <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{formatTime(totalHours)}</strong>
+                <span className={styles.kpiLabel}>Total:</span>
+                <strong className={styles.kpiValue}>{formatTime(totalHours)}</strong>
               </div>
 
-              <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
+              <div className={styles.kpiDivider} />
 
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div className={styles.kpiItem}>
                 <Award size={16} style={{ color: "#15803d" }} />
-                <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Nota Media:</span>
-                <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgGrade} / 10</strong>
+                <span className={styles.kpiLabel}>Nota Media:</span>
+                <strong className={styles.kpiValue}>{avgGrade} / 10</strong>
               </div>
 
-              <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
+              <div className={styles.kpiDivider} />
 
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div className={styles.kpiItem}>
                 <Moon size={16} style={{ color: "#a21caf" }} />
-                <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Sueño Promedio:</span>
-                <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgSleep}</strong>
+                <span className={styles.kpiLabel}>Sueño Promedio:</span>
+                <strong className={styles.kpiValue}>{avgSleep}</strong>
               </div>
 
-              <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border)" }} />
+              <div className={styles.kpiDivider} />
 
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div className={styles.kpiItem}>
                 <Zap size={16} style={{ color: "#c2410c" }} />
-                <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>Concentración:</span>
-                <strong style={{ fontSize: "13px", color: "var(--text-primary)" }}>{avgConc} {avgConc !== "N/A" ? "/ 5" : ""}</strong>
+                <span className={styles.kpiLabel}>Concentración:</span>
+                <strong className={styles.kpiValue}>{avgConc} {avgConc !== "N/A" ? "/ 5" : ""}</strong>
               </div>
             </div>
 
             {/* Navegación por Pestañas principales */}
-            <div
-              style={{
-                display: "flex",
-                gap: "8px",
-                borderBottom: "1px solid var(--border)",
-                paddingBottom: "8px",
-                marginBottom: "20px",
-                overflowX: "auto"
-              }}
-            >
-              <button
-                onClick={() => setActiveSubTab("academic")}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: "8px",
-                  border: "none",
-                  backgroundColor: activeSubTab === "academic" ? "var(--brand)" : "transparent",
-                  color: activeSubTab === "academic" ? "#ffffff" : "var(--text-secondary)",
-                  fontWeight: "600",
-                  fontSize: "14px",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  transition: "all 0.2s"
-                }}
-              >
-                <BookOpen size={16} /> Asignaturas
-              </button>
-              <button
-                onClick={() => setActiveSubTab("breakdown")}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: "8px",
-                  border: "none",
-                  backgroundColor: activeSubTab === "breakdown" ? "var(--brand)" : "transparent",
-                  color: activeSubTab === "breakdown" ? "#ffffff" : "var(--text-secondary)",
-                  fontWeight: "600",
-                  fontSize: "14px",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  transition: "all 0.2s"
-                }}
-              >
-                <Layers size={16} /> Desglose de Tiempo
-              </button>
-              <button
-                onClick={() => setActiveSubTab("wellbeing")}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: "8px",
-                  border: "none",
-                  backgroundColor: activeSubTab === "wellbeing" ? "var(--brand)" : "transparent",
-                  color: activeSubTab === "wellbeing" ? "#ffffff" : "var(--text-secondary)",
-                  fontWeight: "600",
-                  fontSize: "14px",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  transition: "all 0.2s"
-                }}
-              >
-                <Smile size={16} /> Bienestar y Descanso
-              </button>
-              <button
-                onClick={() => setActiveSubTab("patterns")}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: "8px",
-                  border: "none",
-                  backgroundColor: activeSubTab === "patterns" ? "var(--brand)" : "transparent",
-                  color: activeSubTab === "patterns" ? "#ffffff" : "var(--text-secondary)",
-                  fontWeight: "600",
-                  fontSize: "14px",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  transition: "all 0.2s"
-                }}
-              >
-                <Calendar size={16} /> Hábitos y Patrones
-              </button>
+            <div className={styles.tabs}>
+              {TABS.map(({ id, label, Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => setActiveSubTab(id)}
+                  className={`${styles.tab} ${activeSubTab === id ? styles.tabActive : ""}`}
+                >
+                  <Icon size={16} /> {label}
+                </button>
+              ))}
             </div>
 
             {/* Renderizado Condicional de las Pestañas */}
             {loading ? (
-              <p style={{ color: "var(--text-secondary)", fontStyle: "italic", textAlign: "center", padding: "40px 0" }}>
-                Cargando analíticas...
+              <p className={styles.loading}>
+                Cargando estadísticas...
               </p>
             ) : (
               <>
@@ -529,19 +358,8 @@ export default function AnalyticsDashboard({ isOpen, onClose, isInline = false, 
         )}
 
         {!isInline && (
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "24px" }}>
-            <button
-              onClick={onClose}
-              style={{
-                padding: "10px 20px",
-                borderRadius: "8px",
-                border: "none",
-                backgroundColor: "var(--brand)",
-                color: "#ffffff",
-                fontWeight: "600",
-                cursor: "pointer"
-              }}
-            >
+          <div className={styles.footer}>
+            <button onClick={onClose} className={styles.btnPrimary}>
               Cerrar Dashboard
             </button>
           </div>

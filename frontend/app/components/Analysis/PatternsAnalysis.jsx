@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import styles from "./Analysis.module.css";
 
 export default function PatternsAnalysis({ patterns = {}, periodLabel, formatDate, formatTime }) {
     const [patternsPage, setPatternsPage] = useState(0);
@@ -18,19 +19,16 @@ export default function PatternsAnalysis({ patterns = {}, periodLabel, formatDat
     );
 
     return (
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        <div className={styles.root}>
             {/* Distribución de Horas por Día */}
             <div>
-                <h3 style={{ fontSize: "1.05rem", fontWeight: "600", marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <h3 className={styles.sectionTitle}>
                     <span>Distribución Diaria de Horas</span>
-                    {/* <span style={{ fontSize: "12px", fontWeight: "500", color: "var(--text-secondary)", backgroundColor: "var(--bg-page)", padding: "2px 8px", borderRadius: "12px", border: "1px solid var(--border)" }}>
-                        {periodLabel}
-                    </span> */}
                 </h3>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                     {paginatedHours.length === 0 ? (
-                        <p style={{ color: "var(--text-secondary)", fontSize: "13px", margin: 0 }}>
+                        <p className={styles.empty}>
                             No hay registros de horas en este periodo.
                         </p>
                     ) : (
@@ -43,24 +41,16 @@ export default function PatternsAnalysis({ patterns = {}, periodLabel, formatDat
                             return (
                                 <div
                                     key={dayData.date || dayData.day_name}
-                                    style={{
-                                        padding: "12px 16px",
-                                        borderRadius: "10px",
-                                        backgroundColor: "var(--bg-input)",
-                                        border: "1px solid var(--border)",
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        alignItems: "center",
-                                        gap: "12px"
-                                    }}
+                                    className={styles.card}
                                 >
-                                    <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: "130px", flexShrink: 0 }}>
-                                        <span style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)" }}>
+                                    <div className={styles.dateLabel}>
+                                        <span className={styles.dateName}>
                                             {dayData.day_name}, {formattedDate}
                                         </span>
                                     </div>
 
-                                    <div style={{ flex: 1, backgroundColor: "var(--border)", height: "10px", borderRadius: "5px", overflow: "hidden" }}>
+                                    {/* Barra de progreso: el contenedor es .progressBar, el fill es inline (depende del %) */}
+                                    <div className={styles.progressBar}>
                                         <div
                                             style={{
                                                 width: `${pct}%`,
@@ -72,10 +62,8 @@ export default function PatternsAnalysis({ patterns = {}, periodLabel, formatDat
                                         />
                                     </div>
 
-                                    <div style={{ whiteSpace: "nowrap", width: "70px", textAlign: "right" }}>
-                                        <span style={{ fontSize: "14px", color: "var(--brand)", fontWeight: "700" }}>
-                                            {formatTime(hrs)}
-                                        </span>
+                                    <div className={styles.timeValue}>
+                                        {formatTime(hrs)}
                                     </div>
                                 </div>
                             );
@@ -85,49 +73,23 @@ export default function PatternsAnalysis({ patterns = {}, periodLabel, formatDat
 
                 {/* Controles de Paginación */}
                 {recentHoursList.length > PATTERNS_PER_PAGE && (
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
+                    <div className={styles.pagination}>
                         <button
                             disabled={patternsPage === 0}
                             onClick={() => setPatternsPage((prev) => prev - 1)}
-                            style={{
-                                padding: "6px 12px",
-                                borderRadius: "6px",
-                                border: "1px solid var(--border)",
-                                backgroundColor: "var(--bg-input)",
-                                color: "var(--text-primary)",
-                                cursor: patternsPage === 0 ? "not-allowed" : "pointer",
-                                opacity: patternsPage === 0 ? 0.5 : 1,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "4px",
-                                fontSize: "12px",
-                                fontWeight: "600"
-                            }}
+                            className={styles.paginationBtn}
                         >
                             <ChevronLeft size={14} /> Anterior
                         </button>
 
-                        <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "500" }}>
+                        <span className={styles.paginationInfo}>
                             Página {patternsPage + 1} de {totalPages}
                         </span>
 
                         <button
                             disabled={patternsPage >= totalPages - 1}
                             onClick={() => setPatternsPage((prev) => prev + 1)}
-                            style={{
-                                padding: "6px 12px",
-                                borderRadius: "6px",
-                                border: "1px solid var(--border)",
-                                backgroundColor: "var(--bg-input)",
-                                color: "var(--text-primary)",
-                                cursor: patternsPage >= totalPages - 1 ? "not-allowed" : "pointer",
-                                opacity: patternsPage >= totalPages - 1 ? 0.5 : 1,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "4px",
-                                fontSize: "12px",
-                                fontWeight: "600"
-                            }}
+                            className={styles.paginationBtn}
                         >
                             Siguiente <ChevronRight size={14} />
                         </button>
@@ -137,23 +99,20 @@ export default function PatternsAnalysis({ patterns = {}, periodLabel, formatDat
 
             {/* Horario Preferido de Estudio */}
             <div>
-                <h3 style={{ fontSize: "1.05rem", fontWeight: "600", marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <h3 className={styles.sectionTitle}>
                     <span>Horario Preferido de Estudio</span>
-                    <span style={{ fontSize: "12px", fontWeight: "500", color: "var(--text-secondary)", backgroundColor: "var(--bg-page)", padding: "2px 8px", borderRadius: "12px", border: "1px solid var(--border)" }}>
-                        {periodLabel}
-                    </span>
+                    <span className={styles.periodBadge}>{periodLabel}</span>
                 </h3>
-                <div style={{ padding: "16px", borderRadius: "10px", backgroundColor: "var(--bg-input)", border: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: "8px" }}>
-                    <div style={{ display: "flex", alignItems: "flex-end", height: "120px", gap: "2px" }}>
+                <div className={styles.chartContainer}>
+                    <div className={styles.chartBars}>
                         {minutesByHour.map((mins, idx) => {
                             const hPct = Math.min(100, Math.max(0, (mins / maxMinsByHour) * 100));
                             return (
-                                <div key={idx} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
+                                <div key={idx} className={styles.chartBarWrapper}>
                                     {mins > 0 && (
-                                        <span style={{ fontSize: "9px", color: "var(--text-secondary)", marginBottom: "2px" }}>
-                                            {mins}m
-                                        </span>
+                                        <span className={styles.chartBarLabel}>{mins}m</span>
                                     )}
+                                    {/* Fill del bar: inline porque depende del % */}
                                     <div
                                         style={{
                                             width: "100%",
@@ -169,9 +128,9 @@ export default function PatternsAnalysis({ patterns = {}, periodLabel, formatDat
                             );
                         })}
                     </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--text-secondary)", marginTop: "6px", paddingLeft: "0" }}>
+                    <div className={styles.chartXAxis}>
                         {[0, 3, 6, 9, 12, 15, 18, 21, 23].map((h) => (
-                            <span key={h} style={{ flex: h === 23 ? "none" : undefined }}>{`${String(h).padStart(2, "0")}h`}</span>
+                            <span key={h}>{`${String(h).padStart(2, "0")}h`}</span>
                         ))}
                     </div>
                 </div>

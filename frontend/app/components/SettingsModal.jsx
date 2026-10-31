@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Copy, Check, Trash2, UserX, Shield, Clock, Settings, Tag as TagIcon, Palette } from "lucide-react";
+import { X, Copy, Check, Trash2, UserX, BarChart2, Clock, Settings, Tag as TagIcon, Palette } from "lucide-react";
 import ClockifyConfigPanel from "./ClockifyConfigPanel";
 import TagBadge from "./TagBadge";
 import TagColorPickerModal from "./TagColorPickerModal";
 import { setTagColorLocal, refreshTagColors } from "../utils/tagColorStore";
+import styles from "./SettingsModal.module.css";
 
 const RAW_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 const BACKEND_URL = RAW_BACKEND_URL.replace(/\/+$/, "");
@@ -271,144 +272,51 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
   if (!isOpen) return null;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: "rgba(0,0,0,0.6)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1100,
-        padding: "20px"
-      }}
-    >
-      <div
-        style={{
-          backgroundColor: "var(--bg-surface)",
-          border: "1px solid var(--border)",
-          borderRadius: "16px",
-          width: "100%",
-          maxWidth: "760px",
-          maxHeight: "85vh",
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: "0 20px 30px rgba(0,0,0,0.25)",
-          overflow: "hidden",
-          color: "var(--text-primary)"
-        }}
-      >
+    <div className={styles.backdrop}>
+      <div className={styles.panel}>
         {/* Cabecera Modal */}
-        <div
-          style={{
-            padding: "18px 24px",
-            borderBottom: "1px solid var(--border)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center"
-          }}
-        >
-          <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: "700", display: "flex", alignItems: "center", gap: "8px" }}>
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>
             <Settings size={18} />
             Configuración
           </h3>
-          <button
-            onClick={onClose}
-            style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", padding: "4px" }}
-          >
+          <button onClick={onClose} className={styles.btnCloseHeader}>
             <X size={20} />
           </button>
         </div>
 
         {/* Cuerpo con Navegación Lateral */}
-        <div style={{ display: "flex", flex: 1, minHeight: "380px", overflow: "hidden" }}>
+        <div className={styles.body}>
           {/* Menú Izquierdo */}
-          <div
-            style={{
-              width: "200px",
-              borderRight: "1px solid var(--border)",
-              backgroundColor: "var(--bg-page)",
-              padding: "16px 10px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "6px"
-            }}
-          >
-            <button
-              onClick={() => setActiveTab("clockify")}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                padding: "10px 12px",
-                borderRadius: "8px",
-                border: "none",
-                backgroundColor: activeTab === "clockify" ? "var(--pressed-button-bg)" : "transparent",
-                color: "var(--text-primary)",
-                fontWeight: activeTab === "clockify" ? "600" : "500",
-                fontSize: "13px",
-                cursor: "pointer",
-                textAlign: "left"
-              }}
-            >
-              <Clock size={16} /> Clockify
-            </button>
-
-            <button
-              onClick={() => setActiveTab("privacy")}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                padding: "10px 12px",
-                borderRadius: "8px",
-                border: "none",
-                backgroundColor: activeTab === "privacy" ? "var(--pressed-button-bg)" : "transparent",
-                color: "var(--text-primary)",
-                fontWeight: activeTab === "privacy" ? "600" : "500",
-                fontSize: "13px",
-                cursor: "pointer",
-                textAlign: "left"
-              }}
-            >
-              <Shield size={16} /> Estadísticas
-            </button>
-
-            <button
-              onClick={() => setActiveTab("tags")}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                padding: "10px 12px",
-                borderRadius: "8px",
-                border: "none",
-                backgroundColor: activeTab === "tags" ? "var(--pressed-button-bg)" : "transparent",
-                color: "var(--text-primary)",
-                fontWeight: activeTab === "tags" ? "600" : "500",
-                fontSize: "13px",
-                cursor: "pointer",
-                textAlign: "left"
-              }}
-            >
-              <TagIcon size={16} /> Etiquetas
-            </button>
+          <div className={styles.sidebar}>
+            {[
+              { id: "clockify", label: "Clockify", Icon: Clock },
+              { id: "privacy",  label: "Estadísticas", Icon:  BarChart2 },
+              { id: "tags",     label: "Etiquetas", Icon: TagIcon },
+            ].map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={`${styles.sidebarBtn} ${activeTab === id ? styles.sidebarBtnActive : ""}`}
+              >
+                <Icon size={16} /> {label}
+              </button>
+            ))}
           </div>
 
           {/* Área de Contenido */}
-          <div style={{ flex: 1, padding: "24px", overflowY: "auto" }}>
+          <div className={styles.content}>
             {/* PESTAÑA CLOCKIFY */}
             {/* Se mantiene montada (oculta con CSS) mientras el modal está abierto,
                 en vez de solo cuando esta pestaña está activa, para que su estado
                 se cargue en cuanto se abre el modal y esté disponible también para
-                la pestaña de Permisos, igual que antes. */}
+                la pestaña de Permisos */}
             <div style={{ display: activeTab === "clockify" ? "flex" : "none", flexDirection: "column", gap: "18px" }}>
               <div>
-                <h4 style={{ margin: "0 0 6px 0", fontSize: "15px" }}>Integración de Clockify</h4>
-                <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary)" }}>
+                <h4 className={styles.sectionTitle}>
+                  Integración con Clockify
+                </h4>
+                <p className={styles.sectionSubtitle}>
                   Conecta tu API Key de Clockify para sincronizar automáticamente el tiempo dedicado a tus asignaturas.
                 </p>
               </div>
@@ -418,51 +326,30 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
                 onSuccess={onSuccess}
                 onStatusChange={setClockifyStatus}
               />
-            </div>
-
+            </div>  
 
             {/* PESTAÑA PERMISOS Y PRIVACIDAD */}
             {activeTab === "privacy" && (
               <div style={{ display: "flex", flexDirection: "column", gap: "22px" }}>
                 {/* 1. Mi Código */}
-                <div style={{ borderBottom: "1px solid var(--border)", paddingBottom: "18px" }}>
-                  <h4 style={{ margin: "0 0 6px 0", fontSize: "14px", fontWeight: "600" }}>Código para compartir mis estadísticas</h4>
-                  <p style={{ margin: "0 0 10px 0", fontSize: "12px", color: "var(--text-secondary)" }}>
+                <div className={styles.section}>
+                  <h4 className={styles.sectionTitle}>Código para compartir mis estadísticas</h4>
+                  <p className={styles.sectionSubtitle}>
                     Comparte este código con compañeros para que puedan seguir tus estadísticas de estudio.
                   </p>
                   {!clockifyStatus ? (
-                    <p style={{ margin: 0, fontSize: "12px", color: "#dc2626", fontStyle: "italic" }}>
+                    <p className={styles.warningText}>
                       Debes vincular una cuenta de Clockify para poder compartir tus estadísticas.
                     </p>
                   ) : (
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                      <code
-                        style={{
-                          padding: "6px 14px",
-                          borderRadius: "8px",
-                          backgroundColor: "var(--bg-page)",
-                          border: "1px solid var(--border)",
-                          fontSize: "16px",
-                          fontWeight: "700",
-                          letterSpacing: "2px"
-                        }}
-                      >
+                    <div className={styles.shareCodeRow}>
+                      <code className={styles.shareCode}>
                         {myShareCode || (privacyLoading ? "Cargando..." : "—")}
                       </code>
                       <button
                         onClick={handleCopyCode}
                         disabled={!myShareCode}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: "6px",
-                          border: "1px solid var(--border)",
-                          backgroundColor: "var(--bg-surface)",
-                          cursor: myShareCode ? "pointer" : "not-allowed",
-                          fontSize: "12px",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "4px"
-                        }}
+                        className={styles.btnOutline}
                       >
                         {copied ? <Check size={14} color="#16a34a" /> : <Copy size={14} />}
                         {copied ? "Copiado" : "Copiar"}
@@ -472,63 +359,45 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
                 </div>
 
                 {/* 2. Usuarios que sigo */}
-                <div style={{ borderBottom: "1px solid var(--border)", paddingBottom: "18px" }}>
-                  <h4 style={{ margin: "0 0 12px 0", fontSize: "14px", fontWeight: "600" }}>Usuarios que sigo</h4>
+                <div className={styles.section}>
+                  <h4 className={styles.sectionTitle}>Estadísticas que quiero ver</h4>
 
-                  {/* Arriba: Añadir un nuevo usuario */}
+                  {/* Añadir un nuevo usuario */}
                   <div style={{ marginBottom: "16px" }}>
-                    <label style={{ display: "block", fontSize: "12px", color: "var(--text-secondary)", marginBottom: "6px", fontWeight: "500" }}>
+                    <label style={{ margin: "0 0 8px 0", fontSize: "12px", color: "var(--text-secondary)", fontWeight: "600" }}>
                       Añadir un nuevo usuario
                     </label>
-                    <div style={{ display: "flex", gap: "8px" }}>
+                    <div className={styles.inputRow}>
                       <input
                         type="text"
                         value={followCode}
                         onChange={(e) => setFollowCode(e.target.value.toUpperCase())}
                         placeholder="Introduce el código..."
                         maxLength={10}
-                        style={{
-                          padding: "7px 12px",
-                          borderRadius: "6px",
-                          border: "1px solid var(--border)",
-                          backgroundColor: "var(--bg-input)",
-                          color: "var(--text-primary)",
-                          fontSize: "13px",
-                          width: "200px"
-                        }}
+                        className={styles.inputField}
                       />
                       <button
                         onClick={handleFollowUser}
                         disabled={!followCode.trim()}
-                        style={{
-                          padding: "7px 16px",
-                          borderRadius: "6px",
-                          border: "none",
-                          backgroundColor: "var(--brand)",
-                          color: "#fff",
-                          cursor: followCode.trim() ? "pointer" : "not-allowed",
-                          fontSize: "12px",
-                          fontWeight: "600",
-                          opacity: followCode.trim() ? 1 : 0.6
-                        }}
+                        className={styles.btnPrimary}
                       >
                         Seguir
                       </button>
                     </div>
-                    {followError && <p style={{ margin: "6px 0 0", fontSize: "12px", color: "#dc2626" }}>{followError}</p>}
+                    {followError && <p className={styles.errorText}>{followError}</p>}
                   </div>
 
-                  {/* Abajo: Lista de usuarios que sigo */}
+                  {/* Lista de usuarios que sigo */}
                   <div>
                     <h5 style={{ margin: "0 0 8px 0", fontSize: "12px", color: "var(--text-secondary)", fontWeight: "600" }}>
-                      Lista de usuarios seguidos ({followedUsers.length})
+                      Usuarios a los que puedo ver sus estadísticas ({followedUsers.length})
                     </h5>
                     {followedUsers.length === 0 ? (
                       <p style={{ fontSize: "12px", color: "var(--text-secondary)", margin: 0, fontStyle: "italic" }}>
                         No estás siguiendo a ningún usuario todavía.
                       </p>
                     ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "160px", overflowY: "auto" }}>
+                      <div className={styles.userList}>
                         {followedUsers.map((u, idx) => {
                           const uId = u.followed_user_id || u.target_user_id || u.user_id || u.id || u._id;
                           const name = u.name || u.user_name || u.nombre;
@@ -544,33 +413,12 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
                           }
 
                           return (
-                            <div
-                              key={uId || idx}
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                padding: "8px 12px",
-                                borderRadius: "6px",
-                                backgroundColor: "var(--bg-page)",
-                                border: "1px solid var(--border)"
-                              }}
-                            >
-                              <span style={{ fontSize: "13px", color: "var(--text-primary)" }}>
-                                {userLabel}
-                              </span>
+                            <div key={uId || idx} className={styles.userListItem}>
+                              <span className={styles.userListItemName}>{userLabel}</span>
                               <button
                                 onClick={() => handleUnfollowUser(uId, userLabel)}
                                 title="Dejar de seguir"
-                                style={{
-                                  background: "none",
-                                  border: "none",
-                                  color: "#dc2626",
-                                  cursor: "pointer",
-                                  padding: "4px",
-                                  display: "flex",
-                                  alignItems: "center"
-                                }}
+                                className={styles.btnDanger}
                               >
                                 <Trash2 size={15} />
                               </button>
@@ -584,7 +432,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
 
                 {/* 3. Quién puede ver mis estadísticas */}
                 <div>
-                  <h4 style={{ margin: "0 0 8px 0", fontSize: "14px", fontWeight: "600" }}>
+                  <h4 className={styles.sectionTitle}>
                     Quién puede ver mis estadísticas ({followers.length})
                   </h4>
                   {followers.length === 0 ? (
@@ -592,7 +440,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
                       Nadie ve tus estadísticas.
                     </p>
                   ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "140px", overflowY: "auto" }}>
+                    <div className={styles.userList} style={{ maxHeight: "140px" }}>
                       {followers.map((f, idx) => {
                         const fId = f.follower_id || f.user_id || f.id || f._id;
                         const name = f.name || f.user_name || f.nombre;
@@ -608,33 +456,12 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
                         }
 
                         return (
-                          <div
-                            key={fId || idx}
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              padding: "8px 12px",
-                              borderRadius: "6px",
-                              backgroundColor: "var(--bg-page)",
-                              border: "1px solid var(--border)"
-                            }}
-                          >
-                            <span style={{ fontSize: "13px", color: "var(--text-primary)" }}>
-                              {followerLabel}
-                            </span>
+                          <div key={fId || idx} className={styles.userListItem}>
+                            <span className={styles.userListItemName}>{followerLabel}</span>
                             <button
                               onClick={() => handleRevokeFollower(fId, followerLabel)}
                               title="Revocar acceso"
-                              style={{
-                                background: "none",
-                                border: "none",
-                                color: "#dc2626",
-                                cursor: "pointer",
-                                padding: "4px",
-                                display: "flex",
-                                alignItems: "center"
-                              }}
+                              className={styles.btnDanger}
                             >
                               <UserX size={15} />
                             </button>
@@ -651,26 +478,14 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
             {activeTab === "tags" && (
               <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
                 <div>
-                  <h4 style={{ margin: "0 0 6px 0", fontSize: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <Palette size={18} /> Personalización de Etiquetas
+                  <h4 className={styles.sectionTitle}>
+                    Personalización de Etiquetas
                   </h4>
                   <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary)" }}>
                     Haz clic sobre cualquier etiqueta para elegir su color de la paleta. Si no seleccionas ninguno, se asignará un color armónico por defecto.
                   </p>
                   <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "10px" }}>
-                    <button
-                      onClick={handleMergeDuplicateTags}
-                      style={{
-                        padding: "6px 12px",
-                        borderRadius: "8px",
-                        border: "1px solid var(--border)",
-                        background: "transparent",
-                        color: "var(--text-primary)",
-                        fontSize: "12px",
-                        fontWeight: "600",
-                        cursor: "pointer"
-                      }}
-                    >
+                    <button onClick={handleMergeDuplicateTags} className={styles.btnMerge}>
                       Fusionar duplicadas
                     </button>
                     {mergeMessage && (
@@ -682,27 +497,11 @@ export default function SettingsModal({ isOpen, onClose, initialTab = "clockify"
                 {tagsLoading ? (
                   <div style={{ fontSize: "13px", color: "var(--text-secondary)" }}>Cargando etiquetas...</div>
                 ) : tags.length === 0 ? (
-                  <div style={{
-                    padding: "24px",
-                    textAlign: "center",
-                    backgroundColor: "var(--bg-page)",
-                    borderRadius: "12px",
-                    border: "1px dashed var(--border)",
-                    color: "var(--text-secondary)",
-                    fontSize: "13px"
-                  }}>
+                  <div className={styles.tagsEmpty}>
                     No se han encontrado etiquetas. Se irán registrando automáticamente conforme añadas tags en tus tareas o en las respuestas de la IA.
                   </div>
                 ) : (
-                  <div style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: "10px",
-                    padding: "18px",
-                    backgroundColor: "var(--bg-page)",
-                    borderRadius: "12px",
-                    border: "1px solid var(--border)"
-                  }}>
+                  <div className={styles.tagGrid}>
                     {tags.map((t) => (
                       <TagBadge
                         key={t.name}

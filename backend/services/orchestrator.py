@@ -54,8 +54,13 @@ class AgentOrchestrator:
            EXCEPCIÓN CRÍTICA: Si el usuario pide EXPLÍCITAMENTE una acción académica ("muéstrame mis tareas",
            "añade esta tarea") ignorando la pregunta de bienestar, clasifica SIEMPRE como ACADEMICO.
 
-        3. GENERAL: Saludo aislado ("hola", "qué tal"), pregunta sobre qué puede hacer el sistema, o despedida
-           sin contexto previo de tareas u operaciones académicas.
+        3. GENERAL: Saludo aislado ("hola", "qué tal"), pregunta sobre qué puede hacer el sistema, DUDAS sobre cómo
+           funciona el sistema o una de sus funcionalidades, o despedida sin contexto previo de tareas u operaciones
+           académicas.
+           Ejemplos GENERAL: "¿qué puedes hacer?", "ayuda", "¿cómo registro mi tiempo?", "¿para qué sirve el plan de
+           estudio?", "¿cómo comparto mis estadísticas?", "¿qué son las etiquetas?", "¿qué hace el cronómetro?".
+           Solo es GENERAL si el usuario PREGUNTA cómo funciona o qué es algo. Si pide ejecutar la acción
+           ("registra 2 horas de Física", "crea la tarea X"), NO es GENERAL.
 
         4. PLANIFICADOR: SOLO cuando el usuario pide EXPLÍCITAMENTE crear, modificar o reorganizar su PLAN DE ESTUDIO
            EN CONJUNTO (varias actividades, la semana, el plan entero), no una tarea suelta. Señales claras:
@@ -75,6 +80,10 @@ class AgentOrchestrator:
         - Si proponía algo sobre tareas, asignaturas, tiempos o el cronómetro (incluido un borrado) → ACADEMICO.
         - Si era una pregunta de informe de sesión o de bienestar → BIENESTAR.
         Una invitación del asistente a "reorganizar el plan" tras un saludo o un aviso de retrasos cuenta como propuesta de PLANIFICADOR.
+        EXCEPCIÓN: GENERAL no puede ejecutar acciones. Si la última respuesta fue de GENERAL (explicación, ayuda o
+        bienvenida) y el usuario responde con una confirmación o con datos para actuar (por ejemplo, nombres de
+        asignaturas), enruta al agente que corresponda por el tema: asignaturas, tareas o tiempos → ACADEMICO;
+        plan de estudio → PLANIFICADOR; cómo se siente → BIENESTAR.
 
         {last_agent_hint}{history_str}Último mensaje del usuario (a clasificar, utilizando el historial superior como contexto): "{user_message}"
 

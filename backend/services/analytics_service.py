@@ -802,7 +802,7 @@ class AnalyticsService:
                 except Exception:
                     pass
 
-        # Obtener analíticas de bienestar, patrones, métricas extendidas y desglose de tiempo
+        # Obtener estadísticas de bienestar, patrones, métricas extendidas y desglose de tiempo
         wellbeing = {}
         patterns = {}
         study_plan = {}
@@ -815,7 +815,7 @@ class AnalyticsService:
             ext_metrics = await self.get_extended_subject_metrics(user_id)
             time_breakdown = await self.get_time_breakdown(user_id, days=effective_days)
         except Exception as e:
-            print(f"[DASHBOARD] Error al calcular analíticas complementarias: {e}", file=sys.stderr)
+            print(f"[DASHBOARD] Error al calcular estadísticas complementarias: {e}", file=sys.stderr)
 
         # Obtener informes de estudio para medir concentración media por asignatura
         study_reports = []
@@ -1049,7 +1049,7 @@ class AnalyticsService:
                 subject = subjects[0]
                 grade = subject.get("grade")
                 
-                # 3. Analíticas de la asignatura (horas, concentración)
+                # 3. estadísticas de la asignatura (horas, concentración)
                 student_analytics = await self.get_course_student_analytics(student_id, str(subject["_id"]), days=0)
                 hours = student_analytics.get("hours", 0)
                 concentration = student_analytics.get("avg_concentration")

@@ -33,7 +33,6 @@ export default function TagBadge({ name, color, customColorMap = {}, onClick, sh
                 cursor: onClick ? "pointer" : "default",
                 transition: "all 0.15s ease",
             }}
-            className={onClick ? "hover:brightness-95 hover:scale-105" : ""}
             title={onClick ? `Haz clic para cambiar el color de #${name}` : `#${name}`}
         >
             {showIcon && <TagIcon size={isSmall ? 10 : 12} style={{ color: style.text }} />}

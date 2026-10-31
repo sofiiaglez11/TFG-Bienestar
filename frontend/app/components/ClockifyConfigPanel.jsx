@@ -157,26 +157,7 @@ export default function ClockifyConfigPanel({ isActive = true, onSuccess, onCanc
             </div>
           )}
         </div>
-        {isConnected && (
-          <button
-            type="button"
-            onClick={handleDisconnect}
-            disabled={loading}
-            style={{
-              padding: "6px 12px",
-              borderRadius: "6px",
-              border: "1px solid rgba(239,68,68,0.4)",
-              backgroundColor: "transparent",
-              color: "#dc2626",
-              fontSize: "12px",
-              fontWeight: "600",
-              cursor: loading ? "not-allowed" : "pointer",
-              flexShrink: 0,
-            }}
-          >
-            Desconectar
-          </button>
-        )}
+        
       </div>
 
       {/* Guía paso a paso (desplegable) */}
@@ -285,7 +266,6 @@ export default function ClockifyConfigPanel({ isActive = true, onSuccess, onCanc
               color: "var(--text-primary)",
             }}
           >
-            API Key de Clockify
           </label>
           <div style={{ position: "relative" }}>
             <input

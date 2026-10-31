@@ -9,6 +9,7 @@ from langgraph.graph import StateGraph, START, END
 from zoneinfo import ZoneInfo
 from datetime import timedelta
 from services.database_service import task_can_be_rescheduled
+from services.capabilities import FEATURES_OVERVIEW
 
 class GraphState(TypedDict):
     user_id: str
@@ -835,13 +836,18 @@ class LangGraphService:
             proactive_prompt = (
                 f"El usuario {user_name} acaba de registrarse e ingresar por primera vez a la plataforma.\n"
                 "Dale una cálida, entusiasta y cercana bienvenida llamándole por su nombre.\n"
-                "Explícale de manera clara, amigable y bien estructurada (usa viñetas o puntos breves) "
-                "las funcionalidades principales con las que este chat le ayudará en su día a día como estudiante:\n"
-                # "• **Gestión de Asignaturas y Tareas**: Organización de materias, tareas pendientes, fechas límite de entregas y exámenes.\n"
-                # "• **Temporizador y Registro de Estudio**: Medición del tiempo real de estudio con cronómetro en directo e integración con Clockify.\n"
-                # "• **Planes de Estudio Personalizados**: Creación y seguimiento de planificaciones semanales adaptadas a sus objetivos y ritmo.\n"
-                # "• **Cuidado de tu Bienestar**: Registro de horas de sueño, descansos, niveles de estrés y fatiga tras cada sesión para mantener un equilibrio saludable.\n"
-                # "• **Métricas y Consejos Inteligentes**: Análisis de rendimiento y recomendaciones proactivas para optimizar su estudio sin agotarse.\n\n"
+                "Explícale con detalle, de manera clara, amigable y bien estructurada, qué puede hacer con la plataforma. "
+                "Usa ÚNICAMENTE la información de la sección 'FUNCIONALIDADES DEL SISTEMA' que aparece más abajo; no inventes nada.\n"
+                "FORMATO OBLIGATORIO de esta bienvenida (es más extensa de lo habitual a propósito):\n"
+                "- Un saludo cálido de 1-2 frases, llamándole por su nombre.\n"
+                "- Después, un bloque por cada funcionalidad principal, cada uno con su título en negrita: "
+                "Asignaturas y tareas, Control del tiempo de estudio, Plan de estudio, Bienestar y consejos, y "
+                "Estadísticas, compartir y cursos (estos últimos están en la aplicación, no en el chat).\n"
+                "- En cada bloque: 1-2 frases explicando qué le aporta y un ejemplo corto de lo que puede escribir, entre comillas "
+                "(ej: 'Tengo Física y Matemáticas', 'Empieza el cronómetro para Física', 'Hoy he dormido 7 horas').\n"
+                "- Menciona de pasada que para usar el cronómetro y las estadísticas personales necesita tener Clockify vinculado desde Configuración.\n"
+                "- Habla siempre en lenguaje cotidiano: NUNCA uses términos técnicos como herramientas, MCP, parámetros o nombres de variables.\n\n"
+                + FEATURES_OVERVIEW + "\n\n"
                 "Termina el mensaje con una llamada a la acción clara e interactiva para empezar, sugiriendo registrar sus asignaturas actuales. Por ejemplo:\n"
                 "'Para empezar a organizarnos, ¿qué te parece si registramos tus asignaturas? Cuéntame qué asignaturas estás cursando este cuatrimestre y las configuramos juntos.'\n\n"
                 "REGLA ESTRICTA: En este primer saludo de onboarding NO le preguntes cuántas horas ha dormido hoy ni le pidas informe de bienestar todavía; el foco absoluto es presentarle la plataforma e invitarle a registrar sus asignaturas."

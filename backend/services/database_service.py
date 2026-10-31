@@ -33,7 +33,6 @@ class DatabaseService:
         # Colecciones
         self.users = self.db["users"]
  
-        self.periods = self.db["periods"]
         self.subjects = self.db["subjects"]
         self.tasks = self.db["tasks"]
         self.history = self.db["history"]
@@ -52,7 +51,7 @@ class DatabaseService:
         Crea los índices necesarios. Llamar una vez al arrancar la app (p.ej. en el
         lifespan de main.py), es idempotente: si el índice ya existe, Mongo no hace nada.
         """
-        await self.subjects.create_index([("user_id", 1), ("period_id", 1)])
+        await self.subjects.create_index([("user_id", 1)])
         await self.subjects.create_index([("course_id", 1), ("user_id", 1)])
         await self.tasks.create_index([("subject_id", 1)])
         await self.tasks.create_index([("parent_task_id", 1)])
@@ -60,7 +59,6 @@ class DatabaseService:
         await self.tasks.create_index("tags")
         await self.user_tags.create_index([("user_id", 1), ("name", 1)], unique=True)
         # await self.deadlines.create_index([("user_id", 1), ("date", 1)])
-        await self.periods.create_index([("user_id", 1)])
         await self.history.create_index([("user_id", 1), ("timestamp", -1)])
         await self.wellbeing_entries.create_index([("user_id", 1), ("date", -1)])
         await self.study_reports.create_index([("user_id", 1), ("timestamp", -1)])
@@ -130,7 +128,6 @@ class DatabaseService:
             "name": name,
             "password": hashed_password,
             "role": role,
-            "current_period_id": None,
             "clockify": None
         }
         result = await self.users.insert_one(user)
@@ -291,13 +288,6 @@ class DatabaseService:
                 return None
         return creds
 
-    async def update_current_period(self, user_id: str, period_id: str):
-        """Actualiza el periodo académico actual de un usuario."""
-        await self.users.update_one(
-            {"_id": ObjectId(user_id)},
-            {"$set": {"current_period_id": period_id}}
-        )
-
     async def update_subject_grade(self, subject_id: str, grade: float):
         """Actualiza la nota/calificación de una asignatura."""
         await self.subjects.update_one(
@@ -388,81 +378,10 @@ class DatabaseService:
  
  
     ############################################################################
-    # METHODS FOR PERIODS
- 
-    async def create_period(self, user_id: str, name: str, start_date: str, end_date: str) -> dict:
-        """Crea un nuevo periodo académico asociado a un usuario."""
-        period = {
-            "user_id": user_id,
-            "name": name,
-            "start_date": start_date,
-            "end_date": end_date
-        }
-        result = await self.periods.insert_one(period)
-        period["_id"] = str(result.inserted_id)
-        return period
- 
-    async def get_periods_by_user(self, user_id: str) -> list:
-        """Devuelve todos los periodos académicos de un usuario."""
-        cursor = self.periods.find({"user_id": user_id})
-        periods = await cursor.to_list(100)
-        for p in periods:
-            p["_id"] = str(p["_id"])
-        return periods
- 
-    async def get_period_by_id(self, period_id: str) -> dict | None:
-        """Devuelve un periodo académico por su ID."""
-        period = await self.periods.find_one({"_id": ObjectId(period_id)})
-        if period:
-            period["_id"] = str(period["_id"])
-        return period
- 
-    async def get_period_by_user_and_name(self, user_id: str, name: str) -> dict | None:
-        """Devuelve un periodo académico por su nombre y usuario."""
-        period = await self.periods.find_one({"user_id": user_id, "name": name})
-        if period:
-            period["_id"] = str(period["_id"])
-        return period
- 
-    async def update_period(self, period_id: str, **fields):
-        """Actualiza campos sueltos de un periodo (name, start_date, end_date)."""
-        if not fields:
-            return
-        await self.periods.update_one({"_id": ObjectId(period_id)}, {"$set": fields})
- 
-    async def set_active_period(self, user_id: str, period_id: str):
-        """
-        Marca un periodo como el activo del usuario, desactivando el resto.
-        NOTA: usamos un campo is_active en el propio documento de period (en vez de
-        users.current_period_id) porque, mientras no haya login real, user_id es un
-        string plano ("default_user") y no un ObjectId válido -- convertirlo con
-        ObjectId(user_id) fallaría con InvalidId.
-        """
-        await self.periods.update_many({"user_id": user_id}, {"$set": {"is_active": False}})
-        await self.periods.update_one({"_id": ObjectId(period_id)}, {"$set": {"is_active": True}})
- 
-    async def get_active_period(self, user_id: str) -> dict | None:
-        """Devuelve el periodo activo del usuario, si tiene uno."""
-        period = await self.periods.find_one({"user_id": user_id, "is_active": True})
-        if period:
-            period["_id"] = str(period["_id"])
-        return period
- 
-    async def delete_period(self, period_id: str):
-        """
-        Elimina un periodo académico por su ID.
-        NOTA: no toca las subjects que lo referencian, para no borrar datos de asignaturas
-        por accidente. Si quieres "liberar" esas asignaturas (dejarlas sin periodo) antes
-        de borrar, hazlo explícitamente con update_subject(subject_id, period_id=None).
-        """
-        await self.periods.delete_one({"_id": ObjectId(period_id)})
- 
- 
-    ############################################################################
     # METHODS FOR SUBJECTS
  
     async def create_subject(self, user_id: str, name: str, clockify_project_id: str, weekly_hours_goal: int = 0, 
-        period_id: Optional[str] = None, grade: Optional[float] = None, description: Optional[str] = None, 
+        start_date: Optional[str] = None, end_date: Optional[str] = None, grade: Optional[float] = None, description: Optional[str] = None, 
         evaluation_criteria: Optional[str] = None, notes: Optional[str] = None,
         course_id: Optional[str] = None) -> dict:
         """
@@ -471,7 +390,8 @@ class DatabaseService:
         """
         subject = {
             "user_id": user_id,
-            "period_id": period_id,
+            "start_date": start_date,  # opcional, formato YYYY-MM-DD
+            "end_date": end_date,      # opcional, formato YYYY-MM-DD
             "name": name,
             "clockify_project_id": clockify_project_id,
             "weekly_hours_goal": weekly_hours_goal,
@@ -508,14 +428,6 @@ class DatabaseService:
             s["_id"] = str(s["_id"])
         return subjects
  
-    async def get_subjects_by_period(self, period_id: str) -> list:
-        """Devuelve todas las asignaturas asociadas a un periodo concreto."""
-        cursor = self.subjects.find({"period_id": period_id})
-        subjects = await cursor.to_list(100)
-        for s in subjects:
-            s["_id"] = str(s["_id"])
-        return subjects
- 
     async def get_subject_by_id(self, subject_id: str) -> dict | None:
         """Devuelve una asignatura por su ID."""
         subject = await self.subjects.find_one({"_id": ObjectId(subject_id)})
@@ -526,8 +438,8 @@ class DatabaseService:
     async def update_subject(self, subject_id: str, **fields):
         """
         Actualiza campos sueltos de una asignatura (name, weekly_hours_goal,
-        period_id, is_archived...). Ej: update_subject(id, is_archived=True)
-        para archivarla al cerrar un periodo, en vez de borrarla.
+        start_date, end_date, is_archived...). Ej: update_subject(id, is_archived=True)
+        para archivarla al terminar la asignatura, en vez de borrarla.
         """
         if not fields:
             return
@@ -955,20 +867,9 @@ class DatabaseService:
     ############################################################################
     # METHODS FOR STUDY REPORTS
 
-    async def create_study_report(
-        self,
-        user_id: str,
-        clockify_time_entry_id: str,
-        subject_name: str = None,
-        study_quality: int = None,
-        goals_achieved: bool = None,
-        goals_description: str = None,
-        distractions: str = None,
-        breaks_taken: int = None,
-        mood_before: int = None,
-        mood_after: int = None,
-        notes: str = None
-    ) -> dict:
+    async def create_study_report(self, user_id: str, clockify_time_entry_id: str, subject_name: str = None,
+        study_quality: int = None, goals_achieved: bool = None, goals_description: str = None, distractions: str = None,
+        breaks_taken: int = None, mood_before: int = None, mood_after: int = None, notes: str = None ) -> dict:
         """
         Crea un informe de sesión de estudio vinculado OBLIGATORIAMENTE a una entrada de tiempo de Clockify.
         Todos los campos son opcionales excepto user_id y clockify_time_entry_id.

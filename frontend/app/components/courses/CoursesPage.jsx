@@ -8,15 +8,26 @@ import {
 const gridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "16px" };
 
 /* TARJETA DE CURSO */
-
 function CourseCard({ course, role, onClick }) {
   const isTeacher = role === "teacher";
+  const studentCount = course.student_ids?.length || 0;
+
   return (
     <div
       onClick={onClick}
       style={{
-        background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "16px",
-        padding: "20px", cursor: "pointer", transition: "all 0.2s ease", position: "relative", overflow: "hidden",
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border)",
+        borderRadius: "16px",
+        padding: "20px",
+        cursor: "pointer",
+        transition: "all 0.2s ease",
+        position: "relative",
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        boxSizing: "border-box"
       }}
       onMouseOver={e => {
         e.currentTarget.style.transform = "translateY(-2px)";
@@ -34,49 +45,50 @@ function CourseCard({ course, role, onClick }) {
         background: "var(--brand)", borderRadius: "3px 3px 0 0"
       }} />
 
-
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h3 style={{ margin: "0 0 6px 0", fontSize: "16px", fontWeight: "700", color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      {/* Bloque superior */}
+      <div style={{ flex: 1 }}>
+        {/* Fila del título e icono de rol */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px", marginBottom: "6px" }}>
+          <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
             {course.name}
           </h3>
-          {course.academic_year && (
+          <span style={{ display: "flex", alignItems: "center", color: "var(--brand)", flexShrink: 0 }}>
+            {isTeacher
+              ? <Users size={22} strokeWidth={1.8} />
+              : <GraduationCap size={22} strokeWidth={1.8} />
+            }
+          </span>
+        </div>
+
+        {/* Año académico justo debajo, alineado con el margen izquierdo */}
+        {course.academic_year && (
+          <div style={{ marginBottom: "12px", marginLeft: "-4px" }}>
             <Badge color="var(--brand)">
               <Calendar size={10} />
               {course.academic_year}
             </Badge>
-          )}
-        </div>
-        <span style={{ marginLeft: "12px", display: "flex", alignItems: "center", color: "var(--brand)" }}>
-          {isTeacher
-            ? <Users size={22} strokeWidth={1.8} />
-            : <GraduationCap size={22} strokeWidth={1.8} />
-          }
-        </span>
+          </div>
+        )}
+
+        {/* Descripción */}
+        {course.description && (
+          <p style={{ margin: "0 0 12px 0", fontSize: "13px", color: "var(--text-secondary)", lineHeight: "1.5", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+            {course.description}
+          </p>
+        )}
       </div>
 
-      {course.description && (
-        <p style={{ margin: "0 0 12px 0", fontSize: "13px", color: "var(--text-secondary)", lineHeight: "1.5", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-          {course.description}
-        </p>
-      )}
-
-      <div style={{ display: "flex", gap: "12px", fontSize: "12px", color: "var(--text-secondary)", marginTop: "8px" }}>
+      {/* Bloque inferior: Información de alumnos siempre al fondo */}
+      <div style={{ display: "flex", gap: "12px", fontSize: "12px", color: "var(--text-secondary)", marginTop: "auto", paddingTop: "12px" }}>
         {isTeacher ? (
-          <>
-            <span>{course.student_ids?.length || 0} alumnos</span>
-            <span style={{ marginLeft: "auto", fontFamily: "monospace", background: "var(--bg-input)", padding: "2px 8px", borderRadius: "6px", fontSize: "12px", letterSpacing: "1px", color: "var(--text-primary)" }}>
-              {course.enrollment_code}
-            </span>
-          </>
+          <span>{studentCount} {studentCount === 1 ? "alumno" : "alumnos"}</span>
         ) : (
-          <span style={{ color: "var(--brand)" }}>✓ Matriculado</span>
+          <span style={{ color: "var(--brand)" }}>Matriculado</span>
         )}
       </div>
     </div>
   );
 }
-
 /*CABECERA DE SELECCIÓN */
 
 function SectionHeader({ icon: Icon, title, count, color, action }) {

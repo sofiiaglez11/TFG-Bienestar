@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ListChecks } from "lucide-react";
 import TagBadge from "../TagBadge";
+import styles from "./Analysis.module.css";
 
 export default function TimeBreakdownAnalysis({ timeBreakdown = {}, formatTime }) {
     const [subjectFilter, setSubjectFilter] = useState("All");
@@ -21,22 +22,18 @@ export default function TimeBreakdownAnalysis({ timeBreakdown = {}, formatTime }
 
     const filteredTotalHoursRaw = filteredTasks.reduce((acc, t) => acc + (t.hours || 0) + ((t.minutes || 0) / 60), 0);
 
-    const labelStyle = { fontSize: "12px", fontWeight: "600", color: "var(--text-secondary)", whiteSpace: "nowrap" };
-    const selectStyle = { padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", backgroundColor: "var(--bg-surface)", color: "var(--text-primary)", fontSize: "13px" };
-    const fieldStyle = { display: "flex", flexDirection: "row", alignItems: "center", gap: "8px" };
-
     return (
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        <div className={styles.root}>
             {/* Filtros */}
-            <div style={{ display: "flex", gap: "16px", alignItems: "center", flexWrap: "wrap", backgroundColor: "var(--bg-input)", padding: "12px", borderRadius: "10px", border: "1px solid var(--border)" }}>
+            <div className={styles.filtersBar}>
                 <span style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)" }}>Filtros</span>
 
-                <div style={fieldStyle}>
-                    <label style={labelStyle}>Asignatura</label>
+                <div className={styles.filterRow}>
+                    <label className={styles.filterLabel}>Asignatura</label>
                     <select
                         value={subjectFilter}
                         onChange={(e) => setSubjectFilter(e.target.value)}
-                        style={selectStyle}
+                        className={styles.filterSelect}
                     >
                         {availableSubjects.map((s) => (
                             <option key={s} value={s}>{s === "All" ? "Todas" : s}</option>
@@ -44,12 +41,12 @@ export default function TimeBreakdownAnalysis({ timeBreakdown = {}, formatTime }
                     </select>
                 </div>
 
-                <div style={fieldStyle}>
-                    <label style={labelStyle}>Etiqueta</label>
+                <div className={styles.filterRow}>
+                    <label className={styles.filterLabel}>Etiqueta</label>
                     <select
                         value={tagFilter}
                         onChange={(e) => setTagFilter(e.target.value)}
-                        style={selectStyle}
+                        className={styles.filterSelect}
                     >
                         {availableTags.map((t) => (
                             <option key={t} value={t}>{t === "All" ? "Todas" : t}</option>
@@ -57,9 +54,9 @@ export default function TimeBreakdownAnalysis({ timeBreakdown = {}, formatTime }
                     </select>
                 </div>
 
-                <div style={{ ...fieldStyle, marginLeft: "auto" }}>
-                    <span style={labelStyle}>Tiempo Total Filtrado</span>
-                    <span style={{ fontSize: "18px", fontWeight: "700", color: "var(--brand)", whiteSpace: "nowrap" }}>
+                <div className={styles.filterRowRight}>
+                    <span className={styles.filterLabel}>Tiempo Total Filtrado</span>
+                    <span className={styles.totalTime}>
                         {formatTime(filteredTotalHoursRaw)}
                     </span>
                 </div>
@@ -67,7 +64,7 @@ export default function TimeBreakdownAnalysis({ timeBreakdown = {}, formatTime }
 
             {/* Lista Unificada de Tareas */}
             <div>
-                <h4 style={{ margin: "0 0 12px 0", fontSize: "15px", fontWeight: "600", display: "flex", alignItems: "center", gap: "8px" }}>
+                <h4 className={styles.taskListHeader}>
                     <ListChecks size={18} /> Sesiones de Trabajo y Tareas
                 </h4>
                 {filteredTasks.length === 0 ? (
@@ -75,29 +72,17 @@ export default function TimeBreakdownAnalysis({ timeBreakdown = {}, formatTime }
                 ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                         {filteredTasks.map((item, idx) => (
-                            <div
-                                key={idx}
-                                style={{
-                                    padding: "12px 16px",
-                                    borderRadius: "10px",
-                                    backgroundColor: "var(--bg-input)",
-                                    border: "1px solid var(--border)",
-                                    display: "flex",
-                                    justifyContent: "space-between",
-                                    alignItems: "center",
-                                    gap: "12px"
-                                }}
-                            >
-                                <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
-                                    <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--brand)", marginTop: "1px" }}>
+                            <div key={idx} className={styles.taskItem}>
+                                <div className={styles.taskLeft}>
+                                    <span className={styles.taskSubject}>
                                         {item.subject}
                                     </span>
-                                    <span style={{ fontSize: "14px", color: "var(--text-secondary)" }}>|</span>
+                                    <span className={styles.taskSeparator}>|</span>
 
-                                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                                        <span style={{ fontSize: "14px", fontWeight: "600" }}>{item.title}</span>
+                                    <div className={styles.taskMeta}>
+                                        <span className={styles.taskTitle}>{item.title}</span>
                                         {item.tags && item.tags.length > 0 && (
-                                            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                                            <div className={styles.taskTagsRow}>
                                                 {item.tags.map((tag) => (
                                                     <TagBadge key={tag} name={tag} size="sm" />
                                                 ))}
@@ -105,8 +90,8 @@ export default function TimeBreakdownAnalysis({ timeBreakdown = {}, formatTime }
                                         )}
                                     </div>
                                 </div>
-                                <div style={{ whiteSpace: "nowrap" }}>
-                                    <span style={{ fontSize: "14px", color: "var(--brand)", fontWeight: "700" }}>
+                                <div>
+                                    <span className={styles.taskTime}>
                                         {formatTime(item.hours)}
                                     </span>
                                 </div>
