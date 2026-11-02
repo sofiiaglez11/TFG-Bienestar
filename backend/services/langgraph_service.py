@@ -101,7 +101,7 @@ class LangGraphService:
                 "USER_MESSAGE": "router",
                 "ONBOARDING": "onboarding",
                 "LOGIN_GREETING": "login_greeting",
-                "DAILY_REVIEW": "planner"  # Redirige directo al planificador
+                "DAILY_REVIEW": "planner"  
             }
         )
 
@@ -183,9 +183,10 @@ class LangGraphService:
         )
 
         try:
-            self.wellbeing_agent.set_config(wb_tools)
-            self.wellbeing_agent.load_history(history_msgs)
-            await self.wellbeing_agent.run_agentic_conversation(
+            agent = self.wellbeing_agent.fork()
+            agent.set_config(wb_tools)
+            agent.load_history(history_msgs)
+            await agent.run_agentic_conversation(
                 user_message=instruction,
                 tool_executor=flush_tool_executor
             )
@@ -240,8 +241,9 @@ class LangGraphService:
             and t["name"] not in self.PLANNER_ONLY_TOOLS
         ]
         
-        self.academic_agent.set_config(filtered_tools)
-        self.academic_agent.load_history(history_msgs)
+        agent = self.academic_agent.fork()
+        agent.set_config(filtered_tools)
+        agent.load_history(history_msgs)
 
         session_registered = False
 
@@ -273,7 +275,7 @@ class LangGraphService:
 
             return res
 
-        result = await self.academic_agent.run_agentic_conversation(
+        result = await agent.run_agentic_conversation(
             user_message=message_with_context,
             tool_executor=intercepted_tool_executor
         )
@@ -298,8 +300,9 @@ class LangGraphService:
         tools_raw = state.get("tools_raw", [])
         filtered_tools = [t for t in tools_raw if t["name"].startswith("wb_")]
         
-        self.wellbeing_agent.set_config(filtered_tools)
-        self.wellbeing_agent.load_history(history_msgs)
+        agent = self.wellbeing_agent.fork()
+        agent.set_config(filtered_tools)
+        agent.load_history(history_msgs)
 
         report_added = False
 
@@ -321,7 +324,7 @@ class LangGraphService:
         if session_entry_id:
             message_with_context = message_with_context + f"\n[DATOS_SESION: clockify_time_entry_id={session_entry_id}]"
 
-        result = await self.wellbeing_agent.run_agentic_conversation(
+        result = await agent.run_agentic_conversation(
             user_message=message_with_context,
             tool_executor=intercepted_tool_executor
         )
@@ -355,15 +358,16 @@ class LangGraphService:
         tools_raw = state.get("tools_raw", [])
         filtered_tools = [t for t in tools_raw if t["name"] == "get_agent_capabilities"]
         
-        self.general_agent.set_config(filtered_tools)
-        self.general_agent.load_history(history_msgs)
+        agent = self.general_agent.fork()
+        agent.set_config(filtered_tools)
+        agent.load_history(history_msgs)
 
         async def intercepted_tool_executor(name: str, arguments: dict):
             if name != "get_agent_capabilities":
                 arguments["user_id"] = user_id
             return await self.mcp_client.call_tool(name, arguments)
 
-        result = await self.general_agent.run_agentic_conversation(
+        result = await agent.run_agentic_conversation(
             user_message=message_with_context,
             tool_executor=intercepted_tool_executor
         )
@@ -456,13 +460,12 @@ class LangGraphService:
         tools_raw = state.get("tools_raw", [])
         filtered_tools = [t for t in tools_raw if t["name"] in self.PLANNER_TOOLS]
 
-        self.planner_agent.set_config(filtered_tools)
-        # Si es revisión diaria silenciosa, no cargamos el historial largo para que no se distraiga,
-        # pero si es un chat del usuario, sí lo cargamos.
-        if event_type == "DAILY_REVIEW":
-            self.planner_agent.clear_history()
-        else:
-            self.planner_agent.load_history(history_msgs)
+        agent = self.planner_agent.fork()
+        agent.set_config(filtered_tools)
+        # Si es revisión diaria silenciosa, no cargamos el historial largo para que no se distraiga
+        # (la copia ya parte con historial vacío), pero si es un chat del usuario, sí lo cargamos.
+        if event_type != "DAILY_REVIEW":
+            agent.load_history(history_msgs)
 
         PLAN_CHANGING_TOOLS = {"create_study_plan", "reschedule_plan_item", "edit_task"}
 
@@ -485,7 +488,7 @@ class LangGraphService:
                     pass
             return res
 
-        result = await self.planner_agent.run_agentic_conversation(
+        result = await agent.run_agentic_conversation(
             user_message=message_with_context,
             tool_executor=planner_tool_executor
         )
@@ -499,8 +502,9 @@ class LangGraphService:
 
     async def _onboarding_node(self, state: GraphState) -> Dict[str, Any]:
         proactive_prompt = state.get("proactive_prompt", "")
-        self.general_agent.set_config([])
-        result = await self.general_agent.run_agentic_conversation(
+        agent = self.general_agent.fork()
+        agent.set_config([])
+        result = await agent.run_agentic_conversation(
             user_message=proactive_prompt,
             tool_executor=None
         )
@@ -512,8 +516,9 @@ class LangGraphService:
 
     async def _login_greeting_node(self, state: GraphState) -> Dict[str, Any]:
         proactive_prompt = state.get("proactive_prompt", "")
-        self.wellbeing_agent.set_config([])
-        result = await self.wellbeing_agent.run_agentic_conversation(
+        agent = self.wellbeing_agent.fork()
+        agent.set_config([])
+        result = await agent.run_agentic_conversation(
             user_message=proactive_prompt,
             tool_executor=None
         )
@@ -535,8 +540,9 @@ class LangGraphService:
 
         self._last_advisor_run_count[user_id] = self._user_message_counts.get(user_id, 0)
 
-        self.advisor_agent.set_config([])
-        self.advisor_agent.load_history(history_msgs)
+        agent = self.advisor_agent.fork()
+        agent.set_config([])
+        agent.load_history(history_msgs)
 
         past_advice_text = self._extract_past_advice(history_msgs)
         tasks_discussed = self._were_tasks_discussed(history_msgs)
@@ -599,7 +605,7 @@ class LangGraphService:
             f"Nunca añadas un consejo ni una nueva pregunta cuando el usuario ya tiene una pregunta pendiente de responder."
         )
 
-        result = await self.advisor_agent.run_agentic_conversation(
+        result = await agent.run_agentic_conversation(
             user_message=prompt_advisor,
             tool_executor=None
         )

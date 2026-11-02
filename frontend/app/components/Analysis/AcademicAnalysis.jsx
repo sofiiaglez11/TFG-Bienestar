@@ -23,7 +23,7 @@ export default function AcademicAnalysis({
       <div>
         {analytics.length === 0 ? (
           <p className={styles.subjectsEmpty}>
-            Aún no tienes asignaturas registradas. Puedes crearlas conversando con el tutor.
+            Aún no tienes asignaturas registradas. Puedes crearlas conversando con el Asistente.
           </p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>

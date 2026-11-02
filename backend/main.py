@@ -756,14 +756,6 @@ async def get_chat_history(
 
 @app.post("/api/chat/reset")
 async def reset_chat(user_id: str = Depends(get_current_user_id)):
-    academic_agent.clear_history()
-    wellbeing_agent.clear_history()
-    general_agent.clear_history()
-    planner_agent.clear_history()
-    if hasattr(advisor_agent, "clear_history"):
-        advisor_agent.clear_history()
-    orchestrator.classifier.clear_history()
-    
     deleted_count = await db_service.clear_history(user_id)
     
     return {

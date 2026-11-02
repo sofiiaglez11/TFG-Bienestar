@@ -1,4 +1,5 @@
 # base_bot.py
+import copy
 from abc import ABC, abstractmethod
 
 
@@ -29,6 +30,19 @@ class BaseChatbotService(ABC):
 
     def set_system_instruction(self, instruction: str):
         self.system_instruction = instruction
+
+    def fork(self):
+        '''
+        Devuelve una copia ligera del servicio para UNA petición.
+        Comparte el cliente HTTP, el modelo y la instrucción de sistema (inmutables
+        o de solo lectura), pero tiene su propio historial y configuración. Así, dos
+        peticiones concurrentes no se pisan el estado a través de los await.
+        El agente original (global) actúa solo como plantilla y nunca se modifica.
+        '''
+        clone = copy.copy(self)
+        clone.history = []
+        clone.config = None
+        return clone
 
     
     def set_config(self, config):
