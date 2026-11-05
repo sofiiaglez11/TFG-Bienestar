@@ -252,7 +252,7 @@ class LangGraphService:
             if name != "get_agent_capabilities":
                 arguments["user_id"] = user_id
 
-            print(f"[ACADEMIC] 🔧 Herramienta: {name}", file=sys.stderr)
+            print(f"[ACADEMIC] Herramienta: {name}", file=sys.stderr)
             res = await self.mcp_client.call_tool(name, arguments)
             
             SESSION_TOOLS = {"start_timer", "stop_timer", "log_time_entry", "log_study_hours", "edit_time_entry", "delete_time_entry"}
@@ -616,7 +616,7 @@ class LangGraphService:
             active_dom = state.get("active_domain", "ACADEMIC")
             return {
                 "response_text": updated_response,
-                "active_domain": f"{active_dom}+ASESOR"
+                "active_domain": f"{active_dom}+ADVISOR"
             }
 
         return {"response_text": response_text}

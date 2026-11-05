@@ -25,7 +25,7 @@ class AgentOrchestrator:
                 if msg.get("role") == "user":
                     role_label = "Usuario"
                 else:
-                    agent = (msg.get("agent_used") or "").replace("+ASESOR", "")
+                    agent = (msg.get("agent_used") or "").replace("+ADVISOR", "")
                     role_label = f"Asistente[{agent}]" if agent else "Asistente"
                     last_agent = agent or last_agent
                 history_str += f"- {role_label}: {msg.get('content')}\n"
